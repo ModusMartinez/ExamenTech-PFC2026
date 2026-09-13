@@ -1,75 +1,95 @@
-# React + TypeScript + Vite
+# ExamenTech-PFC2026
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Sistema de gerenciamento de provas e atividades acadêmicas com foco em segurança, autenticidade, auditoria e proteção contra possíveis fraudes durante avaliações online.
 
-Currently, two official plugins are available:
+Projeto desenvolvido como Projeto Final de Curso (PFC).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Objetivo
 
-## React Compiler
+O ExamenTech tem como objetivo disponibilizar uma plataforma para criação, aplicação e correção de provas e atividades acadêmicas, incorporando mecanismos de segurança, autenticação em dois fatores, auditoria e monitoramento de eventos durante avaliações.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Tecnologias
 
-## Expanding the ESLint configuration
+### Front-end
+- React
+- TypeScript
+- Vite
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Back-end
+- Node.js
+- TypeScript
+- API REST / JSON
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Banco de dados
+- Supabase
+- PostgreSQL
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Segurança
+- Autenticação por e-mail e senha
+- Autenticação em dois fatores (TOTP)
+- Cloudflare Turnstile
+- Controle de acesso por perfil
+- Logs de auditoria
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Testes
+- Vitest
+- Playwright
 
-```
+### Deploy
+- Vercel
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+### Versionamento
+- Git
+- GitHub
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Perfis de usuário
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+O sistema possui três perfis principais:
 
-```
+- Administrador
+- Professor
+- Aluno
+
+## Branch
+
+Estamos desenvolvendo na `desenv` e a `main` é a principal.
+Novas funcionalidades serão desenvolvidas em branches específicas, como exemplo:
+- `feature/auth`
+- `feature/turmas`
+- `feature/avaliacoes`
+- `feature/auditoria`
+
+## Configuração inicial
+
+O projeto React com TypeScript foi criado utilizando Vite.
+
+O arquivo `.gitignore` foi gerado utilizando o template Node:
+
+- `npx gitignore node`
+
+## As dependências do projeto podem ser instaladas com:
+
+- `npm install`
+
+## Para executar o ambiente de desenvolvimento:
+
+- `npm run dev``
+
+## Por padrão, a aplicação será disponibilizada em teste em:
+
+- `http://localhost:5173`
+
+## Variáveis de ambiente
+
+Criar um arquivo .env.local na raiz do projeto baseado no arquivo .env.example.
+
+## Variáveis necessárias:
+
+VITE_SUPABASE_URL=
+VITE_SUPABASE_PUBLISHABLE_KEY=
+
+## Exigência 2fa pelo banco.
+
+- `(SELECT auth.jwt() ->> 'aal') = 'aal2'`
+
+É exatamente a estratégia recomendada pelo Supabase para exigir MFA através de RLS; para uma política que deve restringir todos os demais acessos, eles recomendam uma policy AS RESTRICTIVE
