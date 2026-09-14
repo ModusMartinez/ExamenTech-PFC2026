@@ -174,6 +174,49 @@
   border-radius: 6px;
 }
 
+.sgpa-password-toggle:focus-visible,
+.sgpa-submit-button:focus-visible,
+.sgpa-logout-button:focus-visible {
+  outline: 3px solid rgba(29, 93, 149, 0.3);
+  outline-offset: 3px;
+}
+
+/* Verificação anti-bot */
+
+.sgpa-turnstile-block {
+  min-height: 96px;
+  margin-top: 14px;
+}
+
+.sgpa-turnstile-widget {
+  min-height: 65px;
+  display: flex;
+  align-items: center;
+}
+
+.sgpa-turnstile-status {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.sgpa-turnstile-status-verified {
+  color: #28705e;
+  font-weight: 700;
+}
+
+.sgpa-turnstile-status-error {
+  color: #8d1f2b;
+}
+
+.sgpa-security-note {
+  margin: -2px 0 2px;
+  color: #708294;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
 /* Mensagem de erro */
 
 .sgpa-alert {
@@ -324,6 +367,14 @@
 
 .sgpa-dashboard-notice span {
   font-size: 0.9rem;
+}
+
+.sgpa-dashboard-notice code {
+  display: block;
+  margin-top: 9px;
+  color: #456b62;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 /* Tablet e celular */
