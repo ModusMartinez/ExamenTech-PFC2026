@@ -17,19 +17,19 @@ type UserWithPassword = User & {
 // Usuários temporários para testar o login
 const usuariosMockados: UserWithPassword[] = [
   {
-    email: 'admin@sgpa.com',
+    email: 'admin@examentech.com',
     password: '123456',
     name: 'Mariana Costa',
     profile: 'Administrador',
   },
   {
-    email: 'professor@sgpa.com',
+    email: 'professor@examentech.com',
     password: '123456',
     name: 'Prof. Rafael Mendes',
     profile: 'Professor',
   },
   {
-    email: 'aluno@sgpa.com',
+    email: 'aluno@examentech.com',
     password: '123456',
     name: 'Lucas Ferreira',
     profile: 'Aluno',
@@ -101,8 +101,8 @@ function App() {
     <main className="sgpa-shell">
       <section className="sgpa-brand-panel">
         <div className="sgpa-brand">
-          <span className="sgpa-brand-mark">SG</span>
-          <span>SGPA</span>
+          <span className="sgpa-brand-mark">ET</span>
+          <span>ExamenTech</span>
         </div>
 
         <div className="sgpa-brand-content">
@@ -117,7 +117,7 @@ function App() {
         </div>
 
         <p className="sgpa-copyright">
-          © {new Date().getFullYear()} SGPA · Sistema de Gerenciamento Seguro
+          © {new Date().getFullYear()} ExamenTech · Sistema de Gerenciamento Seguro
           de Provas e Atividades Acadêmicas
         </p>
       </section>
@@ -125,8 +125,8 @@ function App() {
       <section className="sgpa-login-panel">
         <div className="sgpa-login-card">
           <div className="sgpa-mobile-brand">
-            <span className="sgpa-brand-mark">SG</span>
-            <span>SGPA</span>
+            <span className="sgpa-brand-mark">ET</span>
+            <span>ExamenTech</span>
           </div>
 
           <header>
@@ -145,7 +145,7 @@ function App() {
             <input
               id="email"
               type="email"
-              placeholder="seuemail@sgpa.com"
+              placeholder="seuemail@examentech.com"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
@@ -206,8 +206,8 @@ function Dashboard({ user, onLogout }: DashboardProps) {
     <main className="sgpa-dashboard">
       <header className="sgpa-dashboard-header">
         <div className="sgpa-brand">
-          <span className="sgpa-brand-mark">SG</span>
-          <span>SGPA</span>
+          <span className="sgpa-brand-mark">ET</span>
+          <span>ExamenTech</span>
         </div>
 
         <button
@@ -225,8 +225,8 @@ function Dashboard({ user, onLogout }: DashboardProps) {
         <h1>Olá, {user.name}.</h1>
 
         <p className="sgpa-subtitle">
-          Você está conectado ao Sistema de Gerenciamento Seguro de Provas e
-          Atividades Acadêmicas.
+          Você está conectado ao ExamenTech, Sistema de Gerenciamento Seguro
+          de Provas e Atividades Acadêmicas.
         </p>
 
         <article className="sgpa-user-card">
