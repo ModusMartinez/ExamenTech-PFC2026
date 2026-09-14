@@ -5,8 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite",
+    "dev:api": "node --env-file-if-exists=.env.local --watch scripts/api-dev.ts",
+    "dev:full": "node scripts/dev-full.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "node --test tests/*.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
