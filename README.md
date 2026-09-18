@@ -1,95 +1,118 @@
 # ExamenTech-PFC2026
 
-Sistema de gerenciamento de provas e atividades acadêmicas com foco em segurança, autenticidade, auditoria e proteção contra possíveis fraudes durante avaliações online.
+Sistema de Gerenciamento Seguro de Provas e Atividades Acadêmicas (SGPA), desenvolvido como Projeto Final de Curso.
 
-Projeto desenvolvido como Projeto Final de Curso (PFC).
-
-## Objetivo
-
-O ExamenTech tem como objetivo disponibilizar uma plataforma para criação, aplicação e correção de provas e atividades acadêmicas, incorporando mecanismos de segurança, autenticação em dois fatores, auditoria e monitoramento de eventos durante avaliações.
+O projeto reúne criação, aplicação e correção de avaliações, com controle de acesso, autenticação em dois fatores e registro de eventos de segurança.
 
 ## Tecnologias
 
-### Front-end
-- React
-- TypeScript
-- Vite
-
-### Back-end
-- Node.js
-- TypeScript
-- API REST / JSON
-
-### Banco de dados
-- Supabase
-- PostgreSQL
-
-### Segurança
-- Autenticação por e-mail e senha
-- Autenticação em dois fatores (TOTP)
+- React, TypeScript e Vite
+- Node.js e Vercel Functions
+- Supabase e PostgreSQL
 - Cloudflare Turnstile
-- Controle de acesso por perfil
-- Logs de auditoria
+- Git e GitHub
 
-### Testes
-- Vitest
-- Playwright
-
-### Deploy
-- Vercel
-
-### Versionamento
-- Git
-- GitHub
-
-## Perfis de usuário
-
-O sistema possui três perfis principais:
+## Perfis
 
 - Administrador
 - Professor
 - Aluno
 
-## Branch
+## Branches
 
-Estamos desenvolvendo na `desenv` e a `main` é a principal.
-Novas funcionalidades serão desenvolvidas em branches específicas, como exemplo:
-- `feature/auth`
-- `feature/turmas`
-- `feature/avaliacoes`
-- `feature/auditoria`
+- `main`: versão estável
+- `desenv`: desenvolvimento integrado
+- `feature/*`: funcionalidades em desenvolvimento
+- `entrega1409`: versão preparada para a primeira entrega
 
-## Configuração inicial
+## Configuração
 
-O projeto React com TypeScript foi criado utilizando Vite.
+Instale as dependências:
 
-O arquivo `.gitignore` foi gerado utilizando o template Node:
+```bash
+npm install
+```
 
-- `npx gitignore node`
+Crie um arquivo `.env.local` usando `.env.example` como modelo.
 
-## As dependências do projeto podem ser instaladas com:
+### Front-end
 
-- `npm install`
+Variáveis incorporadas no front-end:
 
-## Para executar o ambiente de desenvolvimento:
-
-- `npm run dev``
-
-## Por padrão, a aplicação será disponibilizada em teste em:
-
-- `http://localhost:5173`
-
-## Variáveis de ambiente
-
-Criar um arquivo .env.local na raiz do projeto baseado no arquivo .env.example.
-
-## Variáveis necessárias:
-
+```env
 VITE_SUPABASE_URL=
 VITE_SUPABASE_PUBLISHABLE_KEY=
+VITE_TURNSTILE_SITE_KEY=
+```
 
-## Exigência 2fa pelo banco.
+### Back-end
 
-- `(SELECT auth.jwt() ->> 'aal') = 'aal2'`
+Variáveis lidas pelo back-end; não usam o prefixo `VITE_`:
 
-É exatamente a estratégia recomendada pelo Supabase para exigir MFA através de RLS; para uma política que deve restringir todos os demais acessos, eles recomendam uma policy AS RESTRICTIVE
+```env
+SUPABASE_URL=
+SUPABASE_SECRET_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+TURNSTILE_SECRET_KEY=
+TURNSTILE_EXPECTED_HOSTNAMES=
+```
+
+Use `SUPABASE_SECRET_KEY` nos projetos atuais. `SUPABASE_SERVICE_ROLE_KEY` fica disponível para projetos que ainda usam a chave antiga.
+
+Em `TURNSTILE_EXPECTED_HOSTNAMES`, informe os domínios permitidos separados por vírgula. No ambiente local, essa variável pode ficar vazia.
+
+O arquivo `.env.local` não deve ser enviado ao GitHub.
+
+## Executando o projeto
+
+Inicie o front-end e a API juntos:
+
+```bash
+npm run dev:full
+```
+
+Acesse:
+
+```text
+http://localhost:5173
+```
+
+Para executar separadamente:
+
+```bash
+npm run dev:web
+npm run dev:api
+```
+
+## Integração com Turnstile
+
+Antes de verificar o e-mail e a senha, o sistema exige a validação do Cloudflare Turnstile.
+
+O token é enviado para `/api/validar-turnstile`, validado no servidor e descartado. O resultado da operação é registrado em `eventos_seguranca` e o protocolo aparece no painel após o acesso.
+
+No desenvolvimento local, o projeto usa as chaves oficiais de teste quando nenhuma chave do Turnstile foi configurada. No ambiente de produção, as chaves reais são obrigatórias.
+
+## Verificações
+
+```bash
+npm run lint
+npm run test
+npm run build
+```
+
+## Situação atual
+
+- Tela de acesso responsiva
+- Validação com Cloudflare Turnstile
+- Verificação do token no back-end
+- Auditoria dos resultados no Supabase
+- Estrutura de perfis e políticas RLS
+- Login por e-mail e senha ainda simulado
+- Supabase Auth e MFA serão integrados nas próximas etapas
+
+## Cuidados
+
+- Chaves privadas ficam somente no back-end
+- Tokens do Turnstile não são armazenados
+- O acesso é bloqueado se a validação ou a auditoria falhar
+- Arquivos com senhas e chaves não devem ser enviados ao GitHub
