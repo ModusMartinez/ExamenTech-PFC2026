@@ -1,6 +1,18 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import { TurnstileWidget } from './components/TurnstileWidget'
+import {
+  TurnstileValidationError,
+  validateTurnstileToken,
+} from './services/turnstile'
+import type { SuccessfulTurnstileValidation } from './services/turnstile'
 import './App.css'
+
+const TURNSTILE_TEST_SITE_KEY = '1x00000000000000000000AA'
+
+const turnstileSiteKey =
+  import.meta.env.VITE_TURNSTILE_SITE_KEY ||
+  (import.meta.env.DEV ? TURNSTILE_TEST_SITE_KEY : '')
 
 type Profile = 'Administrador' | 'Professor' | 'Aluno'
 
@@ -53,6 +65,10 @@ function App() {
   const [page, setPage] = useState<'login' | 'cadastro'>('login')
   const [users, setUsers] = useState<SavedUser[]>(loadUsers)
   const [loggedUser, setLoggedUser] = useState<User | null>(null)
+  const [securityValidation, setSecurityValidation] =
+    useState<SuccessfulTurnstileValidation | null>(null)
+  const [turnstileToken, setTurnstileToken] = useState('')
+  const [turnstileResetSignal, setTurnstileResetSignal] = useState(0)
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -68,6 +84,11 @@ function App() {
   const [loading, setLoading] = useState(false)
 
   const allUsers = [...defaultUsers, ...users]
+
+  function resetTurnstile() {
+    setTurnstileToken('')
+    setTurnstileResetSignal((current) => current + 1)
+  }
 
   async function handleLogin(event: FormEvent) {
     event.preventDefault()
@@ -89,26 +110,47 @@ function App() {
       return
     }
 
-    setLoading(true)
-    await new Promise((resolve) => window.setTimeout(resolve, 700))
-    setLoading(false)
-
-    const foundUser = allUsers.find(
-      (user) =>
-        user.email.toLowerCase() === typedEmail &&
-        user.password === password
-    )
-
-    if (!foundUser) {
-      setLoginError('E-mail ou senha incorretos.')
+    if (!turnstileToken) {
+      setLoginError('Conclua a verificação de segurança para continuar.')
       return
     }
 
-    setLoggedUser({
-      name: foundUser.name,
-      email: foundUser.email,
-      profile: foundUser.profile,
-    })
+    setLoading(true)
+
+    try {
+      const validation = await validateTurnstileToken(turnstileToken)
+
+      // O login por e-mail e senha continua simulado nesta etapa.
+      await new Promise((resolve) => window.setTimeout(resolve, 700))
+
+      const foundUser = allUsers.find(
+        (user) =>
+          user.email.toLowerCase() === typedEmail &&
+          user.password === password
+      )
+
+      if (!foundUser) {
+        setLoginError('E-mail ou senha incorretos.')
+        resetTurnstile()
+        return
+      }
+
+      setSecurityValidation(validation)
+      setLoggedUser({
+        name: foundUser.name,
+        email: foundUser.email,
+        profile: foundUser.profile,
+      })
+    } catch (error) {
+      setLoginError(
+        error instanceof TurnstileValidationError
+          ? error.message
+          : 'Não foi possível concluir a verificação de segurança.'
+      )
+      resetTurnstile()
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleRegister(event: FormEvent) {
@@ -184,15 +226,19 @@ function App() {
 
   function handleLogout() {
     setLoggedUser(null)
+    setSecurityValidation(null)
+    setTurnstileToken('')
     setEmail('')
     setPassword('')
     setShowPassword(false)
+    setLoginError('')
   }
 
-  if (loggedUser) {
+  if (loggedUser && securityValidation) {
     return (
       <Dashboard
         user={loggedUser}
+        securityValidation={securityValidation}
         onLogout={handleLogout}
       />
     )
@@ -252,6 +298,7 @@ function App() {
                     placeholder="seuemail@examentech.com"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
+                    autoComplete="email"
                   />
                 </div>
 
@@ -267,6 +314,7 @@ function App() {
                       onChange={(event) =>
                         setPassword(event.target.value)
                       }
+                      autoComplete="current-password"
                     />
 
                     <button
@@ -279,8 +327,30 @@ function App() {
                   </div>
                 </div>
 
+                <TurnstileWidget
+                  siteKey={turnstileSiteKey}
+                  resetSignal={turnstileResetSignal}
+                  onVerify={(token) => {
+                    setTurnstileToken(token)
+                    setLoginError('')
+                  }}
+                  onExpire={() => {
+                    setTurnstileToken('')
+                    setLoginError('A verificação expirou. Conclua-a novamente.')
+                  }}
+                  onError={(message) => {
+                    setTurnstileToken('')
+                    setLoginError(message)
+                  }}
+                />
+
+                <p className="security-note">
+                  Protegido por Cloudflare Turnstile. O token é validado no
+                  servidor e não é armazenado.
+                </p>
+
                 {loginError && (
-                  <div className="alert error">
+                  <div className="alert error" role="alert">
                     {loginError}
                   </div>
                 )}
@@ -294,9 +364,14 @@ function App() {
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={loading}
+                  disabled={loading || !turnstileToken}
+                  aria-busy={loading}
                 >
-                  {loading ? 'Entrando...' : 'Entrar'}
+                  {loading
+                    ? 'Validando acesso...'
+                    : turnstileToken
+                      ? 'Entrar'
+                      : 'Conclua a verificação'}
                 </button>
               </form>
 
@@ -306,8 +381,10 @@ function App() {
                 <button
                   type="button"
                   className="btn-link"
+                  disabled={loading}
                   onClick={() => {
                     setPage('cadastro')
+                    setTurnstileToken('')
                     setLoginError('')
                     setSuccessMessage('')
                   }}
@@ -351,6 +428,7 @@ function App() {
                     onChange={(event) =>
                       setName(event.target.value)
                     }
+                    autoComplete="name"
                   />
                 </div>
 
@@ -366,6 +444,7 @@ function App() {
                     onChange={(event) =>
                       setRegisterEmail(event.target.value)
                     }
+                    autoComplete="email"
                   />
                 </div>
 
@@ -382,6 +461,7 @@ function App() {
                     onChange={(event) =>
                       setRegisterPassword(event.target.value)
                     }
+                    autoComplete="new-password"
                   />
                 </div>
 
@@ -397,6 +477,7 @@ function App() {
                     onChange={(event) =>
                       setConfirmPassword(event.target.value)
                     }
+                    autoComplete="new-password"
                   />
                 </div>
 
@@ -424,10 +505,11 @@ function App() {
 
 type DashboardProps = {
   user: User
+  securityValidation: SuccessfulTurnstileValidation
   onLogout: () => void
 }
 
-function Dashboard({ user, onLogout }: DashboardProps) {
+function Dashboard({ user, securityValidation, onLogout }: DashboardProps) {
   const nameParts = user.name.split(' ')
 
   const initials = nameParts
@@ -482,6 +564,12 @@ function Dashboard({ user, onLogout }: DashboardProps) {
             {user.profile}
           </div>
         </div>
+
+        <p className="verification-receipt">
+          Verificação de segurança registrada no Supabase.
+          <br />
+          <span>Protocolo: {securityValidation.requestId}</span>
+        </p>
       </main>
     </div>
   )

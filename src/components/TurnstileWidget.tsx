@@ -8,7 +8,7 @@ type TurnstileOptions = {
   sitekey: string
   action: string
   theme: 'light'
-  language: 'pt-BR'
+  language: 'pt-br'
   appearance: 'always'
   retry: 'auto'
   'refresh-expired': 'auto'
@@ -134,7 +134,7 @@ export function TurnstileWidget({
           sitekey: siteKey,
           action: 'login',
           theme: 'light',
-          language: 'pt-BR',
+          language: 'pt-br',
           appearance: 'always',
           retry: 'auto',
           'refresh-expired': 'auto',
