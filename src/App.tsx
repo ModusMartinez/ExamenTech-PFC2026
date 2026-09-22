@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { TurnstileWidget } from './components/TurnstileWidget'
+import { supabase } from './lib/supabase'
 import {
   TurnstileValidationError,
   validateTurnstileToken,
@@ -22,11 +23,12 @@ type User = {
   profile: Profile
 }
 
-type SavedUser = User & {
+type DemoUser = User & {
   password: string
 }
 
-const defaultUsers: SavedUser[] = [
+// Contas de demonstração até a integração do login com o Supabase.
+const defaultUsers: DemoUser[] = [
   {
     name: 'Mariana Costa',
     email: 'admin@examentech.com',
@@ -47,23 +49,8 @@ const defaultUsers: SavedUser[] = [
   },
 ]
 
-function loadUsers(): SavedUser[] {
-  const data = localStorage.getItem('examentech-usuarios')
-
-  if (!data) {
-    return []
-  }
-
-  try {
-    return JSON.parse(data)
-  } catch {
-    return []
-  }
-}
-
 function App() {
   const [page, setPage] = useState<'login' | 'cadastro'>('login')
-  const [users, setUsers] = useState<SavedUser[]>(loadUsers)
   const [loggedUser, setLoggedUser] = useState<User | null>(null)
   const [securityValidation, setSecurityValidation] =
     useState<SuccessfulTurnstileValidation | null>(null)
@@ -82,8 +69,6 @@ function App() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [registerError, setRegisterError] = useState('')
   const [loading, setLoading] = useState(false)
-
-  const allUsers = [...defaultUsers, ...users]
 
   function resetTurnstile() {
     setTurnstileToken('')
@@ -123,7 +108,7 @@ function App() {
       // O login por e-mail e senha continua simulado nesta etapa.
       await new Promise((resolve) => window.setTimeout(resolve, 700))
 
-      const foundUser = allUsers.find(
+      const foundUser = defaultUsers.find(
         (user) =>
           user.email.toLowerCase() === typedEmail &&
           user.password === password
@@ -155,6 +140,11 @@ function App() {
 
   async function handleRegister(event: FormEvent) {
     event.preventDefault()
+
+    if (loading) {
+      return
+    }
+
     setRegisterError('')
 
     const newName = name.trim()
@@ -187,41 +177,59 @@ function App() {
       return
     }
 
-    const emailAlreadyExists = allUsers.some(
-      (user) => user.email.toLowerCase() === newEmail
-    )
-
-    if (emailAlreadyExists) {
-      setRegisterError('Já existe uma conta com esse e-mail.')
-      return
-    }
-
     setLoading(true)
-    await new Promise((resolve) => window.setTimeout(resolve, 700))
-    setLoading(false)
 
-    const newUser: SavedUser = {
-      name: newName,
-      email: newEmail,
-      password: registerPassword,
-      profile: 'Aluno',
+    try {
+      // O trigger do banco usa esses dados para criar o perfil do aluno.
+      const { data, error } = await supabase.auth.signUp({
+        email: newEmail,
+        password: registerPassword,
+        options: {
+          emailRedirectTo: window.location.origin,
+          data: {
+            nome: newName,
+            perfil: 'ALUNO',
+          },
+        },
+      })
+
+      if (error) {
+        if (error.code === 'user_already_exists' || error.code === 'email_exists') {
+          setRegisterError('Não foi possível cadastrar este e-mail. Se já possui conta, utilize-a.')
+        } else if (error.code === 'weak_password') {
+          setRegisterError('Escolha uma senha mais forte, com letras, números e símbolos.')
+        } else if (error.status === 429) {
+          setRegisterError('Muitas tentativas de cadastro. Aguarde alguns minutos e tente novamente.')
+        } else {
+          setRegisterError('Não foi possível concluir o cadastro. Tente novamente mais tarde.')
+        }
+        return
+      }
+
+      if (!data.user) {
+        setRegisterError('Não foi possível confirmar o cadastro. Tente novamente mais tarde.')
+        return
+      }
+
+      setEmail(newEmail)
+      setPassword('')
+      setName('')
+      setRegisterEmail('')
+      setRegisterPassword('')
+      setConfirmPassword('')
+
+      setPage('login')
+
+      if (data.session) {
+        setSuccessMessage('Cadastro realizado. Sua conta está pendente de aprovação.')
+      } else {
+        setSuccessMessage('Solicitação recebida. Confira seu e-mail para confirmar o cadastro.')
+      }
+    } catch {
+      setRegisterError('Não foi possível acessar o serviço de cadastro. Tente novamente.')
+    } finally {
+      setLoading(false)
     }
-
-    const newUserList = [...users, newUser]
-
-    setUsers(newUserList)
-    localStorage.setItem('examentech-usuarios', JSON.stringify(newUserList))
-
-    setEmail(newEmail)
-    setPassword('')
-
-    setName('')
-    setRegisterEmail('')
-    setRegisterPassword('')
-    setConfirmPassword('')
-
-    setPage('login')
-    setSuccessMessage('Conta criada. Agora você já pode entrar.')
   }
 
   function handleLogout() {
@@ -356,7 +364,7 @@ function App() {
                 )}
 
                 {successMessage && (
-                  <div className="alert success">
+                  <div className="alert success" role="status">
                     {successMessage}
                   </div>
                 )}
@@ -399,6 +407,7 @@ function App() {
                 <button
                   type="button"
                   className="btn-back"
+                  disabled={loading}
                   onClick={() => {
                     setPage('login')
                     setRegisterError('')
@@ -424,6 +433,7 @@ function App() {
                   <input
                     id="name"
                     type="text"
+                    disabled={loading}
                     value={name}
                     onChange={(event) =>
                       setName(event.target.value)
@@ -440,6 +450,7 @@ function App() {
                   <input
                     id="register-email"
                     type="email"
+                    disabled={loading}
                     value={registerEmail}
                     onChange={(event) =>
                       setRegisterEmail(event.target.value)
@@ -456,6 +467,7 @@ function App() {
                   <input
                     id="register-password"
                     type="password"
+                    disabled={loading}
                     placeholder="Mínimo de 6 caracteres"
                     value={registerPassword}
                     onChange={(event) =>
@@ -473,6 +485,7 @@ function App() {
                   <input
                     id="confirm-password"
                     type="password"
+                    disabled={loading}
                     value={confirmPassword}
                     onChange={(event) =>
                       setConfirmPassword(event.target.value)
@@ -482,7 +495,7 @@ function App() {
                 </div>
 
                 {registerError && (
-                  <div className="alert error">
+                  <div className="alert error" role="alert">
                     {registerError}
                   </div>
                 )}
@@ -491,6 +504,7 @@ function App() {
                   type="submit"
                   className="btn-primary"
                   disabled={loading}
+                  aria-busy={loading}
                 >
                   {loading ? 'Criando conta...' : 'Criar conta'}
                 </button>

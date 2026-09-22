@@ -103,12 +103,18 @@ npm run build
 ## Situação atual
 
 - Tela de acesso responsiva
+- Cadastro de alunos com Supabase Auth, sem gravar senhas no navegador
 - Validação com Cloudflare Turnstile
 - Verificação do token no back-end
 - Auditoria dos resultados no Supabase
 - Estrutura de perfis e políticas RLS
-- Login por e-mail e senha ainda simulado
-- Supabase Auth e MFA serão integrados nas próximas etapas
+- Login ainda simulado com as três contas de demonstração
+- Login pelo Supabase e MFA serão integrados nas próximas etapas
+
+Contas cadastradas no Supabase ainda não entram pela tela de login nesta etapa.
+Os cadastros antigos do navegador deixaram de ser usados e não foram migrados.
+
+Confirmação de e-mail conforme a configuração do Supabase. Em **Authentication → URL Configuration**, adicione `http://localhost:5173` às URLs de redirecionamento permitidas para os testes locais.
 
 ## Cuidados
 
