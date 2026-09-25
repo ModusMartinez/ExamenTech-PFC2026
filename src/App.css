@@ -445,3 +445,35 @@ input {
   outline: 3px solid rgba(29, 93, 149, 0.35);
   outline-offset: 3px;
 }
+
+.auth-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  color: var(--dark-blue);
+}
+
+.mfa-setup {
+  margin-bottom: 18px;
+  line-height: 1.5;
+}
+
+.mfa-qr {
+  display: block;
+  width: 190px;
+  max-width: 100%;
+  margin: 16px auto;
+}
+
+.mfa-secret {
+  display: block;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  border-radius: 6px;
+  background: var(--background);
+  text-align: center;
+}
+
+.mfa-cancel {
+  margin-top: 20px;
+}
