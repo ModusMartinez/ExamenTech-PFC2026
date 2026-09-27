@@ -2,7 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { MfaStep } from './components/MfaStep'
 import { InvitationPanel } from './components/InvitationPanel'
+import { AuditPanel } from './components/AuditPanel'
 import { TurnstileWidget } from './components/TurnstileWidget'
+import { LegalModal } from './components/LegalModal'
+import { LegalFooter } from './components/LegalFooter'
+import { LegalPage } from './components/LegalPage'
+import { TERMS_VERSION, PRIVACY_VERSION } from './content/legalDocuments'
+import type { LegalDocumentType } from './content/legalDocuments'
 import { supabase } from './lib/supabase'
 import { resolveAccess } from './services/access'
 import type { AccessState, AccessUser } from './services/access'
@@ -21,6 +27,21 @@ const turnstileSiteKey =
   (import.meta.env.DEV ? TURNSTILE_TEST_SITE_KEY : '')
 
 function App() {
+  // São páginas públicas: a leitura não depende da sessão nem do MFA.
+  const path = window.location.pathname.replace(/\/$/, '')
+  let documentType: LegalDocumentType | null = null
+  if (path === '/termos') documentType = 'termos'
+  if (path === '/privacidade') documentType = 'privacidade'
+
+  return (
+    <div className="site-layout">
+      {documentType ? <LegalPage documentType={documentType} /> : <AccessApp />}
+      <LegalFooter openInNewTab={!documentType} />
+    </div>
+  )
+}
+
+function AccessApp() {
   const [page, setPage] =
     useState<'login' | 'cadastro' | 'mfa-setup' | 'mfa-verify'>('login')
   const [loggedUser, setLoggedUser] = useState<AccessUser | null>(null)
@@ -43,10 +64,16 @@ function App() {
   const [registerPassword, setRegisterPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [organizationCode, setOrganizationCode] = useState('')
-  const [studentCode, setStudentCode] = useState('')
+  const [invitationCode, setInvitationCode] = useState('')
   const [registerError, setRegisterError] = useState('')
   const [registerCaptchaError, setRegisterCaptchaError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [legalModal, setLegalModal] = useState<{
+    documentType: LegalDocumentType
+    requireAcceptance: boolean
+  } | null>(null)
+  const [acceptedTermsVersion, setAcceptedTermsVersion] = useState<string | null>(null)
+  const registerNameRef = useRef<HTMLInputElement>(null)
   const registeringRef = useRef(false)
   const checkAccessRef = useRef<() => Promise<void>>(async () => {})
 
@@ -58,6 +85,10 @@ function App() {
       setPage((current) => current === 'cadastro' ? 'cadastro' : 'login')
       return
     }
+
+    // Uma sessão iniciada em outra aba encerra a tentativa de cadastro local.
+    setLegalModal(null)
+    setAcceptedTermsVersion(null)
 
     if (access.kind === 'denied') {
       setPage('login')
@@ -173,6 +204,26 @@ function App() {
     return () => window.removeEventListener('focus', checkOnFocus)
   }, [loggedUser, page])
 
+  useEffect(() => {
+    if (page === 'cadastro') registerNameRef.current?.focus()
+  }, [page])
+
+  function startRegistration() {
+    setAcceptedTermsVersion(null)
+    setLegalModal({ documentType: 'termos', requireAcceptance: true })
+  }
+
+  function acceptTermsAndRegister() {
+    setAcceptedTermsVersion(TERMS_VERSION)
+    setLegalModal(null)
+    setPage('cadastro')
+    setTurnstileToken('')
+    setRegisterTurnstileToken('')
+    setRegisterCaptchaError('')
+    setLoginError('')
+    setSuccessMessage('')
+  }
+
   function resetTurnstile() {
     setTurnstileToken('')
     setTurnstileResetSignal((current) => current + 1)
@@ -246,6 +297,12 @@ function App() {
     setRegisterError('')
     setRegisterCaptchaError('')
 
+    if (acceptedTermsVersion !== TERMS_VERSION) {
+      setRegisterError('Leia e aceite os Termos de Uso antes de continuar.')
+      setLegalModal({ documentType: 'termos', requireAcceptance: true })
+      return
+    }
+
     const newName = name.trim()
     const newEmail = registerEmail.trim().toLowerCase()
 
@@ -264,7 +321,7 @@ function App() {
     if (invitationsEnabled) {
       const invitationFieldError = validateInvitationFields(
         organizationCode,
-        studentCode,
+        invitationCode,
       )
 
       if (invitationFieldError) {
@@ -282,19 +339,28 @@ function App() {
     setLoading(true)
 
     try {
-      const registrationData: { nome: string; ticket_cadastro?: string } = {
+      const registrationData: {
+        nome: string
+        ticket_cadastro?: string
+        termos_aceitos: boolean
+        termos_versao: string
+        privacidade_versao: string
+      } = {
         nome: newName,
+        termos_aceitos: true,
+        termos_versao: TERMS_VERSION,
+        privacidade_versao: PRIVACY_VERSION,
       }
 
       if (invitationsEnabled) {
         // O banco troca os códigos por um ticket temporário. A verificação
         // definitiva acontece no gatilho do Auth durante o cadastro.
         const { data: ticketData, error: ticketError } = await supabase.rpc(
-          'preparar_cadastro_aluno',
+          'preparar_cadastro',
           {
             p_email: newEmail,
             p_codigo_organizacao: organizationCode.trim(),
-            p_codigo_convite: studentCode.trim(),
+            p_codigo_convite: invitationCode.trim(),
           },
         )
         const ticket = (ticketData as { ticket?: unknown } | null)?.ticket
@@ -315,7 +381,7 @@ function App() {
         registrationData.ticket_cadastro = ticket
       }
 
-      // O trigger do banco usa esses dados para criar o perfil do aluno.
+      // Os gatilhos criam o perfil e registram a versão dos termos aceita.
       const { data, error } = await supabase.auth.signUp({
         email: newEmail,
         password: registerPassword,
@@ -351,7 +417,8 @@ function App() {
       setRegisterPassword('')
       setConfirmPassword('')
       setOrganizationCode('')
-      setStudentCode('')
+      setInvitationCode('')
+      setAcceptedTermsVersion(null)
 
       setLoginError('')
       setPage('login')
@@ -386,6 +453,8 @@ function App() {
     setPassword('')
     setShowPassword(false)
     setLoginError('')
+    setAcceptedTermsVersion(null)
+    setLegalModal(null)
   }
 
   if (checkingSession) {
@@ -540,14 +609,7 @@ function App() {
                   type="button"
                   className="btn-link"
                   disabled={loading}
-                  onClick={() => {
-                    setPage('cadastro')
-                    setTurnstileToken('')
-                    setRegisterTurnstileToken('')
-                    setRegisterCaptchaError('')
-                    setLoginError('')
-                    setSuccessMessage('')
-                  }}
+                  onClick={startRegistration}
                 >
                   Criar conta
                 </button>
@@ -565,16 +627,17 @@ function App() {
                     setRegisterTurnstileToken('')
                     setRegisterError('')
                     setRegisterCaptchaError('')
+                    setAcceptedTermsVersion(null)
                   }}
                 >
                   ← Voltar
                 </button>
 
-                <p className="overline">CADASTRO DE ALUNO</p>
+                <p className="overline">CADASTRO POR CONVITE</p>
                 <h2>Crie sua conta</h2>
 
                 <p className="subtitle">
-                  Novas contas são cadastradas como aluno.
+                  Seu convite define se a conta será de aluno ou professor.
                 </p>
               </header>
 
@@ -586,6 +649,7 @@ function App() {
 
                   <input
                     id="name"
+                    ref={registerNameRef}
                     type="text"
                     disabled={loading}
                     value={name}
@@ -667,9 +731,9 @@ function App() {
                     </div>
 
                     <div className="input-group">
-                      <label htmlFor="student-code">Convite individual do aluno</label>
+                      <label htmlFor="invitation-code">Convite individual</label>
                       <input
-                        id="student-code"
+                        id="invitation-code"
                         type="text"
                         autoComplete="off"
                         autoCapitalize="off"
@@ -677,14 +741,14 @@ function App() {
                         spellCheck={false}
                         maxLength={128}
                         disabled={loading}
-                        value={studentCode}
-                        onChange={(event) => setStudentCode(event.target.value)}
+                        value={invitationCode}
+                        onChange={(event) => setInvitationCode(event.target.value)}
                       />
                     </div>
 
                     <p className="security-note">
-                      O convite deve ser liberado por um professor ou administrador
-                      da sua organização.
+                      Convites para professores são emitidos pelo administrador.
+                      Para alunos, pelo professor ou administrador da organização.
                     </p>
                   </>
                 )}
@@ -741,8 +805,17 @@ function App() {
               onCancel={handleLogout}
             />
           )}
+
         </div>
       </section>
+
+      {legalModal && (
+        <LegalModal
+          documentType={legalModal.documentType}
+          onClose={() => setLegalModal(null)}
+          onAccept={legalModal.requireAcceptance ? acceptTermsAndRegister : undefined}
+        />
+      )}
     </main>
   )
 }
@@ -754,6 +827,7 @@ type DashboardProps = {
 
 function Dashboard({ user, onLogout }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
+  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria'>('inicio')
   const nameParts = user.name.split(' ')
 
   const initials = nameParts
@@ -763,6 +837,7 @@ function Dashboard({ user, onLogout }: DashboardProps) {
     .toUpperCase()
 
   const firstName = nameParts[0]
+  const showingAudit = user.profile === 'Administrador' && dashboardView === 'auditoria'
 
   return (
     <div className="dashboard-container">
@@ -786,42 +861,44 @@ function Dashboard({ user, onLogout }: DashboardProps) {
         </button>
       </nav>
 
-      <main className="dashboard-content">
+      <main className={showingAudit ? 'dashboard-content dashboard-content-audit' : 'dashboard-content'}>
         {logoutError && <div className="alert error" role="alert">{logoutError}</div>}
-        <p className="overline">PAINEL INICIAL</p>
+        {user.profile === 'Administrador' && (
+          <nav className="dashboard-section-nav" aria-label="Seções do painel">
+            <button type="button" aria-pressed={dashboardView === 'inicio'} onClick={() => setDashboardView('inicio')}>
+              Início
+            </button>
+            <button type="button" aria-pressed={dashboardView === 'auditoria'} onClick={() => setDashboardView('auditoria')}>
+              Auditoria
+            </button>
+          </nav>
+        )}
 
-        <h1>Olá, {firstName}.</h1>
+        {showingAudit ? <AuditPanel /> : (
+          <>
+            <p className="overline">PAINEL INICIAL</p>
+            <h1>Olá, {firstName}.</h1>
+            <p className="subtitle">Você está conectado ao sistema ExamenTech.</p>
 
-        <p className="subtitle">
-          Você está conectado ao sistema ExamenTech.
-        </p>
+            <div className="profile-card">
+              <div className="avatar">{initials}</div>
+              <div className="profile-info">
+                <span className="label">USUÁRIO CONECTADO</span>
+                <h2>{user.name}</h2>
+                <p>{user.email}</p>
+              </div>
+              <div className="badge">{user.profile}</div>
+            </div>
 
-        <div className="profile-card">
-          <div className="avatar">
-            {initials}
-          </div>
+            <p className="verification-receipt">
+              Acesso confirmado com autenticação em duas etapas.
+            </p>
 
-          <div className="profile-info">
-            <span className="label">
-              USUÁRIO CONECTADO
-            </span>
-
-            <h2>{user.name}</h2>
-            <p>{user.email}</p>
-          </div>
-
-          <div className="badge">
-            {user.profile}
-          </div>
-        </div>
-
-        <p className="verification-receipt">
-          Acesso confirmado com autenticação em duas etapas.
-        </p>
-
-        {invitationsEnabled &&
-          (user.profile === 'Administrador' || user.profile === 'Professor') && (
-          <InvitationPanel profile={user.profile} />
+            {invitationsEnabled &&
+              (user.profile === 'Administrador' || user.profile === 'Professor') && (
+              <InvitationPanel profile={user.profile} />
+            )}
+          </>
         )}
       </main>
     </div>

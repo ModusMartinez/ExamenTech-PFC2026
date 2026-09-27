@@ -39,15 +39,15 @@ export function validateRegistrationFields(
 
 export function validateInvitationFields(
   organizationCode: string,
-  studentCode: string,
+  invitationCode: string,
 ): string | null {
-  if (!organizationCode.trim() || !studentCode.trim()) {
+  if (!organizationCode.trim() || !invitationCode.trim()) {
     return 'Informe o código da organização e o convite individual.'
   }
 
   if (
     !/^[A-Za-z0-9_-]{21}$/.test(organizationCode.trim()) ||
-    !/^[a-fA-F0-9]{64}$/.test(studentCode.trim())
+    !/^[a-fA-F0-9]{64}$/.test(invitationCode.trim())
   ) {
     return 'Um dos códigos informados é inválido.'
   }

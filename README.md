@@ -115,30 +115,37 @@ npm run test
 npm run build
 ```
 
-`npm test` também verifica a tela de cadastro: troca de janela, mensagens de
-erro e retorno ao login após sucesso. Para rodar só esses testes, use
+`npm test` também verifica o aceite dos termos, as regras do banco e a tela de
+cadastro: troca de janela, mensagens de erro e retorno ao login após sucesso. Para rodar só os testes de tela, use
 `npm run test:ui`. Supabase e CAPTCHA são simulados; nenhuma conta é criada.
 
 ## Situação atual
 
-Cadastro, confirmação de e-mail, MFA, acesso de administrador e registros de cadastro/login foram validados pela equipe no Supabase de testes. A retirada da aprovação manual foi testada localmente e precisa do ajuste no banco descrito no roteiro de cadastro. Cada ambiente precisa ter suas configurações e testes conferidos.
+Cadastro, confirmação de e-mail, MFA, convites de professor/aluno e registros de cadastro/login foram validados pela equipe no Supabase de testes. A nova revisão dos documentos precisa da atualização de versões no banco descrita no roteiro de termos. Cada ambiente precisa ter suas configurações e testes conferidos.
 
 - Tela de acesso responsiva
+- Modal de Termos de Uso antes do cadastro, com aceite obrigatório
+- Páginas públicas de Termos e Política de Privacidade, com links pequenos no rodapé de todas as telas
 - Cadastro e login por e-mail e senha usando Supabase Auth
 - Configuração e confirmação de TOTP antes de liberar o painel
 - Cadastro por convite sem aprovação manual; leitura do perfil real e bloqueio de contas inativas
+- Administrador convida professores ou alunos; professor convida somente alunos da própria organização
 - Cadastro por convite individual, vinculado a uma organização, disponível somente com `VITE_INVITES_ENABLED=true` e as migrações correspondentes
 - Token Turnstile enviado ao Supabase Auth; requer configuração do CAPTCHA no painel Supabase
 - Rota separada de validação Turnstile com testes e auditoria técnica
 - Dashboards por perfil em `src/components/Dashboard` ainda com dados de exemplo e sem ligação com o painel atual
 - Auditoria de cadastro e acesso aprovado/negado após MFA, com registro no banco e sem duplicação por sessão
+- Tela de auditoria para administrador: últimos 50 eventos, filtro por tipo e atualização
 - Auditoria das demais ações dos usuários ainda pendente
 
 Tentativas recusadas antes do MFA não são copiadas para nossa tabela. O Supabase Auth também oferece logs próprios; confirme sua disponibilidade/configuração no projeto. Auditoria de ações acadêmicas ainda não foi implementada.
 
-Roteiros para a próxima etapa: [preparação e testes do Supabase](docs/preparacao-supabase.md), [convites e organizações](docs/convites-organizacoes.md) e [integração externa com Turnstile](docs/integracao-turnstile.md).
+Roteiros: [professores e auditoria](docs/professores-auditoria.md), [termos e privacidade](docs/termos-privacidade.md), [preparação e testes do Supabase](docs/preparacao-supabase.md), [convites e organizações](docs/convites-organizacoes.md) e [integração externa com Turnstile](docs/integracao-turnstile.md).
 
-A política de privacidade e as decisões de retenção de dados ainda precisam de revisão pela equipe responsável pela LGPD.
+Termos e Política específicos para a demonstração do PFC: integrantes responsáveis,
+contato `modusmartinezex@gmail.com`, serviços utilizados e conservação por até três
+meses a partir da coleta. A exclusão ainda é manual. Os textos não autorizam uso
+em escolas sem nova revisão.
 
 ## Cuidados
 

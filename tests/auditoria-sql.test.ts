@@ -4,8 +4,17 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 
+// Esta suíte cobre o estágio 001–008. A versão atual com 009 tem testes próprios.
+const TERMS_VERSION = '2026-09-27'
+const PRIVACY_VERSION = '2026-09-27'
+
 const adminId = '00000000-0000-4000-8000-000000000001'
 const studentId = '00000000-0000-4000-8000-000000000002'
+const legalData = {
+  termos_aceitos: true,
+  termos_versao: TERMS_VERSION,
+  privacidade_versao: PRIVACY_VERSION,
+}
 
 test('auditoria em PostgreSQL local, sem conexão com Supabase', async (t) => {
   const db = new PGlite()
@@ -65,6 +74,8 @@ test('auditoria em PostgreSQL local, sem conexão com Supabase', async (t) => {
   await applyMigration('006_auditoria_cadastro_login.sql')
   await applyMigration('007_cadastro_sem_aprovacao.sql')
   await applyMigration('007_cadastro_sem_aprovacao.sql')
+  await applyMigration('008_aceite_termos.sql')
+  await applyMigration('008_aceite_termos.sql')
 
   async function scenario(name: string, run: () => Promise<void>) {
     await t.test(name, async () => {
@@ -127,9 +138,18 @@ test('auditoria em PostgreSQL local, sem conexão com Supabase', async (t) => {
     return { userId, email, ticket, orgId }
   }
 
+  async function signupWithTerms() {
+    const signup = await prepareSignup()
+    await db.query('INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ($1, $2, $3)', [
+      signup.userId, signup.email, JSON.stringify({ ...legalData, ticket_cadastro: signup.ticket }),
+    ])
+    return signup
+  }
+
   await scenario('preserva registros antigos e permissões após reaplicar 006', async () => {
     assert.equal((await db.query('SELECT * FROM public.eventos_seguranca')).rows.length, 1)
     assert.equal((await events()).length, 0)
+    assert.equal((await db.query('SELECT * FROM public.aceites_termos')).rows.length, 0)
     const result = await db.query<{ permitido: boolean }>(`
       SELECT has_function_privilege('anon', 'public.preparar_cadastro_aluno(text,text,text)', 'EXECUTE')
         AND has_schema_privilege('anon', 'examentech_private', 'USAGE') AS permitido
@@ -142,6 +162,7 @@ test('auditoria em PostgreSQL local, sem conexão com Supabase', async (t) => {
     await db.exec('SET LOCAL ROLE supabase_auth_admin')
     await db.query('INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ($1, $2, $3)', [
       userId, email, JSON.stringify({
+        ...legalData, usuario_id: adminId, aceito_em: '2000-01-01T00:00:00Z',
         nome: 'Aluno', perfil: 'ADMIN', situacao: 'PENDENTE', rgm: '123456', ticket_cadastro: ticket,
       }),
     ])
@@ -161,6 +182,14 @@ test('auditoria em PostgreSQL local, sem conexão com Supabase', async (t) => {
     assert.equal(JSON.stringify(rows).includes(email), false)
     const metadata = (await db.query<{ raw_user_meta_data: object }>('SELECT raw_user_meta_data FROM auth.users WHERE id = $1', [userId])).rows[0]
     assert.equal('ticket_cadastro' in metadata.raw_user_meta_data, false)
+    const acceptance = await db.query(`
+      SELECT usuario_id, termos_versao, privacidade_versao, aceito_em = NOW() AS horario_servidor
+      FROM public.aceites_termos WHERE usuario_id = $1
+    `, [userId])
+    assert.deepEqual(acceptance.rows, [{
+      usuario_id: userId, termos_versao: TERMS_VERSION,
+      privacidade_versao: PRIVACY_VERSION, horario_servidor: true,
+    }])
     await startSession(userId)
     assert.equal((await access())?.situacao, 'ATIVO')
     assert.deepEqual((await events()).map((row) => row.evento).sort(), ['CADASTRO_REALIZADO', 'LOGIN_SUCESSO'])
@@ -168,7 +197,7 @@ test('auditoria em PostgreSQL local, sem conexão com Supabase', async (t) => {
 
   await scenario('retirar aprovação não permite reutilizar o ticket de cadastro', async () => {
     const { userId, email, ticket } = await prepareSignup()
-    const metadata = JSON.stringify({ ticket_cadastro: ticket })
+    const metadata = JSON.stringify({ ...legalData, ticket_cadastro: ticket })
     await db.query('INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ($1, $2, $3)', [userId, email, metadata])
     await db.exec('SAVEPOINT repeticao')
     await assert.rejects(db.query(
@@ -196,14 +225,109 @@ test('auditoria em PostgreSQL local, sem conexão com Supabase', async (t) => {
       SET LOCAL ROLE supabase_auth_admin;
     `)
     await assert.rejects(db.query('INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ($1, $2, $3)', [
-      userId, email, JSON.stringify({ nome: 'Aluno', ticket_cadastro: ticket }),
+      userId, email, JSON.stringify({ ...legalData, nome: 'Aluno', ticket_cadastro: ticket }),
     ]), /falha_simulada/)
     await db.exec('ROLLBACK TO SAVEPOINT cadastro; RESET ROLE')
     assert.equal((await db.query('SELECT * FROM auth.users WHERE id = $1', [userId])).rows.length, 0)
     assert.equal((await db.query('SELECT * FROM public.perfis WHERE id = $1', [userId])).rows.length, 0)
+    assert.equal((await db.query('SELECT * FROM public.aceites_termos WHERE usuario_id = $1', [userId])).rows.length, 0)
     const invite = await db.query<{ situacao: string }>('SELECT situacao FROM public.convites_aluno WHERE email = $1', [email])
     assert.equal(invite.rows[0].situacao, 'LIBERADO')
     assert.equal((await events()).length, 0)
+  })
+
+  for (const [label, metadata] of [
+    ['sem aceite', {}],
+    ['aceite falso', { ...legalData, termos_aceitos: false }],
+    ['string em vez de booleano', { ...legalData, termos_aceitos: 'true' }],
+    ['aceite nulo', { ...legalData, termos_aceitos: null }],
+    ['sem versões', { termos_aceitos: true }],
+    ['termos desatualizados', { ...legalData, termos_versao: '2000-01-01' }],
+    ['política desatualizada', { ...legalData, privacidade_versao: '2000-01-01' }],
+  ] as const) {
+    await scenario(`cadastro ${label} é recusado no banco sem consumir o convite`, async () => {
+      const { userId, email, ticket } = await prepareSignup()
+      await db.exec('SAVEPOINT sem_aceite; SET LOCAL ROLE supabase_auth_admin')
+      await assert.rejects(db.query('INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ($1, $2, $3)', [
+        userId, email, JSON.stringify({ ...metadata, ticket_cadastro: ticket }),
+      ]), /aceite da versão atual/)
+      await db.exec('ROLLBACK TO SAVEPOINT sem_aceite; RESET ROLE')
+
+      assert.equal((await db.query('SELECT * FROM auth.users WHERE id = $1', [userId])).rows.length, 0)
+      assert.equal((await db.query('SELECT * FROM public.perfis WHERE id = $1', [userId])).rows.length, 0)
+      assert.equal((await db.query('SELECT * FROM public.aceites_termos')).rows.length, 0)
+      assert.equal((await events()).length, 0)
+      assert.deepEqual((await db.query(`
+        SELECT situacao, utilizado_em, utilizado_por FROM public.convites_aluno WHERE email = $1
+      `, [email])).rows, [{ situacao: 'LIBERADO', utilizado_em: null, utilizado_por: null }])
+      assert.deepEqual((await db.query(`
+        SELECT utilizado_em, utilizado_por FROM public.tickets_cadastro_aluno
+      `)).rows, [{ utilizado_em: null, utilizado_por: null }])
+    })
+  }
+
+  await scenario('alterar metadados depois não muda o aceite nem inventa aceite de conta antiga', async () => {
+    const { userId } = await signupWithTerms()
+    const before = (await db.query('SELECT * FROM public.aceites_termos')).rows
+    await db.query('UPDATE auth.users SET raw_user_meta_data = $1 WHERE id IN ($2, $3)', [
+      JSON.stringify({ termos_aceitos: true, termos_versao: 'versao-forjada' }), userId, studentId,
+    ])
+    assert.deepEqual((await db.query('SELECT * FROM public.aceites_termos')).rows, before)
+  })
+
+  await scenario('aceite só pode ser consultado pelo titular ou ADMIN, ambos com MFA', async () => {
+    const { userId } = await signupWithTerms()
+    await startSession(userId, 'aal1')
+    assert.equal((await db.query('SELECT * FROM public.aceites_termos')).rows.length, 0)
+    await db.exec('RESET ROLE')
+    await startSession(userId)
+    assert.equal((await db.query('SELECT * FROM public.aceites_termos')).rows.length, 1)
+    await db.exec('RESET ROLE')
+    await startSession(studentId)
+    assert.equal((await db.query('SELECT * FROM public.aceites_termos')).rows.length, 0)
+    await db.exec('RESET ROLE')
+    await startSession(adminId, 'aal1')
+    assert.equal((await db.query('SELECT * FROM public.aceites_termos')).rows.length, 0)
+    await db.exec('RESET ROLE')
+    await startSession(adminId)
+    assert.equal((await db.query('SELECT * FROM public.aceites_termos')).rows.length, 1)
+  })
+
+  await scenario('anônimo não consulta aceites', async () => {
+    await db.exec('SET LOCAL ROLE anon')
+    await assert.rejects(db.query('SELECT * FROM public.aceites_termos'), /permission denied/)
+  })
+
+  for (const operation of [
+    `INSERT INTO public.aceites_termos (usuario_id, termos_versao, privacidade_versao)
+     VALUES ('${studentId}', 'forjado', 'forjado')`,
+    "UPDATE public.aceites_termos SET termos_versao = 'forjado'",
+    'DELETE FROM public.aceites_termos',
+  ]) {
+    await scenario(`nem ADMIN pelo navegador pode fazer ${operation.split(' ')[0]} nos aceites`, async () => {
+      await signupWithTerms()
+      await startSession(adminId)
+      await assert.rejects(db.exec(operation), /permission denied/)
+    })
+  }
+
+  await scenario('gatilho não fica executável pelo navegador', async () => {
+    for (const role of ['anon', 'authenticated']) {
+      const result = await db.query<{ permitido: boolean }>(`
+        SELECT has_function_privilege($1, 'examentech_private.registrar_aceite_termos()', 'EXECUTE') AS permitido
+      `, [role])
+      assert.equal(result.rows[0].permitido, false)
+    }
+  })
+
+  await scenario('excluir conta remove seu aceite, sem apagar o evento histórico de cadastro', async () => {
+    const { userId } = await signupWithTerms()
+    await db.query('DELETE FROM auth.users WHERE id = $1', [userId])
+    assert.equal((await db.query('SELECT * FROM public.aceites_termos')).rows.length, 0)
+    const rows = await events()
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].evento, 'CADASTRO_REALIZADO')
+    assert.equal(rows[0].usuario_id, null)
   })
 
   await scenario('login ativo grava usuário da sessão e não duplica no F5', async () => {
@@ -328,5 +452,17 @@ test('auditoria em PostgreSQL local, sem conexão com Supabase', async (t) => {
     await db.exec('RESET ROLE')
     await startSession(adminId)
     assert.equal((await db.query('SELECT * FROM public.eventos_seguranca')).rows.length, 2)
+  })
+
+  await t.test('reaplicar 008 preserva aceite registrado e não duplica o gatilho', async () => {
+    await signupWithTerms()
+    const before = (await db.query('SELECT * FROM public.aceites_termos')).rows
+    await applyMigration('008_aceite_termos.sql')
+    assert.deepEqual((await db.query('SELECT * FROM public.aceites_termos')).rows, before)
+    const triggers = await db.query(`
+      SELECT tgname FROM pg_catalog.pg_trigger
+      WHERE tgrelid = 'auth.users'::regclass AND tgname = 'examentech_registrar_aceite_termos'
+    `)
+    assert.equal(triggers.rows.length, 1)
   })
 })

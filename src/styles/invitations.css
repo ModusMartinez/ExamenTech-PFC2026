@@ -69,6 +69,7 @@
 }
 
 .invitation-form input,
+.invitation-form select,
 .invitation-rotate select {
   width: 100%;
   min-height: 44px;
@@ -81,6 +82,7 @@
 }
 
 .invitation-form input:focus-visible,
+.invitation-form select:focus-visible,
 .invitation-rotate select:focus-visible,
 .invitation-panel button:focus-visible {
   outline: 3px solid rgba(29, 93, 149, 0.28);

@@ -5,6 +5,8 @@ O projeto principal precisa da mesma conferência de configuração e testes.
 Adicionar arquivos ao Git não executa SQL no banco. O fluxo de convites exige
 `VITE_INVITES_ENABLED=true` e o gatilho de `005`; a retirada da aprovação
 manual depende de `007`.
+O cadastro de professores e o formulário compartilhado dependem de `009`,
+depois dos termos de `008`. Veja o [roteiro de professores e auditoria](professores-auditoria.md).
 
 ## Fluxo atual
 
@@ -12,15 +14,15 @@ manual depende de `007`.
    código de uma existente. A interface mostra o código uma vez. A coluna
    `organizacoes.token_login` continua guardando o código de 21 caracteres,
    conforme a restrição já existente na tabela da equipe.
-2. Um ADMIN, ou um PROFESSOR ativo vinculado àquela organização, emite um
-   convite individual para o e-mail do aluno. O convite vale por sete dias e
+2. ADMIN emite convite de PROFESSOR ou ALUNO. PROFESSOR ativo emite somente
+   convite de ALUNO da própria organização. O convite vale por sete dias e
    seu código em claro também aparece uma vez.
-3. No cadastro, o aluno informa e-mail, senha, código da organização e
+3. No cadastro, aluno ou professor aceita os termos e informa e-mail, senha, código da organização e
    convite. Uma função do banco confere os códigos e entrega um ticket de
    cinco minutos. Somente esse ticket é enviado ao Supabase Auth.
 4. O gatilho em `auth.users` exige e consome o ticket e o convite na mesma
-   transação, remove o ticket dos metadados e, após `007`, cria o perfil
-   `ALUNO/ATIVO` vinculado à organização. Confirmação de e-mail e TOTP continuam
+   transação, remove o ticket dos metadados e, após `009`, cria `ALUNO/ATIVO` ou
+   `PROFESSOR/ATIVO`, conforme o convite salvo no banco. Confirmação de e-mail e TOTP continuam
    obrigatórios; não há uma aprovação adicional do administrador.
 
 O código da organização é gerado no PostgreSQL com `gen_random_uuid()` e
@@ -45,6 +47,9 @@ faz o hash nem substitui a validação no servidor.
 - `database/007_cadastro_sem_aprovacao.sql`: cria alunos ativos e ajusta os
   alunos pendentes elegíveis, sem reativar contas inativas. Veja o
   [roteiro de aplicação](cadastro-sem-aprovacao.md).
+- `database/008_aceite_termos.sql`: valida e registra o aceite no cadastro.
+- `database/009_convites_professor.sql`: estende os convites para professor,
+  preserva os antigos e atualiza a versão exigida dos termos.
 - `src/App.tsx` e `src/components/InvitationPanel.tsx`: interface preparada.
   Ela só aparece quando `VITE_INVITES_ENABLED=true` no ambiente do Vite.
 
@@ -64,7 +69,7 @@ Sequência sugerida na homologação: aplicar `003` após `001`, depois `004`;
 preparar uma conta ADMIN ativa com MFA; criar/rotacionar o código da
 organização; atribuir
 `perfis.organizacao_id` aos professores que emitirão convites; aplicar `005`,
-`006` e `007`;
+`006`, `007`, `008`, `009` e `010`, nessa ordem;
 ativar `VITE_INVITES_ENABLED=true` no front-end e reiniciar o Vite. Publicar
 o front com a flag e ativar `005` devem fazer parte da mesma janela de
 implantação. Se `005` entrar antes, o cadastro antigo falhará de forma
@@ -73,9 +78,9 @@ até o gatilho estar ativo.
 
 **Atenção:** depois de `005`, o botão **Add user** do painel Supabase e outros
 métodos de criação de usuário sem convite também falharão. Não criar exceção
-baseada em metadados informados pelo navegador. Para a demonstração, um
-professor pode ser cadastrado com convite como ALUNO e depois promovido e
-vinculado à organização por um ADMIN. O cadastro de um novo ADMIN exigirá um
+baseada em metadados informados pelo navegador. Com `009`, use o convite de
+professor emitido por ADMIN; não é mais necessário cadastrar como aluno e
+promover manualmente. O cadastro de um novo ADMIN exigirá um
 procedimento privilegiado separado e revisado pela equipe.
 
 ## Testes necessários no Supabase de homologação
@@ -90,6 +95,8 @@ conferidos antes da implantação.
 
 - ADMIN com MFA cria organização e emite convite; PROFESSOR da mesma
   organização emite convite; PROFESSOR de outra organização é recusado.
+- Somente ADMIN emite convite de professor. Professor não escolhe seu perfil
+  no cadastro, e metadados tentando criar ADMIN não promovem a conta.
 - Aluno com ambos os códigos e e-mail correto confirma e-mail, configura
   TOTP e acessa como `ALUNO/ATIVO`, sem aprovação adicional.
 - Conta `INATIVO` continua bloqueada mesmo com e-mail e TOTP confirmados.
