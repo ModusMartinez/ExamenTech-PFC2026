@@ -6,6 +6,9 @@ O widget em `src/components/TurnstileWidget.tsx` gera um token temporário. `src
 
 O código da aplicação não persiste o token em `eventos_seguranca` nem o exibe ao usuário. Após cada tentativa, o widget é reiniciado para pedir um novo token. A configuração real exige uma chave de site no front-end e a chave secreta cadastrada no Supabase Auth. [Documentação oficial do CAPTCHA no Supabase](https://supabase.com/docs/guides/auth/auth-captcha).
 
+Os eventos de cadastro e de acesso após MFA são gravados por funções do banco,
+sem outra validação do token. Veja [auditoria de cadastro e login](auditoria-cadastro-login.md).
+
 ## Rota própria, separada do login
 
 `api/validar-turnstile.ts` é uma API independente de demonstração da integração servidor → Cloudflare Siteverify. Ela recebe `POST /api/validar-turnstile` com JSON `{ "token": "..." }`, chama o [Siteverify](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/) com a chave privada e, se a tabela existir, registra o resultado técnico em `public.eventos_seguranca`.

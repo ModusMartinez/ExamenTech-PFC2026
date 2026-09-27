@@ -21,10 +21,7 @@ export function decideProfileAccess(record: ProfileRecord): ProfileDecision {
   if (record.situacao !== 'ATIVO') {
     return {
       kind: 'denied',
-      message:
-        record.situacao === 'PENDENTE'
-          ? 'Sua conta ainda aguarda aprovação do administrador.'
-          : 'Sua conta está inativa. Procure o administrador.',
+      message: 'Sua conta não está ativa. Procure o administrador.',
     }
   }
 

@@ -1,12 +1,12 @@
-# Convites e organizações — preparação para revisão
+# Convites e organizações
 
 Esta funcionalidade foi exercitada em um projeto Supabase de teste separado.
-Na última conferência, `003`, `004` e `005` ainda não haviam sido aplicados
-ao projeto principal. Adicionar estes arquivos ao Git não executa SQL no banco.
-O fluxo atual de cadastro continua funcionando enquanto `VITE_INVITES_ENABLED`
-não estiver definido como `true` **e** a migração `005` não tiver sido aplicada.
+O projeto principal precisa da mesma conferência de configuração e testes.
+Adicionar arquivos ao Git não executa SQL no banco. O fluxo de convites exige
+`VITE_INVITES_ENABLED=true` e o gatilho de `005`; a retirada da aprovação
+manual depende de `007`.
 
-## Fluxo proposto
+## Fluxo atual
 
 1. Um ADMIN com MFA e situação `ATIVO` cria uma organização ou rotaciona o
    código de uma existente. A interface mostra o código uma vez. A coluna
@@ -19,9 +19,9 @@ não estiver definido como `true` **e** a migração `005` não tiver sido aplic
    convite. Uma função do banco confere os códigos e entrega um ticket de
    cinco minutos. Somente esse ticket é enviado ao Supabase Auth.
 4. O gatilho em `auth.users` exige e consome o ticket e o convite na mesma
-   transação, remove o ticket dos metadados e cria o perfil `ALUNO/PENDENTE`
-   vinculado à organização. A confirmação de e-mail e o TOTP continuam nos
-   seus fluxos atuais. Um ADMIN ainda precisa mudar a situação para `ATIVO`.
+   transação, remove o ticket dos metadados e, após `007`, cria o perfil
+   `ALUNO/ATIVO` vinculado à organização. Confirmação de e-mail e TOTP continuam
+   obrigatórios; não há uma aprovação adicional do administrador.
 
 O código da organização é gerado no PostgreSQL com `gen_random_uuid()` e
 convertido para 21 caracteres compatíveis com `token_login`. Ele permanece
@@ -33,14 +33,18 @@ faz o hash nem substitui a validação no servidor.
 ## Arquivos e ordem de implantação
 
 - `database/003_cadastro_publico_aluno.sql`: depois de `001`, força novos
-  cadastros públicos a nascerem como `ALUNO/PENDENTE`, sem RGM informado pelo
-  navegador. Confirmar com a equipe o impacto sobre o cadastro de professores.
+  cadastros públicos a serem apenas ALUNO, sem RGM informado pelo navegador.
+  A situação inicial dessa versão histórica é substituída por `007`.
 - `database/004_convites_organizacoes.sql`: adiciona vínculo, tabelas e
   funções. Requer a tabela `public.organizacoes` preexistente. Não altera os
   códigos existentes nem ativa o bloqueio de cadastro.
 - `database/005_ativar_convite_cadastro.sql`: exige convite em **toda** nova
   linha de `auth.users`. Esta é a etapa que impede o uso direto de `signUp`
   sem convite.
+- `database/006_auditoria_cadastro_login.sql`: registra cadastro e acesso após MFA.
+- `database/007_cadastro_sem_aprovacao.sql`: cria alunos ativos e ajusta os
+  alunos pendentes elegíveis, sem reativar contas inativas. Veja o
+  [roteiro de aplicação](cadastro-sem-aprovacao.md).
 - `src/App.tsx` e `src/components/InvitationPanel.tsx`: interface preparada.
   Ela só aparece quando `VITE_INVITES_ENABLED=true` no ambiente do Vite.
 
@@ -59,7 +63,8 @@ schemas expostos pela Data API.
 Sequência sugerida na homologação: aplicar `003` após `001`, depois `004`;
 preparar uma conta ADMIN ativa com MFA; criar/rotacionar o código da
 organização; atribuir
-`perfis.organizacao_id` aos professores que emitirão convites; aplicar `005`;
+`perfis.organizacao_id` aos professores que emitirão convites; aplicar `005`,
+`006` e `007`;
 ativar `VITE_INVITES_ENABLED=true` no front-end e reiniciar o Vite. Publicar
 o front com a flag e ativar `005` devem fazer parte da mesma janela de
 implantação. Se `005` entrar antes, o cadastro antigo falhará de forma
@@ -76,8 +81,9 @@ procedimento privilegiado separado e revisado pela equipe.
 ## Testes necessários no Supabase de homologação
 
 No projeto de teste separado, a equipe relatou que validou o cadastro com
-convite, a confirmação de e-mail, o TOTP, o bloqueio do perfil `PENDENTE` e o
-acesso após mudar para `ATIVO`. Também relatou testes de convite errado,
+convite, a confirmação de e-mail, o TOTP e o fluxo antigo com aprovação.
+A retirada da aprovação deve ser validada depois de aplicar `007`.
+Também relatou testes de convite errado,
 reutilizado e cadastro sem convite. Esses relatos não comprovam o mesmo
 comportamento no projeto principal; os demais casos abaixo ainda precisam ser
 conferidos antes da implantação.
@@ -85,7 +91,8 @@ conferidos antes da implantação.
 - ADMIN com MFA cria organização e emite convite; PROFESSOR da mesma
   organização emite convite; PROFESSOR de outra organização é recusado.
 - Aluno com ambos os códigos e e-mail correto confirma e-mail, configura
-  TOTP e permanece bloqueado enquanto `PENDENTE`; depois de `ATIVO`, acessa.
+  TOTP e acessa como `ALUNO/ATIVO`, sem aprovação adicional.
+- Conta `INATIVO` continua bloqueada mesmo com e-mail e TOTP confirmados.
 - Código de organização errado/antigo, convite errado, expirado, usado ou
   destinado a outro e-mail não criam conta. `signUp` chamado diretamente sem
   ticket também não cria conta.
@@ -96,8 +103,8 @@ conferidos antes da implantação.
   verificar em `perfis` o `organizacao_id` correto e, nas tabelas novas, o
   consumo único. Não mostrar valores dos códigos nessas evidências.
 
-`npm run build`, `lint` e os testes JavaScript não executam PostgreSQL. Eles
-não substituem os testes da migração, das permissões e do Auth em homologação.
+`npm test` inclui PostgreSQL em memória e simulações da tela. Esses testes,
+o build e o lint não substituem a validação do Auth, e-mail e MFA em homologação.
 Usuários antigos permanecem com `organizacao_id` nulo até que a equipe revise
 os vínculos; o isolamento de turmas e avaliações por organização e o bloqueio
 automático de contas quando a organização é inativada ainda exigem políticas

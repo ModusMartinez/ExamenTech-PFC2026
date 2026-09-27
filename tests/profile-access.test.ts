@@ -29,15 +29,12 @@ test('libera perfil ativo com nome e papel vindos do banco', () => {
   )
 })
 
-test('bloqueia contas pendentes ou inativas', () => {
-  assert.equal(
-    decideProfileAccess({ ...activeStudent, situacao: 'PENDENTE' }).kind,
-    'denied',
-  )
-  assert.equal(
-    decideProfileAccess({ ...activeStudent, situacao: 'INATIVO' }).kind,
-    'denied',
-  )
+test('bloqueia contas inativas e estados legados ou desconhecidos sem pedir aprovação', () => {
+  for (const situacao of ['INATIVO', 'PENDENTE', 'DESCONHECIDO']) {
+    assert.deepEqual(decideProfileAccess({ ...activeStudent, situacao }), {
+      kind: 'denied', message: 'Sua conta não está ativa. Procure o administrador.',
+    })
+  }
 })
 
 test('bloqueia perfil desconhecido', () => {

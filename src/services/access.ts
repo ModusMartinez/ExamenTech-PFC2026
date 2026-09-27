@@ -1,8 +1,8 @@
-import { supabase } from '../lib/supabase'
-import { decideProfileAccess } from './profileAccess'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { decideProfileAccess } from './profileAccess.ts'
 
-export type { AccessUser, Profile } from './profileAccess'
-import type { AccessUser } from './profileAccess'
+export type { AccessUser, Profile } from './profileAccess.ts'
+import type { AccessUser } from './profileAccess.ts'
 
 export type AccessState =
   | { kind: 'signed-out' }
@@ -11,7 +11,7 @@ export type AccessState =
   | { kind: 'denied'; message: string }
   | { kind: 'ready'; user: AccessUser }
 
-export async function resolveAccess(): Promise<AccessState> {
+export async function resolveAccess(supabase: SupabaseClient): Promise<AccessState> {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
 
   if (sessionError) {
@@ -50,14 +50,16 @@ export async function resolveAccess(): Promise<AccessState> {
       : { kind: 'setup-totp' }
   }
 
-  const { data: record, error: profileError } = await supabase
-    .from('perfis')
-    .select('nome, email, perfil, situacao')
-    .eq('id', userData.user.id)
-    .single()
+  // O banco consulta o próprio perfil e registra o resultado após o MFA.
+  // A função não recebe usuário nem resultado informados pelo navegador.
+  const { data: record, error: auditError } = await supabase.rpc('registrar_acesso')
 
-  if (profileError || !record) {
-    throw new Error('Seu perfil não foi encontrado. Procure o administrador.')
+  if (auditError) {
+    throw new Error('Não foi possível registrar seu acesso. Tente novamente.')
+  }
+
+  if (!record) {
+    return { kind: 'denied', message: 'Seu perfil não foi encontrado. Procure o administrador.' }
   }
 
   return decideProfileAccess(record)

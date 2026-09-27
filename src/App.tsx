@@ -45,7 +45,9 @@ function App() {
   const [organizationCode, setOrganizationCode] = useState('')
   const [studentCode, setStudentCode] = useState('')
   const [registerError, setRegisterError] = useState('')
+  const [registerCaptchaError, setRegisterCaptchaError] = useState('')
   const [loading, setLoading] = useState(false)
+  const registeringRef = useRef(false)
   const checkAccessRef = useRef<() => Promise<void>>(async () => {})
 
   const applyAccess = useCallback(async (access: AccessState) => {
@@ -53,7 +55,7 @@ function App() {
     setLoggedUser(null)
 
     if (access.kind === 'signed-out') {
-      setPage('login')
+      setPage((current) => current === 'cadastro' ? 'cadastro' : 'login')
       return
     }
 
@@ -94,7 +96,7 @@ function App() {
       setLoggedUser(null)
 
       try {
-        const access = await resolveAccess()
+        const access = await resolveAccess(supabase)
         if (active && checkId === latestCheck) await applyAccess(access)
       } catch {
         if (active && checkId === latestCheck) {
@@ -107,6 +109,8 @@ function App() {
     }
 
     function scheduleCheck() {
+      if (registeringRef.current) return
+
       latestCheck += 1
       setLoggedUser(null)
       setCheckingSession(true)
@@ -122,11 +126,15 @@ function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event) => {
+        // O signUp pode emitir SIGNED_IN antes de devolver seu resultado.
+        // Durante o envio, quem decide a tela e a mensagem é handleRegister.
+        if (registeringRef.current) return
+
         if (event === 'SIGNED_OUT') {
           latestCheck += 1
           if (scheduledCheck) clearTimeout(scheduledCheck)
           setLoggedUser(null)
-          setPage('login')
+          setPage((current) => current === 'cadastro' ? 'cadastro' : 'login')
           setCheckingSession(false)
           return
         }
@@ -143,17 +151,27 @@ function App() {
       },
     )
 
-    window.addEventListener('focus', scheduleCheck)
-
     return () => {
       active = false
       latestCheck += 1
       if (scheduledCheck) clearTimeout(scheduledCheck)
       checkAccessRef.current = async () => {}
-      window.removeEventListener('focus', scheduleCheck)
       subscription.unsubscribe()
     }
   }, [applyAccess])
+
+  useEffect(() => {
+    // Login e cadastro são telas públicas: voltar à janela não deve desmontar
+    // o formulário nem o CAPTCHA. Sessões autenticadas continuam conferidas.
+    if (!loggedUser && page !== 'mfa-setup' && page !== 'mfa-verify') return
+
+    function checkOnFocus() {
+      void checkAccessRef.current()
+    }
+
+    window.addEventListener('focus', checkOnFocus)
+    return () => window.removeEventListener('focus', checkOnFocus)
+  }, [loggedUser, page])
 
   function resetTurnstile() {
     setTurnstileToken('')
@@ -221,11 +239,12 @@ function App() {
   async function handleRegister(event: FormEvent) {
     event.preventDefault()
 
-    if (loading) {
+    if (loading || registeringRef.current) {
       return
     }
 
     setRegisterError('')
+    setRegisterCaptchaError('')
 
     const newName = name.trim()
     const newEmail = registerEmail.trim().toLowerCase()
@@ -255,10 +274,11 @@ function App() {
     }
 
     if (!registerTurnstileToken) {
-      setRegisterError('Conclua a verificação de segurança para continuar.')
+      setRegisterCaptchaError('Conclua a verificação de segurança para continuar.')
       return
     }
 
+    registeringRef.current = true
     setLoading(true)
 
     try {
@@ -333,17 +353,19 @@ function App() {
       setOrganizationCode('')
       setStudentCode('')
 
+      setLoginError('')
       setPage('login')
 
       if (data.session) {
         await supabase.auth.signOut({ scope: 'local' })
-        setSuccessMessage('Cadastro realizado. Sua conta está pendente de aprovação.')
+        setSuccessMessage('Cadastro realizado. Entre para configurar seu Authenticator.')
       } else {
         setSuccessMessage('Solicitação recebida. Confira seu e-mail para confirmar o cadastro.')
       }
     } catch {
       setRegisterError('Não foi possível acessar o serviço de cadastro. Tente novamente.')
     } finally {
+      registeringRef.current = false
       resetRegisterTurnstile()
       setLoading(false)
     }
@@ -357,6 +379,7 @@ function App() {
     }
 
     setLoggedUser(null)
+    setPage('login')
     setTurnstileToken('')
     setRegisterTurnstileToken('')
     setEmail('')
@@ -521,6 +544,7 @@ function App() {
                     setPage('cadastro')
                     setTurnstileToken('')
                     setRegisterTurnstileToken('')
+                    setRegisterCaptchaError('')
                     setLoginError('')
                     setSuccessMessage('')
                   }}
@@ -540,6 +564,7 @@ function App() {
                     setPage('login')
                     setRegisterTurnstileToken('')
                     setRegisterError('')
+                    setRegisterCaptchaError('')
                   }}
                 >
                   ← Voltar
@@ -670,21 +695,27 @@ function App() {
                   resetSignal={registerTurnstileResetSignal}
                   onVerify={(token) => {
                     setRegisterTurnstileToken(token)
-                    setRegisterError('')
+                    setRegisterCaptchaError('')
                   }}
                   onExpire={() => {
                     setRegisterTurnstileToken('')
-                    setRegisterError('A verificação expirou. Conclua-a novamente.')
+                    setRegisterCaptchaError('A verificação expirou. Conclua-a novamente.')
                   }}
                   onError={(message) => {
                     setRegisterTurnstileToken('')
-                    setRegisterError(message)
+                    setRegisterCaptchaError(message)
                   }}
                 />
 
                 {registerError && (
                   <div className="alert error" role="alert">
                     {registerError}
+                  </div>
+                )}
+
+                {registerCaptchaError && (
+                  <div className="alert error" role="alert">
+                    {registerCaptchaError}
                   </div>
                 )}
 
