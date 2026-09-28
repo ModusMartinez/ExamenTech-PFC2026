@@ -20,10 +20,9 @@ O projeto reúne criação, aplicação e correção de avaliações, com contro
 
 ## Branches
 
-- `main`: versão estável
 - `desenv`: desenvolvimento integrado
 - `feature/*`: funcionalidades em desenvolvimento
-- `entrega1409`: versão preparada para a primeira entrega
+- `entrega1409`: branch principal da entrega do grupo
 
 ## Configuração
 
@@ -43,7 +42,11 @@ Variáveis incorporadas no front-end:
 VITE_SUPABASE_URL=
 VITE_SUPABASE_PUBLISHABLE_KEY=
 VITE_TURNSTILE_SITE_KEY=
+VITE_INVITES_ENABLED=false
 ```
+
+Mantenha `VITE_INVITES_ENABLED=false` até as etapas de convites estarem prontas
+no mesmo projeto Supabase usado pelo site.
 
 ### Back-end
 
@@ -86,11 +89,23 @@ npm run dev:api
 
 ## Integração com Turnstile
 
-Antes de verificar o e-mail e a senha, o sistema exige a validação do Cloudflare Turnstile.
+No login e no cadastro, o token do Turnstile é enviado ao Supabase Auth por meio de `captchaToken`. Para essa proteção funcionar de verdade, habilite Cloudflare Turnstile nas configurações de CAPTCHA do Supabase Auth e informe a chave secreta no painel do Supabase. Cada token pode ser usado apenas uma vez.
 
-O token é enviado para `/api/validar-turnstile`, validado no servidor e descartado. O resultado da operação é registrado em `eventos_seguranca` e o protocolo aparece no painel após o acesso.
+A rota `/api/validar-turnstile` continua disponível como integração separada com a API da Cloudflare. Ela valida o token no servidor e grava eventos técnicos em `eventos_seguranca`, mas não participa do login pelo Supabase Auth nem registra se o usuário entrou com sucesso. Não envie o mesmo token para as duas validações.
 
-No desenvolvimento local, o projeto usa as chaves oficiais de teste quando nenhuma chave do Turnstile foi configurada. No ambiente de produção, as chaves reais são obrigatórias.
+Cadastro e acesso após MFA têm auditoria própria na mesma tabela, com eventos `CADASTRO_REALIZADO`, `LOGIN_SUCESSO` e `LOGIN_NEGADO`. A ativação e os testes estão no [roteiro de auditoria](docs/auditoria-cadastro-login.md).
+
+No desenvolvimento local, a rota separada usa as chaves oficiais de teste quando nenhuma chave foi configurada. Em preview e produção, exige chave real. O CAPTCHA do Supabase Auth precisa ser configurado no próprio projeto Supabase.
+
+## Preparação do acesso real
+
+- Configure `.env.local` com a URL e a chave pública do projeto Supabase, usando `.env.example` como modelo. Nunca coloque a chave secreta no front-end.
+- Confirme que os arquivos `database/001_perfis.sql` e `database/002_eventos_seguranca.sql` foram aplicados ao projeto Supabase. Os arquivos no repositório não aplicam as regras automaticamente.
+- Aplique também `database/003_cadastro_publico_aluno.sql` depois de `001`, inclusive em projetos onde `001` já foi executado. Essa correção impede elevação de perfil pelo cadastro público.
+- Para o cadastro por convite, siga [o roteiro específico](docs/convites-organizacoes.md): `004` prepara tabelas e funções; `005` passa a exigir convite em toda criação de conta. A tabela `public.organizacoes` precisa existir antes de `004`. Ative `VITE_INVITES_ENABLED=true` no site somente quando o banco correspondente estiver pronto.
+- Configure confirmação de e-mail e proteção CAPTCHA no Supabase Auth. O login exige um aplicativo autenticador TOTP: o usuário configura o QR code na primeira entrada e informa o código nas próximas entradas.
+- O acesso ao painel só é liberado depois do TOTP e da leitura de `perfis` com situação `ATIVO`. Com o [cadastro sem aprovação](docs/cadastro-sem-aprovacao.md) aplicado, novos alunos com convite entram como `ALUNO/ATIVO`, sem aprovação manual. Uma conta administradora inicial deve ser preparada pela equipe no Supabase, nunca pelo cadastro público.
+- Publique a aplicação usando HTTPS. O Supabase Auth gerencia o hash das senhas; não armazene senhas no código, no navegador ou na tabela `perfis`.
 
 ## Verificações
 
@@ -100,19 +115,41 @@ npm run test
 npm run build
 ```
 
+`npm test` também verifica o aceite dos termos, as regras do banco e a tela de
+cadastro: troca de janela, mensagens de erro e retorno ao login após sucesso. Para rodar só os testes de tela, use
+`npm run test:ui`. Supabase e CAPTCHA são simulados; nenhuma conta é criada.
+
 ## Situação atual
 
+Cadastro, confirmação de e-mail, MFA, convites de professor/aluno e registros de cadastro/login foram validados pela equipe no Supabase de testes. A nova revisão dos documentos precisa da atualização de versões no banco descrita no roteiro de termos. Cada ambiente precisa ter suas configurações e testes conferidos.
+
 - Tela de acesso responsiva
-- Validação com Cloudflare Turnstile
-- Verificação do token no back-end
-- Auditoria dos resultados no Supabase
-- Estrutura de perfis e políticas RLS
-- Login por e-mail e senha ainda simulado
-- Supabase Auth e MFA serão integrados nas próximas etapas
+- Modal de Termos de Uso antes do cadastro, com aceite obrigatório
+- Páginas públicas de Termos e Política de Privacidade, com links pequenos no rodapé de todas as telas
+- Cadastro e login por e-mail e senha usando Supabase Auth
+- Configuração e confirmação de TOTP antes de liberar o painel
+- Cadastro por convite sem aprovação manual; leitura do perfil real e bloqueio de contas inativas
+- Administrador convida professores ou alunos; professor convida somente alunos da própria organização
+- Cadastro por convite individual, vinculado a uma organização, disponível somente com `VITE_INVITES_ENABLED=true` e as migrações correspondentes
+- Token Turnstile enviado ao Supabase Auth; requer configuração do CAPTCHA no painel Supabase
+- Rota separada de validação Turnstile com testes e auditoria técnica
+- Dashboards por perfil em `src/components/Dashboard` ainda com dados de exemplo e sem ligação com o painel atual
+- Auditoria de cadastro e acesso aprovado/negado após MFA, com registro no banco e sem duplicação por sessão
+- Tela de auditoria para administrador: últimos 50 eventos, filtro por tipo e atualização
+- Auditoria das demais ações dos usuários ainda pendente
+
+Tentativas recusadas antes do MFA não são copiadas para nossa tabela. O Supabase Auth também oferece logs próprios; confirme sua disponibilidade/configuração no projeto. Auditoria de ações acadêmicas ainda não foi implementada.
+
+Roteiros: [professores e auditoria](docs/professores-auditoria.md), [termos e privacidade](docs/termos-privacidade.md), [preparação e testes do Supabase](docs/preparacao-supabase.md), [convites e organizações](docs/convites-organizacoes.md) e [integração externa com Turnstile](docs/integracao-turnstile.md).
+
+Termos e Política específicos para a demonstração do PFC: integrantes responsáveis,
+contato `modusmartinezex@gmail.com`, serviços utilizados e conservação por até três
+meses a partir da coleta. A exclusão ainda é manual. Os textos não autorizam uso
+em escolas sem nova revisão.
 
 ## Cuidados
 
 - Chaves privadas ficam somente no back-end
 - Tokens do Turnstile não são armazenados
-- O acesso é bloqueado se a validação ou a auditoria falhar
+- O acesso depende de sessão Supabase, TOTP e perfil ativo
 - Arquivos com senhas e chaves não devem ser enviados ao GitHub
