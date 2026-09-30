@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_ExamenTech_2809" targetNamespace="https://examentech.example/bpmn/entrega2809">
+  <bpmn:collaboration id="Collaboration_Cad">
+    <bpmn:participant id="Participant_Cad" name="ExamenTech · cadastro por convite" processRef="Process_Cad" />
+  </bpmn:collaboration>
+  <bpmn:process id="Process_Cad" name="ExamenTech · cadastro por convite" isExecutable="false">
+    <bpmn:laneSet id="LaneSet_Cad">
+      <bpmn:lane id="Lane_Emissor" name="Emissor">
+        <bpmn:flowNodeRef>Start_Convite</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Organizacao</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_EmitirConvite</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_EntregarCodigo</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Candidato" name="Candidato">
+        <bpmn:flowNodeRef>Task_ReceberConvite</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_LerTermos</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Aceite</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_SemAceite</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Formulario</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_ConfirmarEmail</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_CadastroPronto</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Sistema" name="Sistema / Supabase">
+        <bpmn:flowNodeRef>Task_PrepararCadastro</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Convite</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_ConviteInvalido</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_CriarConta</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Cadastro</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_FalhaCadastro</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Convite" name="Início">
+      <bpmn:outgoing>Flow_Cad_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Organizacao" name="Definir organização autorizada">
+      <bpmn:incoming>Flow_Cad_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_EmitirConvite" name="Emitir convite permitido pelo perfil">
+      <bpmn:incoming>Flow_Cad_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_3</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_EntregarCodigo" name="Entregar código manualmente">
+      <bpmn:incoming>Flow_Cad_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_4</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_ReceberConvite" name="Receber código da organização e convite">
+      <bpmn:incoming>Flow_Cad_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_5</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_LerTermos" name="Ler Termos e Política de Privacidade">
+      <bpmn:incoming>Flow_Cad_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_6</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_Aceite" name="Aceitou?">
+      <bpmn:incoming>Flow_Cad_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_7</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Cad_8</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_SemAceite" name="Cadastro cancelado">
+      <bpmn:incoming>Flow_Cad_7</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="Task_Formulario" name="Preencher dados, códigos e Turnstile">
+      <bpmn:incoming>Flow_Cad_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_9</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_PrepararCadastro" name="Validar convite, organização e gerar ticket">
+      <bpmn:incoming>Flow_Cad_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_10</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Convite" name="Válido?">
+      <bpmn:incoming>Flow_Cad_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_11</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Cad_12</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_ConviteInvalido" name="Cadastro recusado">
+      <bpmn:incoming>Flow_Cad_11</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_CriarConta" name="Criar conta, perfil ativo, aceite e log">
+      <bpmn:incoming>Flow_Cad_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Cadastro" name="Criado?">
+      <bpmn:incoming>Flow_Cad_13</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_14</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Cad_15</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_FalhaCadastro" name="Falha no cadastro">
+      <bpmn:incoming>Flow_Cad_14</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="Task_ConfirmarEmail" name="Confirmar e-mail, se exigido">
+      <bpmn:incoming>Flow_Cad_15</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cad_16</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="End_CadastroPronto" name="Pronto para entrar">
+      <bpmn:incoming>Flow_Cad_16</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Cad_1" sourceRef="Start_Convite" targetRef="Task_Organizacao" />
+    <bpmn:sequenceFlow id="Flow_Cad_2" sourceRef="Task_Organizacao" targetRef="Task_EmitirConvite" />
+    <bpmn:sequenceFlow id="Flow_Cad_3" sourceRef="Task_EmitirConvite" targetRef="Task_EntregarCodigo" />
+    <bpmn:sequenceFlow id="Flow_Cad_4" sourceRef="Task_EntregarCodigo" targetRef="Task_ReceberConvite" />
+    <bpmn:sequenceFlow id="Flow_Cad_5" sourceRef="Task_ReceberConvite" targetRef="Task_LerTermos" />
+    <bpmn:sequenceFlow id="Flow_Cad_6" sourceRef="Task_LerTermos" targetRef="Gateway_Aceite" />
+    <bpmn:sequenceFlow id="Flow_Cad_7" sourceRef="Gateway_Aceite" targetRef="End_SemAceite" name="não" />
+    <bpmn:sequenceFlow id="Flow_Cad_8" sourceRef="Gateway_Aceite" targetRef="Task_Formulario" name="sim" />
+    <bpmn:sequenceFlow id="Flow_Cad_9" sourceRef="Task_Formulario" targetRef="Task_PrepararCadastro" />
+    <bpmn:sequenceFlow id="Flow_Cad_10" sourceRef="Task_PrepararCadastro" targetRef="Gateway_Convite" />
+    <bpmn:sequenceFlow id="Flow_Cad_11" sourceRef="Gateway_Convite" targetRef="End_ConviteInvalido" name="não" />
+    <bpmn:sequenceFlow id="Flow_Cad_12" sourceRef="Gateway_Convite" targetRef="Task_CriarConta" name="sim" />
+    <bpmn:sequenceFlow id="Flow_Cad_13" sourceRef="Task_CriarConta" targetRef="Gateway_Cadastro" />
+    <bpmn:sequenceFlow id="Flow_Cad_14" sourceRef="Gateway_Cadastro" targetRef="End_FalhaCadastro" name="não" />
+    <bpmn:sequenceFlow id="Flow_Cad_15" sourceRef="Gateway_Cadastro" targetRef="Task_ConfirmarEmail" name="sim" />
+    <bpmn:sequenceFlow id="Flow_Cad_16" sourceRef="Task_ConfirmarEmail" targetRef="End_CadastroPronto" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_Cad">
+    <bpmndi:BPMNPlane id="Plane_Cad" bpmnElement="Collaboration_Cad">
+      <bpmndi:BPMNShape id="Shape_Participant_Cad" bpmnElement="Participant_Cad" isHorizontal="true"><dc:Bounds x="0" y="0" width="2300" height="520" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Emissor" bpmnElement="Lane_Emissor" isHorizontal="true"><dc:Bounds x="30" y="0" width="2270" height="135" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Candidato" bpmnElement="Lane_Candidato" isHorizontal="true"><dc:Bounds x="30" y="135" width="2270" height="165" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Sistema" bpmnElement="Lane_Sistema" isHorizontal="true"><dc:Bounds x="30" y="300" width="2270" height="220" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Start_Convite" bpmnElement="Start_Convite"><dc:Bounds x="78" y="50" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_Organizacao" bpmnElement="Task_Organizacao"><dc:Bounds x="150" y="28" width="145" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_EmitirConvite" bpmnElement="Task_EmitirConvite"><dc:Bounds x="340" y="28" width="160" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_EntregarCodigo" bpmnElement="Task_EntregarCodigo"><dc:Bounds x="545" y="28" width="155" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_ReceberConvite" bpmnElement="Task_ReceberConvite"><dc:Bounds x="745" y="175" width="150" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_LerTermos" bpmnElement="Task_LerTermos"><dc:Bounds x="940" y="175" width="160" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Gateway_Aceite" bpmnElement="Gateway_Aceite"><dc:Bounds x="1140" y="190" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_End_SemAceite" bpmnElement="End_SemAceite"><dc:Bounds x="1150" y="263" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_Formulario" bpmnElement="Task_Formulario"><dc:Bounds x="1230" y="175" width="170" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_PrepararCadastro" bpmnElement="Task_PrepararCadastro"><dc:Bounds x="1435" y="352" width="170" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Gateway_Convite" bpmnElement="Gateway_Convite"><dc:Bounds x="1645" y="367" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_End_ConviteInvalido" bpmnElement="End_ConviteInvalido"><dc:Bounds x="1652" y="463" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_CriarConta" bpmnElement="Task_CriarConta"><dc:Bounds x="1740" y="352" width="185" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Gateway_Cadastro" bpmnElement="Gateway_Cadastro"><dc:Bounds x="1965" y="367" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_End_FalhaCadastro" bpmnElement="End_FalhaCadastro"><dc:Bounds x="1972" y="463" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_ConfirmarEmail" bpmnElement="Task_ConfirmarEmail"><dc:Bounds x="2050" y="175" width="150" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_End_CadastroPronto" bpmnElement="End_CadastroPronto"><dc:Bounds x="2240" y="197" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_1" bpmnElement="Flow_Cad_1">
+        <di:waypoint x="114" y="68" />
+        <di:waypoint x="150" y="68" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_2" bpmnElement="Flow_Cad_2">
+        <di:waypoint x="295" y="68" />
+        <di:waypoint x="340" y="68" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_3" bpmnElement="Flow_Cad_3">
+        <di:waypoint x="500" y="68" />
+        <di:waypoint x="545" y="68" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_4" bpmnElement="Flow_Cad_4">
+        <di:waypoint x="700" y="68" />
+        <di:waypoint x="723" y="68" />
+        <di:waypoint x="723" y="215" />
+        <di:waypoint x="745" y="215" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_5" bpmnElement="Flow_Cad_5">
+        <di:waypoint x="895" y="215" />
+        <di:waypoint x="940" y="215" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_6" bpmnElement="Flow_Cad_6">
+        <di:waypoint x="1100" y="215" />
+        <di:waypoint x="1140" y="215" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_7" bpmnElement="Flow_Cad_7">
+        <di:waypoint x="1165" y="240" />
+        <di:waypoint x="1168" y="263" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_8" bpmnElement="Flow_Cad_8">
+        <di:waypoint x="1190" y="215" />
+        <di:waypoint x="1230" y="215" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_9" bpmnElement="Flow_Cad_9">
+        <di:waypoint x="1400" y="215" />
+        <di:waypoint x="1418" y="215" />
+        <di:waypoint x="1418" y="392" />
+        <di:waypoint x="1435" y="392" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_10" bpmnElement="Flow_Cad_10">
+        <di:waypoint x="1605" y="392" />
+        <di:waypoint x="1645" y="392" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_11" bpmnElement="Flow_Cad_11">
+        <di:waypoint x="1670" y="417" />
+        <di:waypoint x="1670" y="463" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_12" bpmnElement="Flow_Cad_12">
+        <di:waypoint x="1695" y="392" />
+        <di:waypoint x="1740" y="392" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_13" bpmnElement="Flow_Cad_13">
+        <di:waypoint x="1925" y="392" />
+        <di:waypoint x="1965" y="392" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_14" bpmnElement="Flow_Cad_14">
+        <di:waypoint x="1990" y="417" />
+        <di:waypoint x="1990" y="463" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_15" bpmnElement="Flow_Cad_15">
+        <di:waypoint x="2015" y="392" />
+        <di:waypoint x="2033" y="392" />
+        <di:waypoint x="2033" y="215" />
+        <di:waypoint x="2050" y="215" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Cad_16" bpmnElement="Flow_Cad_16">
+        <di:waypoint x="2200" y="215" />
+        <di:waypoint x="2240" y="215" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
