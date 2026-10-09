@@ -1,0 +1,30 @@
+:root {
+  font-family: Arial, Helvetica, sans-serif;
+
+  --navy: #102a43;
+  --blue: #1d5d95;
+  --blue-dark: #164a78;
+
+  --ink: #1f2d3d;
+  --muted: #66788a;
+  --line: #dce5ee;
+  --soft: #f4f8fb;
+
+  color: var(--ink);
+  background: var(--soft);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
