@@ -111,11 +111,16 @@ function verifyCaptcha() {
 }
 
 async function runEvent(callback: () => void) {
-  await act(async () => {
-    callback()
-    // Aguarda as verificações que o App agenda fora do callback de Auth.
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  })
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    await act(async () => {
+      callback()
+      // Executa a verificação agendada pelo Auth sem esperar tempo real.
+      await vi.runOnlyPendingTimersAsync()
+    })
+  } finally {
+    vi.useRealTimers()
+  }
 }
 
 test('antes do cadastro mostra termos com aceite desmarcado e botão desabilitado', async () => {
