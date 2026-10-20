@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 import { createTurmasHandler } from '../api/turmas.ts'
+import { createMatriculasHandler } from '../api/matriculas.ts'
 import { validateTurmaName } from '../src/services/turmaValidation.ts'
 
 test('nome da turma aceita limites e rejeita valores inválidos', () => {
@@ -82,6 +83,12 @@ test('turmas: API, permissões e auditoria no PostgreSQL local', async (t) => {
         return Response.json({ id, email: `${id}@example.test`, app_metadata: {}, user_metadata: {} })
       }
       try {
+        if (path === '/rest/v1/rpc/solicitar_matricula') {
+          const body = await request.json() as { p_codigo: string }
+          assert.deepEqual(Object.keys(body), ['p_codigo'])
+          const result = await queryAs(id, 'SELECT public.solicitar_matricula($1) AS matricula', [body.p_codigo], aal)
+          return Response.json((result.rows[0] as { matricula: unknown }).matricula)
+        }
         if (path === '/rest/v1/perfis') {
           const result = await queryAs(id, 'SELECT perfil,situacao FROM public.perfis WHERE id=$1', [id], aal)
           return Response.json(result.rows)
@@ -102,11 +109,10 @@ test('turmas: API, permissões e auditoria no PostgreSQL local', async (t) => {
         return Response.json({ code, message: 'Falha simulada do banco' }, { status: 400 })
       }
     })
+    const env = { SUPABASE_URL: 'https://exemplo.supabase.co', VITE_SUPABASE_PUBLISHABLE_KEY: 'public-test-key' }
     return {
-      handler: createTurmasHandler({
-        SUPABASE_URL: 'https://exemplo.supabase.co',
-        VITE_SUPABASE_PUBLISHABLE_KEY: 'public-test-key',
-      }, transport),
+      handler: createTurmasHandler(env, transport),
+      matriculas: createMatriculasHandler(env, transport),
       transport,
     }
   }
@@ -363,6 +369,150 @@ test('turmas: API, permissões e auditoria no PostgreSQL local', async (t) => {
       assert.deepEqual((await db.query('SELECT * FROM public.turma_alunos ORDER BY id')).rows, antes)
       assert.equal((await queryAs(aluno, consultar)).rows.length, 2)
       assert.equal((await queryAs(colleague, consultar)).rows.length, 1)
+      await assert.rejects(queryAs(admin, 'DELETE FROM public.turma_alunos'), /permission denied/)
+    })
+  })
+
+  await t.test('013: solicitação por código via API e banco', async (m) => {
+    const anteriores = (await db.query('SELECT * FROM public.turma_alunos ORDER BY id')).rows
+    await migrate('013_solicitar_matricula.sql')
+    assert.deepEqual((await db.query('SELECT * FROM public.turma_alunos ORDER BY id')).rows, anteriores)
+    const turma = (await queryAs(professor, "INSERT INTO public.turmas(nome) VALUES ('Turma de ingresso') RETURNING *"))
+      .rows[0] as { id: string; nome: string; codigo_ingresso: string }
+    function matriculaRequest(body: unknown = { codigo: turma.codigo_ingresso }) {
+      return new Request('http://localhost/api/matriculas', {
+        method: 'POST', headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    }
+    const solicitar = (id = aluno, aal = 'aal2') => apiFor(id, aal).matriculas.fetch(matriculaRequest())
+    const rpc = 'SELECT public.solicitar_matricula($1)'
+
+    await m.test('aluno solicita com código normalizado; banco define identidade, pendência e auditoria', async () => {
+      const response = await apiFor(aluno).matriculas.fetch(matriculaRequest({ codigo: `  ${turma.codigo_ingresso.toLowerCase()}  ` }))
+      assert.equal(response.status, 201)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+      const { matricula } = await response.json()
+      assert.equal(matricula.turma_id, turma.id)
+      assert.equal(matricula.turma_nome, turma.nome)
+      assert.equal(matricula.situacao, 'PENDENTE')
+      assert.ok(matricula.solicitado_em)
+      const registro = (await db.query('SELECT aluno_id FROM public.turma_alunos WHERE id=$1', [matricula.id])).rows
+      assert.deepEqual(registro, [{ aluno_id: aluno }])
+      const evento = (await db.query<{ usuario_id: string; recurso_id: string; sucesso: boolean }>(
+        "SELECT * FROM public.eventos_seguranca WHERE evento='MATRICULA_SOLICITADA'",
+      )).rows[0]
+      assert.equal(evento.usuario_id, aluno)
+      assert.equal(evento.recurso_id, matricula.id)
+      assert.equal(evento.sucesso, true)
+      assert.ok(!JSON.stringify(evento).includes(turma.codigo_ingresso))
+      assert.equal((await queryAs(aluno, 'SELECT * FROM public.turmas')).rows.length, 0)
+    })
+
+    await m.test('repetição não duplica, aprova nem reativa vínculo; preserva ID, data e auditoria', async () => {
+      const antes = (await db.query('SELECT id,solicitado_em FROM public.turma_alunos WHERE turma_id=$1', [turma.id])).rows
+      for (const situacao of ['PENDENTE', 'ATIVA', 'INATIVA']) {
+        await db.query('UPDATE public.turma_alunos SET situacao=$1 WHERE turma_id=$2', [situacao, turma.id])
+        assert.equal((await solicitar()).status, 409)
+        assert.deepEqual((await db.query('SELECT situacao FROM public.turma_alunos WHERE turma_id=$1', [turma.id])).rows, [{ situacao }])
+      }
+      assert.deepEqual((await db.query('SELECT id,solicitado_em FROM public.turma_alunos WHERE turma_id=$1', [turma.id])).rows, antes)
+      assert.equal((await db.query("SELECT id FROM public.eventos_seguranca WHERE evento='MATRICULA_SOLICITADA'")).rows.length, 1)
+    })
+
+    await m.test('recusa outros perfis, falta de MFA, conta inativa e sessão de outra pessoa ou encerrada', async () => {
+      for (const id of [professor, admin]) assert.equal((await solicitar(id)).status, 403)
+      assert.equal((await solicitar(aluno, 'aal1')).status, 403)
+      await assert.rejects(queryAs(aluno, 'SELECT examentech_private.solicitar_matricula($1)',
+        [turma.codigo_ingresso], 'aal1'), { code: '42501' })
+      await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [aluno])
+      assert.equal((await solicitar()).status, 403)
+      await db.query("UPDATE public.perfis SET situacao='ATIVO' WHERE id=$1", [aluno])
+      const sessionId = sessions.get(aluno)!
+      for (const invalidSession of [randomUUID(), sessions.get(professor)!]) {
+        sessions.set(aluno, invalidSession)
+        assert.equal((await solicitar()).status, 403)
+      }
+      sessions.set(aluno, sessionId)
+      await assert.rejects(db.transaction(async (tx) => {
+        await tx.exec('SET LOCAL ROLE anon')
+        return tx.query(rpc, [turma.codigo_ingresso])
+      }), /permission denied/)
+    })
+
+    await m.test('código inválido, turma inativa e outra organização não revelam dados da turma', async () => {
+      const mensagem = { message: 'Código de turma inválido ou indisponível.' }
+      for (const codigo of [null, '', 'ABC', 'Z'.repeat(12), 'A'.repeat(13)]) {
+        await assert.rejects(queryAs(aluno, rpc, [codigo]), { code: '22023' })
+      }
+      const inexistente = randomUUID().replaceAll('-', '').slice(0, 12)
+      const response = await apiFor(aluno).matriculas.fetch(matriculaRequest({ codigo: inexistente }))
+      assert.equal(response.status, 400)
+      assert.deepEqual(await response.json(), mensagem)
+      await db.query("UPDATE public.turmas SET situacao='INATIVA' WHERE id=$1", [turma.id])
+      assert.deepEqual(await (await solicitar()).json(), mensagem)
+      await db.query("UPDATE public.turmas SET situacao='ATIVA' WHERE id=$1", [turma.id])
+      await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [otherOrg, aluno])
+      assert.deepEqual(await (await solicitar()).json(), mensagem)
+      await db.query('UPDATE public.perfis SET organizacao_id=NULL WHERE id=$1', [aluno])
+      assert.equal((await solicitar()).status, 403)
+      await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [org, aluno])
+      await db.query("UPDATE public.organizacoes SET situacao='INATIVO' WHERE id=$1", [org])
+      assert.equal((await solicitar()).status, 403)
+      await db.query("UPDATE public.organizacoes SET situacao='ATIVO' WHERE id=$1", [org])
+    })
+
+    await m.test('API recusa corpo adulterado, JSON inválido, método e conteúdo incorretos antes de chamar o Auth', async () => {
+      const { matriculas, transport } = apiFor(aluno)
+      for (const body of [null, [], {}, { codigo: 123 }, { codigo: 'ABC' },
+        { codigo: turma.codigo_ingresso, aluno_id: professor }, { codigo: turma.codigo_ingresso, situacao: 'ATIVA' }]) {
+        assert.equal((await matriculas.fetch(matriculaRequest(body))).status, 400)
+      }
+      const headers = { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' }
+      assert.equal((await matriculas.fetch(new Request('http://localhost/api/matriculas', { method: 'POST', headers, body: '{' }))).status, 400)
+      assert.equal((await matriculas.fetch(new Request('http://localhost/api/matriculas', { method: 'POST' }))).status, 401)
+      assert.equal((await matriculas.fetch(new Request('http://localhost/api/matriculas', { method: 'POST', headers: { Authorization: 'Bearer test-session' } }))).status, 415)
+      const get = await matriculas.fetch(new Request('http://localhost/api/matriculas'))
+      assert.equal(get.status, 405)
+      assert.equal(get.headers.get('allow'), 'POST')
+      assert.equal(transport.mock.callCount(), 0)
+    })
+
+    await m.test('token recusado não chama RPC; falha de serviço ou resposta inválida não confirma matrícula', async () => {
+      const env = { SUPABASE_URL: 'https://exemplo.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'public-test-key' }
+      for (const status of [401, 500]) {
+        const transport = t.mock.fn(async () => Response.json({ message: 'Falha de teste' }, { status }))
+        const result = await createMatriculasHandler(env, transport).fetch(matriculaRequest())
+        assert.equal(result.status, status === 401 ? 401 : 503)
+        assert.equal(transport.mock.callCount(), 1)
+      }
+      assert.equal((await createMatriculasHandler({}).fetch(matriculaRequest())).status, 503)
+      const invalid = createMatriculasHandler(env, async (input) => new URL(String(input)).pathname === '/auth/v1/user'
+        ? Response.json({ id: aluno }) : Response.json({}))
+      assert.equal((await invalid.fetch(matriculaRequest())).status, 503)
+    })
+
+    await m.test('falha na auditoria desfaz solicitação; outra turma pode ser solicitada na mesma sessão', async () => {
+      const nova = (await queryAs(professor, "INSERT INTO public.turmas(nome) VALUES ('Outra solicitação') RETURNING *"))
+        .rows[0] as { id: string; codigo_ingresso: string }
+      await db.exec("ALTER TABLE public.eventos_seguranca ADD CONSTRAINT teste_matricula CHECK (acao <> 'solicitar_matricula') NOT VALID")
+      const body = { codigo: nova.codigo_ingresso }
+      assert.equal((await apiFor(aluno).matriculas.fetch(matriculaRequest(body))).status, 503)
+      assert.equal((await db.query('SELECT id FROM public.turma_alunos WHERE turma_id=$1', [nova.id])).rows.length, 0)
+      await db.exec('ALTER TABLE public.eventos_seguranca DROP CONSTRAINT teste_matricula')
+      assert.equal((await apiFor(aluno).matriculas.fetch(matriculaRequest(body))).status, 201)
+      assert.equal((await db.query("SELECT id FROM public.eventos_seguranca WHERE evento='MATRICULA_SOLICITADA'")).rows.length, 2)
+    })
+
+    await m.test('013 preserva bloqueio de escrita direta e pode ser reaplicada sem alterar registros', async () => {
+      const antes = (await db.query('SELECT * FROM public.turma_alunos ORDER BY id')).rows
+      const eventos = (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+      await migrate('013_solicitar_matricula.sql')
+      assert.deepEqual((await db.query('SELECT * FROM public.turma_alunos ORDER BY id')).rows, antes)
+      assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, eventos)
+      await assert.rejects(queryAs(aluno, 'INSERT INTO public.turma_alunos(turma_id,aluno_id) VALUES ($1,$2)',
+        [turma.id, aluno]), /permission denied/)
+      await assert.rejects(queryAs(aluno, "UPDATE public.turma_alunos SET situacao='ATIVA'"), /permission denied/)
       await assert.rejects(queryAs(admin, 'DELETE FROM public.turma_alunos'), /permission denied/)
     })
   })
