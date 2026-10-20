@@ -256,4 +256,114 @@ test('turmas: API, permissões e auditoria no PostgreSQL local', async (t) => {
     assert.deepEqual((await db.query('SELECT * FROM public.turmas ORDER BY id')).rows, before.rows)
     assert.equal((await db.query('SELECT id FROM public.eventos_seguranca')).rows.length, eventCount)
   })
+
+  await t.test('012: base das matrículas, sem liberar escrita para a aplicação', async (m) => {
+    const turmasAntes = (await db.query('SELECT * FROM public.turmas ORDER BY id')).rows
+    const eventosAntes = (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+    await migrate('012_matriculas.sql')
+    assert.deepEqual((await db.query('SELECT * FROM public.turmas ORDER BY id')).rows, turmasAntes)
+    assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, eventosAntes)
+
+    const outroAluno = randomUUID()
+    await db.query('INSERT INTO auth.users(id,email) VALUES ($1,$2)', [outroAluno, 'outro-aluno@example.test'])
+    await db.query("UPDATE public.perfis SET situacao='ATIVO',organizacao_id=$1 WHERE id=$2", [org, outroAluno])
+    sessions.set(outroAluno, randomUUID())
+    await db.query('INSERT INTO auth.sessions(id,user_id) VALUES ($1,$2)', [sessions.get(outroAluno), outroAluno])
+    const turmaColega = (await queryAs(colleague, "INSERT INTO public.turmas(nome) VALUES ('Turma do colega') RETURNING id"))
+      .rows[0] as { id: string }
+    // Massa inserida pelo dono do banco de testes, não por um usuário da aplicação.
+    await db.query(`INSERT INTO public.turma_alunos(turma_id,aluno_id)
+      VALUES ($1,$2),($3,$2),($1,$4)`, [turmaId, aluno, turmaColega.id, outroAluno])
+    const consultar = 'SELECT turma_id,aluno_id,situacao FROM public.turma_alunos ORDER BY turma_id,aluno_id'
+    const matriculas = (await db.query<{ turma_id: string; aluno_id: string; situacao: string }>(consultar)).rows
+
+    await m.test('começa pendente, permite várias turmas e impede vínculo duplicado ou inválido', async () => {
+      assert.ok(matriculas.every((matricula) => matricula.situacao === 'PENDENTE'))
+      assert.equal(matriculas.filter((matricula) => matricula.aluno_id === aluno).length, 2)
+      await assert.rejects(db.query('INSERT INTO public.turma_alunos(turma_id,aluno_id) VALUES ($1,$2)',
+        [turmaId, aluno]), { code: '23505' })
+      await assert.rejects(db.exec("UPDATE public.turma_alunos SET situacao='APROVADA'"), { code: '23514' })
+      for (const vinculo of [[randomUUID(), aluno], [turmaId, randomUUID()]]) {
+        await assert.rejects(db.query('INSERT INTO public.turma_alunos(turma_id,aluno_id) VALUES ($1,$2)',
+          vinculo), { code: '23503' })
+      }
+    })
+
+    await m.test('aluno lê só seus vínculos, professor só suas turmas e ADMIN lê todos', async () => {
+      for (const id of [aluno, outroAluno]) {
+        assert.deepEqual((await queryAs(id, consultar)).rows, matriculas.filter((matricula) => matricula.aluno_id === id))
+      }
+      assert.deepEqual((await queryAs(professor, consultar)).rows, matriculas.filter((matricula) => matricula.turma_id === turmaId))
+      assert.deepEqual((await queryAs(colleague, consultar)).rows, matriculas.filter((matricula) => matricula.turma_id === turmaColega.id))
+      assert.deepEqual((await queryAs(admin, consultar)).rows, matriculas)
+      assert.equal((await queryAs(aluno, 'SELECT * FROM public.turmas')).rows.length, 0)
+    })
+
+    await m.test('consulta exige MFA, perfil ativo e sessão válida para todos os perfis', async () => {
+      for (const id of [aluno, professor, admin]) {
+        assert.deepEqual((await queryAs(id, consultar, [], 'aal1')).rows, [])
+        await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [id])
+        assert.deepEqual((await queryAs(id, consultar)).rows, [])
+        await db.query("UPDATE public.perfis SET situacao='ATIVO' WHERE id=$1", [id])
+        const sessionId = sessions.get(id)!
+        for (const invalidSession of [randomUUID(), sessions.get(outroAluno)!]) {
+          sessions.set(id, invalidSession)
+          assert.deepEqual((await queryAs(id, consultar)).rows, [])
+        }
+        sessions.set(id, sessionId)
+      }
+    })
+
+    await m.test('aluno e professor não consultam vínculo fora de sua organização ou com organização inativa', async () => {
+      for (const id of [aluno, professor]) {
+        await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [otherOrg, id])
+        assert.deepEqual((await queryAs(id, consultar)).rows, [])
+        await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [org, id])
+      }
+      await db.query("UPDATE public.organizacoes SET situacao='INATIVO' WHERE id=$1", [org])
+      for (const id of [aluno, professor]) assert.deepEqual((await queryAs(id, consultar)).rows, [])
+      assert.deepEqual((await queryAs(admin, consultar)).rows, matriculas)
+      await db.query("UPDATE public.organizacoes SET situacao='ATIVO' WHERE id=$1", [org])
+    })
+
+    await m.test('não permite escrita direta nem autoaprovação, inclusive para ADMIN', async () => {
+      for (const id of [aluno, professor, admin]) {
+        await assert.rejects(queryAs(id, 'INSERT INTO public.turma_alunos(turma_id,aluno_id) VALUES ($1,$2)',
+          [turmaColega.id, outroAluno]), /permission denied/)
+        await assert.rejects(queryAs(id, "UPDATE public.turma_alunos SET situacao='ATIVA'"), /permission denied/)
+        await assert.rejects(queryAs(id, 'DELETE FROM public.turma_alunos'), /permission denied/)
+      }
+      for (const sql of ['SELECT * FROM public.turma_alunos',
+        `SELECT examentech_private.pode_consultar_matricula('${turmaId}','${aluno}')`]) {
+        await assert.rejects(db.transaction(async (tx) => {
+          await tx.exec('SET LOCAL ROLE anon')
+          return tx.query(sql)
+        }), /permission denied/)
+      }
+    })
+
+    await m.test('matrícula inativa mantém identidade, data e consulta do histórico; exclusão não faz cascata', async () => {
+      const antes = (await db.query('SELECT id,solicitado_em FROM public.turma_alunos ORDER BY id')).rows
+      // Mudanças administrativas abaixo exercitam o modelo; não há rota de aprovação ainda.
+      await db.exec("UPDATE public.turma_alunos SET situacao='ATIVA'")
+      await db.exec("UPDATE public.turma_alunos SET situacao='INATIVA'")
+      assert.deepEqual((await db.query('SELECT id,solicitado_em FROM public.turma_alunos ORDER BY id')).rows, antes)
+      assert.equal((await queryAs(aluno, consultar)).rows.length, 2)
+      await db.query("UPDATE public.turmas SET situacao='INATIVA' WHERE id=$1", [turmaId])
+      assert.equal((await queryAs(aluno, consultar)).rows.length, 2)
+      await assert.rejects(db.query('DELETE FROM public.turmas WHERE id=$1', [turmaId]), { code: '23001' })
+      await assert.rejects(db.query('DELETE FROM public.perfis WHERE id=$1', [aluno]), { code: '23001' })
+      await assert.rejects(db.query('INSERT INTO public.turma_alunos(turma_id,aluno_id) VALUES ($1,$2)',
+        [turmaId, aluno]), { code: '23505' })
+    })
+
+    await m.test('reaplicar 012 preserva matrículas e permissões', async () => {
+      const antes = (await db.query('SELECT * FROM public.turma_alunos ORDER BY id')).rows
+      await migrate('012_matriculas.sql')
+      assert.deepEqual((await db.query('SELECT * FROM public.turma_alunos ORDER BY id')).rows, antes)
+      assert.equal((await queryAs(aluno, consultar)).rows.length, 2)
+      assert.equal((await queryAs(colleague, consultar)).rows.length, 1)
+      await assert.rejects(queryAs(admin, 'DELETE FROM public.turma_alunos'), /permission denied/)
+    })
+  })
 })

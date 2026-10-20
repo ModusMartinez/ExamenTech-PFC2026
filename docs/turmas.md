@@ -1,6 +1,6 @@
 # Turmas
 
-Primeiro bloco de RF07–RF11: criação e consulta. Matrículas ainda não estão implementadas.
+Primeiro bloco de RF07–RF11: criação e consulta de turmas. Matrículas têm apenas a base no banco; o fluxo pela aplicação ainda não está disponível.
 
 ## Fluxo
 
@@ -36,6 +36,22 @@ Primeiro bloco de RF07–RF11: criação e consulta. Matrículas ainda não est�
 8. Conferir que aluno não recebe a opção de turmas nesta etapa.
 
 Usar somente dados demonstrativos. A etapa seguinte acrescentará solicitação e aprovação de matrícula, sem restaurar a aprovação manual da conta. Antes de ampliar a coleta, alinhar a documentação de privacidade com as novas informações e manter o prazo da demonstração; esta alteração não modifica a política de retenção.
+
+## Matrículas — base do banco (012)
+
+- `turma_alunos` vincula aluno e turma, com ID, situação e data da solicitação.
+- Situação inicial `PENDENTE`; o modelo também aceita `ATIVA` e `INATIVA`.
+- Cada par aluno/turma é único, inclusive após inativação. O aluno pode ter várias turmas.
+- Leitura com MFA e sessão válida: aluno vê seus vínculos, professor vê os de suas turmas, ADMIN vê todos. Os perfis precisam estar ativos; aluno e professor também precisam manter vínculo com a organização ativa da turma.
+- Consulta de histórico não depende da matrícula ou turma estar ativa; isso não autoriza realizar avaliações.
+- Escrita direta está bloqueada para todos os perfis, inclusive ADMIN. A solicitação por código, aprovação e inativação terão funções próprias nos próximos blocos, com auditoria.
+- As referências não apagam registros em cascata. Excluir uma conta ou turma com matrículas exige tratamento explícito do histórico; a rotina de encerramento da demonstração deverá considerar isso.
+
+Aplicar `database/012_matriculas.sql` depois de `011` no Supabase de testes. A migração não cadastra matrículas, não modifica usuários/turmas e não altera telas. Não reaplicar migrações antigas depois dela.
+
+Os testes deste bloco estão em `tests/turmas.test.ts`; os vínculos fictícios existem somente no PostgreSQL local do teste. Ainda não há teste manual de solicitação pela interface nem novos eventos de auditoria, pois nenhuma operação de matrícula foi liberada na aplicação.
+
+Referências: [RLS e funções privadas](https://supabase.com/docs/guides/database/postgres/row-level-security), [restrições e integridade referencial](https://www.postgresql.org/docs/current/ddl-constraints.html).
 
 ## Verificações
 
