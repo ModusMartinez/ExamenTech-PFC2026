@@ -59,6 +59,11 @@
   white-space: nowrap;
 }
 
+.turma-form .alert {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
 .turmas-list-heading {
   display: flex;
   align-items: center;

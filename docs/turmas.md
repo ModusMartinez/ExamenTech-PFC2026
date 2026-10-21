@@ -1,6 +1,6 @@
 # Turmas
 
-RF07–RF11 em desenvolvimento: criação/consulta de turmas e solicitação de matrícula pela API. Formulário do aluno e aprovação ainda não estão disponíveis.
+RF07–RF11 em desenvolvimento: criação/consulta de turmas e solicitação de matrícula pelo painel do aluno. Aprovação e gestão das matrículas ainda não estão disponíveis.
 
 ## Fluxo
 
@@ -35,7 +35,7 @@ RF07–RF11 em desenvolvimento: criação/consulta de turmas e solicitação de 
 7. Entrar como administrador: consultar turmas e filtrar **Turma criada** na auditoria.
 8. Conferir que aluno não recebe a opção de turmas nesta etapa.
 
-Usar somente dados demonstrativos. As próximas etapas acrescentarão o formulário de solicitação e a aprovação de matrícula, sem restaurar a aprovação manual da conta. Antes de liberar o formulário aos participantes, alinhar Termos de Uso e Política de Privacidade com turmas e matrículas, mantendo o prazo da demonstração; esta alteração não modifica os documentos nem a política de retenção.
+Usar somente dados demonstrativos. As próximas etapas acrescentarão a aprovação de matrícula, sem restaurar a aprovação manual da conta. Antes de liberar o formulário aos participantes, alinhar Termos de Uso e Política de Privacidade com turmas e matrículas, mantendo o prazo da demonstração; este bloco não modifica os documentos nem a política de retenção.
 
 ## Matrículas — base do banco (012)
 
@@ -64,11 +64,32 @@ Referências: [RLS e funções privadas](https://supabase.com/docs/guides/databa
 - Uma matrícula anterior, pendente/ativa/inativa, gera `409`, sem alterar ID, data ou situação. Não duplica nem reativa vínculos.
 - Código desconhecido, turma inativa ou outra organização recebem a mesma mensagem (`400`). Sessão ausente/inválida: `401`; perfil/MFA/vínculo não autorizado: `403`; indisponibilidade: `503`.
 - Registra `MATRICULA_SOLICITADA`, usuário e ID da matrícula em `recurso_id`. Não guarda código de ingresso no evento. Uma falha de auditoria desfaz a matrícula.
-- A tela de auditoria já mostra o evento pelo nome técnico; seu filtro específico será incluído junto da interface no próximo bloco.
+- A tela de auditoria mostra o evento como **Matrícula solicitada**, com filtro específico e ID da matrícula.
 
-Aplicar `database/013_solicitar_matricula.sql` depois de `012` no Supabase de testes; não reaplicar SQLs antigas. Executar `npm run dev:full` para disponibilizar a rota local. Ainda não há botão/formulário de solicitação: este commit valida somente banco e API com `node --test tests/turmas.test.ts`, sem acessar o Supabase remoto. Não publicar JWTs nem códigos em prints, documentação ou commits.
+Aplicar `database/013_solicitar_matricula.sql` depois de `012` no Supabase de testes; não reaplicar SQLs antigas. Executar `npm run dev:full` para disponibilizar a rota local. Os testes de banco/API rodam com `node --test tests/turmas.test.ts`, sem acessar o Supabase remoto. Não publicar JWTs nem códigos em prints, documentação ou commits.
 
 Referências: [RPC do Supabase](https://supabase.com/docs/reference/javascript/rpc), [funções e permissões](https://supabase.com/docs/guides/database/functions).
+
+## Formulário do aluno
+
+`App` → `SolicitarMatriculaPanel` → `services/matriculas` → `POST /api/matriculas`.
+
+- Opção **Solicitar matrícula** somente no painel do aluno, após login e MFA.
+- Valida o formato do código, aceita minúsculas/espaços externos e bloqueia envio repetido enquanto aguarda a resposta.
+- Usa o token da sessão no cabeçalho; envia somente o código no JSON. As permissões continuam no servidor e no banco.
+- Sucesso informa nome da turma e situação pendente. Falha mantém o código para correção ou nova tentativa.
+- A mensagem de sucesso é temporária; ainda não existe lista/histórico no painel nem aprovação. Recarregar a página não apaga a matrícula salva.
+- Reutiliza estilos das turmas, mantém os links legais no rodapé e não adiciona dependências nem SQL.
+
+Teste manual, com `011`–`013` já aplicadas e `npm run dev:full`:
+
+1. Copiar o código de uma turma fictícia ativa criada pelo professor.
+2. Entrar como aluno ativo da mesma organização, concluir MFA e abrir **Solicitar matrícula**.
+3. Enviar um código incompleto: deve mostrar erro sem chamar a API. Enviar o código válido: deve confirmar a pendência.
+4. No Supabase de testes, conferir o vínculo `PENDENTE` em `turma_alunos`. Repetir o código: deve informar matrícula existente, sem duplicar o vínculo.
+5. Como ADMIN, abrir Auditoria e filtrar **Matrícula solicitada**. Conferir usuário e referência ao vínculo.
+
+`tests/solicitar-matricula.test.tsx` testa o formulário junto do serviço do frontend, simulando sessão e HTTP. Navegação por perfil e filtro da auditoria são cobertos nos testes existentes. Referências: [formulários React](https://react.dev/reference/react-dom/components/input), [sessão no cliente Supabase](https://supabase.com/docs/reference/javascript/auth-getsession).
 
 ## Verificações
 

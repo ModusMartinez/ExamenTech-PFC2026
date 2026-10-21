@@ -390,12 +390,23 @@ test('cadastro compartilhado não permite escolher nem enviar o perfil da conta'
 })
 
 for (const profile of ['Professor', 'Aluno', 'Administrador']) {
-  test(`painel ${profile}: auditoria disponível somente ao administrador`, async () => {
+  test(`painel ${profile}: navegação respeita o perfil e mantém os links legais`, async () => {
     mocks.resolveAccess.mockResolvedValue({ kind: 'ready', user: { name: 'Conta Teste', email, profile } })
     render(<App />)
     await screen.findByRole('heading', { name: 'Olá, Conta.' })
     expect(screen.getByRole('contentinfo').querySelectorAll('a')).toHaveLength(2)
     expect(screen.getByRole('link', { name: 'Política de Privacidade (abre em nova aba)' }).getAttribute('href')).toBe('/privacidade')
+    if (profile === 'Aluno') {
+      expect(screen.queryByRole('button', { name: 'Turmas' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Solicitar matrícula' }))
+      expect(screen.getByLabelText('Código da turma')).toBeTruthy()
+      expect(screen.getByRole('link', { name: 'Termos de Uso (abre em nova aba)' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Início' }))
+      expect(screen.queryByLabelText('Código da turma')).toBeNull()
+    } else {
+      expect(screen.queryByRole('button', { name: 'Solicitar matrícula' })).toBeNull()
+      expect(screen.queryByLabelText('Código da turma')).toBeNull()
+    }
     if (profile === 'Administrador') {
       fireEvent.click(screen.getByRole('button', { name: 'Auditoria' }))
       expect(screen.getByText('Consulta de auditoria')).toBeTruthy()

@@ -68,6 +68,18 @@ test('atualizar busca novamente e mostra o estado vazio sem manter eventos antig
   expect(screen.queryByRole('table')).toBeNull()
 })
 
+test('matrícula solicitada tem filtro, nome legível e referência ao vínculo', async () => {
+  render(<AuditPanel />)
+  await screen.findByText('LOGIN_SUCESSO')
+  mocks.result.mockResolvedValue({ data: [{ ...row, evento: 'MATRICULA_SOLICITADA',
+    acao: 'solicitar_matricula', recurso_id: 'matricula-teste' }], error: null })
+  fireEvent.change(screen.getByLabelText('Tipo de evento'), { target: { value: 'MATRICULA_SOLICITADA' } })
+  await screen.findByText('MATRICULA_SOLICITADA')
+  expect(mocks.eq).toHaveBeenCalledWith('evento', 'MATRICULA_SOLICITADA')
+  expect(screen.getByRole('option', { name: 'Matrícula solicitada' })).toBeTruthy()
+  expect(screen.getByText('matricula-teste')).toBeTruthy()
+})
+
 test('carregamento impede cliques repetidos e informa o andamento', async () => {
   let finish!: (value: unknown) => void
   mocks.result.mockReturnValue(new Promise((resolve) => { finish = resolve }))

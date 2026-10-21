@@ -115,7 +115,7 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
         </ul>
       )}
       <p className="turmas-note">
-        O ingresso de alunos e a aprovação de matrículas serão liberados na próxima etapa.
+        Alunos já podem solicitar matrícula pelo código. A aprovação será liberada na próxima etapa.
         O código da turma não substitui o convite de cadastro.
       </p>
     </section>

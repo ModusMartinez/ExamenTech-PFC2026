@@ -4,6 +4,7 @@ import { MfaStep } from './components/MfaStep'
 import { InvitationPanel } from './components/InvitationPanel'
 import { AuditPanel } from './components/AuditPanel'
 import { TurmasPanel } from './components/TurmasPanel'
+import { SolicitarMatriculaPanel } from './components/SolicitarMatriculaPanel'
 import { TurnstileWidget } from './components/TurnstileWidget'
 import { LegalModal } from './components/LegalModal'
 import { LegalFooter } from './components/LegalFooter'
@@ -828,7 +829,7 @@ type DashboardProps = {
 
 function Dashboard({ user, onLogout }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
-  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas'>('inicio')
+  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula'>('inicio')
   const nameParts = user.name.split(' ')
 
   const initials = nameParts
@@ -865,14 +866,21 @@ function Dashboard({ user, onLogout }: DashboardProps) {
 
       <main className={showingAudit ? 'dashboard-content dashboard-content-audit' : 'dashboard-content'}>
         {logoutError && <div className="alert error" role="alert">{logoutError}</div>}
-        {canViewTurmas && (
+        {(canViewTurmas || user.profile === 'Aluno') && (
           <nav className="dashboard-section-nav" aria-label="Seções do painel">
             <button type="button" aria-pressed={dashboardView === 'inicio'} onClick={() => setDashboardView('inicio')}>
               Início
             </button>
-            <button type="button" aria-pressed={dashboardView === 'turmas'} onClick={() => setDashboardView('turmas')}>
-              Turmas
-            </button>
+            {canViewTurmas && (
+              <button type="button" aria-pressed={dashboardView === 'turmas'} onClick={() => setDashboardView('turmas')}>
+                Turmas
+              </button>
+            )}
+            {user.profile === 'Aluno' && (
+              <button type="button" aria-pressed={dashboardView === 'matricula'} onClick={() => setDashboardView('matricula')}>
+                Solicitar matrícula
+              </button>
+            )}
             {user.profile === 'Administrador' && (
               <button type="button" aria-pressed={dashboardView === 'auditoria'} onClick={() => setDashboardView('auditoria')}>
                 Auditoria
@@ -884,6 +892,8 @@ function Dashboard({ user, onLogout }: DashboardProps) {
         {showingAudit ? <AuditPanel /> : dashboardView === 'turmas' &&
           (user.profile === 'Administrador' || user.profile === 'Professor') ? (
           <TurmasPanel profile={user.profile} />
+        ) : dashboardView === 'matricula' && user.profile === 'Aluno' ? (
+          <SolicitarMatriculaPanel />
         ) : (
           <>
             <p className="overline">PAINEL INICIAL</p>
