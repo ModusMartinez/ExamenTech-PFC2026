@@ -23,6 +23,7 @@ const eventNames: Record<string, string> = {
   TURNSTILE_INDISPONIVEL: 'Turnstile indisponível',
   TURMA_CRIADA: 'Turma criada',
   MATRICULA_SOLICITADA: 'Matrícula solicitada',
+  MATRICULA_APROVADA: 'Matrícula aprovada',
 }
 
 function formatDate(value: string) {

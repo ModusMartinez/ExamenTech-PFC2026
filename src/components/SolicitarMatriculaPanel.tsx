@@ -64,8 +64,8 @@ export function SolicitarMatriculaPanel() {
       </form>
 
       <p className="turmas-note">
-        A solicitação fica pendente e não libera avaliações. A tela de aprovação pelo professor
-        responsável ou administrador será disponibilizada em uma próxima etapa.
+        A solicitação fica pendente até a aprovação pelo professor responsável ou administrador.
+        O acesso às avaliações ainda não está disponível.
       </p>
     </section>
   )

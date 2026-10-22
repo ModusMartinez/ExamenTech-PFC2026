@@ -68,15 +68,17 @@ test('atualizar busca novamente e mostra o estado vazio sem manter eventos antig
   expect(screen.queryByRole('table')).toBeNull()
 })
 
-test('matrícula solicitada tem filtro, nome legível e referência ao vínculo', async () => {
+test.each([
+  ['MATRICULA_SOLICITADA', 'Matrícula solicitada', 'solicitar_matricula'],
+  ['MATRICULA_APROVADA', 'Matrícula aprovada', 'aprovar_matricula'],
+])('%s tem filtro, nome legível e referência ao vínculo', async (evento, nome, acao) => {
   render(<AuditPanel />)
   await screen.findByText('LOGIN_SUCESSO')
-  mocks.result.mockResolvedValue({ data: [{ ...row, evento: 'MATRICULA_SOLICITADA',
-    acao: 'solicitar_matricula', recurso_id: 'matricula-teste' }], error: null })
-  fireEvent.change(screen.getByLabelText('Tipo de evento'), { target: { value: 'MATRICULA_SOLICITADA' } })
-  await screen.findByText('MATRICULA_SOLICITADA')
-  expect(mocks.eq).toHaveBeenCalledWith('evento', 'MATRICULA_SOLICITADA')
-  expect(screen.getByRole('option', { name: 'Matrícula solicitada' })).toBeTruthy()
+  mocks.result.mockResolvedValue({ data: [{ ...row, evento, acao, recurso_id: 'matricula-teste' }], error: null })
+  fireEvent.change(screen.getByLabelText('Tipo de evento'), { target: { value: evento } })
+  await screen.findByText(evento)
+  expect(mocks.eq).toHaveBeenCalledWith('evento', evento)
+  expect(screen.getByRole('option', { name: nome })).toBeTruthy()
   expect(screen.getByText('matricula-teste')).toBeTruthy()
 })
 

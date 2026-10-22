@@ -115,7 +115,7 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
         </ul>
       )}
       <p className="turmas-note">
-        Alunos já podem solicitar matrícula pelo código. A aprovação será liberada na próxima etapa.
+        Alunos podem solicitar matrícula pelo código. Confira as solicitações na seção Matrículas.
         O código da turma não substitui o convite de cadastro.
       </p>
     </section>

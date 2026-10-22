@@ -95,6 +95,11 @@ test('turmas: API, permissões e auditoria no PostgreSQL local', async (t) => {
           const result = await queryAs(id, 'SELECT public.aprovar_matricula($1) AS matricula', [body.p_matricula_id], aal)
           return Response.json((result.rows[0] as { matricula: unknown }).matricula)
         }
+        if (path === '/rest/v1/rpc/listar_matriculas_pendentes') {
+          assert.deepEqual(await request.json(), {})
+          const result = await queryAs(id, 'SELECT public.listar_matriculas_pendentes() AS matriculas', [], aal)
+          return Response.json((result.rows[0] as { matriculas: unknown }).matriculas)
+        }
         if (path === '/rest/v1/perfis') {
           const result = await queryAs(id, 'SELECT perfil,situacao FROM public.perfis WHERE id=$1', [id], aal)
           return Response.json(result.rows)
@@ -478,9 +483,9 @@ test('turmas: API, permissões e auditoria no PostgreSQL local', async (t) => {
       assert.equal((await matriculas.fetch(new Request('http://localhost/api/matriculas', { method: 'POST', headers, body: '{' }))).status, 400)
       assert.equal((await matriculas.fetch(new Request('http://localhost/api/matriculas', { method: 'POST' }))).status, 401)
       assert.equal((await matriculas.fetch(new Request('http://localhost/api/matriculas', { method: 'POST', headers: { Authorization: 'Bearer test-session' } }))).status, 415)
-      const get = await matriculas.fetch(new Request('http://localhost/api/matriculas'))
-      assert.equal(get.status, 405)
-      assert.equal(get.headers.get('allow'), 'POST, PATCH')
+      const invalidMethod = await matriculas.fetch(new Request('http://localhost/api/matriculas', { method: 'DELETE' }))
+      assert.equal(invalidMethod.status, 405)
+      assert.equal(invalidMethod.headers.get('allow'), 'GET, POST, PATCH')
       assert.equal(transport.mock.callCount(), 0)
     })
 
@@ -716,6 +721,126 @@ test('turmas: API, permissões e auditoria no PostgreSQL local', async (t) => {
           [turmaId, aluno]), /permission denied/)
       }
       assert.equal((await novaMatricula()).situacao, 'PENDENTE')
+    })
+  })
+
+  await t.test('015: pendências identificadas sem ampliar acesso aos perfis', async (m) => {
+    await migrate('015_listar_matriculas_pendentes.sql')
+    const rpc = 'SELECT public.listar_matriculas_pendentes() AS matriculas'
+    const listRequest = () => new Request('http://localhost/api/matriculas', {
+      headers: { Authorization: 'Bearer test-session' },
+    })
+    const listar = (id = professor, aal = 'aal2') => apiFor(id, aal).matriculas.fetch(listRequest())
+    type Pendencia = { id: string; turma_id: string; aluno_id: string; aluno_nome: string; aluno_rgm: string | null; situacao: string }
+    await db.query("UPDATE public.perfis SET nome='Aluno demonstrativo',rgm='12345678900' WHERE id=$1", [aluno])
+
+    await m.test('GET mostra só pendentes das próprias turmas com identificação mínima, sem leitura geral de perfis', async () => {
+      const response = await listar()
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+      const { matriculas } = await response.json() as { matriculas: Pendencia[] }
+      const expected = (await db.query<{ id: string }>(`SELECT m.id FROM public.turma_alunos m
+        JOIN public.turmas t ON t.id=m.turma_id WHERE t.professor_id=$1 AND m.situacao='PENDENTE'
+        ORDER BY m.solicitado_em,m.id LIMIT 50`, [professor])).rows
+      assert.ok(matriculas.length > 0)
+      assert.deepEqual(matriculas.map(({ id }) => ({ id })), expected)
+      assert.ok(matriculas.every((item) => item.situacao === 'PENDENTE' && item.aluno_nome === 'Aluno demonstrativo'))
+      assert.equal(matriculas[0].aluno_rgm, '12345678900')
+      assert.deepEqual(Object.keys(matriculas[0]).sort(), [
+        'id', 'turma_id', 'turma_nome', 'aluno_id', 'aluno_nome', 'aluno_rgm', 'situacao', 'solicitado_em',
+      ].sort())
+      assert.deepEqual((await queryAs(professor, 'SELECT * FROM public.perfis WHERE id=$1', [aluno])).rows, [])
+      const other = await (await listar(colleague)).json() as { matriculas: Pendencia[] }
+      assert.ok(other.matriculas.every((item) => !matriculas.some((own) => own.id === item.id)))
+    })
+
+    await m.test('ADMIN vê pendentes de todos os responsáveis mesmo sem organização; aceita RGM ausente', async () => {
+      await db.query('UPDATE public.perfis SET organizacao_id=NULL WHERE id=$1', [admin])
+      await db.query('UPDATE public.perfis SET rgm=NULL WHERE id=$1', [aluno])
+      const response = await listar(admin)
+      assert.equal(response.status, 200)
+      const { matriculas } = await response.json() as { matriculas: Pendencia[] }
+      const expected = (await db.query<{ id: string }>("SELECT id FROM public.turma_alunos WHERE situacao='PENDENTE' ORDER BY solicitado_em,id LIMIT 50")).rows
+      assert.deepEqual(matriculas.map(({ id }) => ({ id })), expected)
+      assert.ok(matriculas.every((item) => item.aluno_rgm === null))
+      await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [org, admin])
+    })
+
+    await m.test('nega aluno, visitante, falta de MFA, perfil inativo e sessão encerrada também na RPC privada', async () => {
+      assert.equal((await listar(aluno)).status, 403)
+      await assert.rejects(queryAs(aluno, 'SELECT examentech_private.listar_matriculas_pendentes()'), { code: '42501' })
+      for (const id of [professor, admin]) {
+        assert.equal((await listar(id, 'aal1')).status, 403)
+        await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [id])
+        assert.equal((await listar(id)).status, 403)
+        await db.query("UPDATE public.perfis SET situacao='ATIVO' WHERE id=$1", [id])
+        const sessionId = sessions.get(id)!
+        for (const invalid of [randomUUID(), sessions.get(aluno)!]) {
+          sessions.set(id, invalid)
+          assert.equal((await listar(id)).status, 403)
+        }
+        sessions.set(id, sessionId)
+      }
+      for (const schema of ['public', 'examentech_private']) {
+        await assert.rejects(db.transaction(async (tx) => {
+          await tx.exec('SET LOCAL ROLE anon')
+          return tx.query(`SELECT ${schema}.listar_matriculas_pendentes()`)
+        }), /permission denied/)
+      }
+      assert.equal((await apiFor(professor).matriculas.fetch(new Request('http://localhost/api/matriculas'))).status, 401)
+    })
+
+    await m.test('professor fora da organização ou organização inativa não recebe nomes nem vínculos', async () => {
+      await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [otherOrg, professor])
+      assert.deepEqual(await (await listar()).json(), { matriculas: [] })
+      await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [org, professor])
+      await db.query("UPDATE public.organizacoes SET situacao='INATIVO' WHERE id=$1", [org])
+      assert.deepEqual(await (await listar()).json(), { matriculas: [] })
+      await db.query("UPDATE public.organizacoes SET situacao='ATIVO' WHERE id=$1", [org])
+    })
+
+    await m.test('aprovação remove a solicitação da próxima consulta, sem apagar o vínculo', async () => {
+      const { matriculas } = await (await listar()).json() as { matriculas: Pendencia[] }
+      const pendente = matriculas[0]
+      await queryAs(professor, 'SELECT public.aprovar_matricula($1)', [pendente.id])
+      const result = await (await listar()).json() as { matriculas: Pendencia[] }
+      assert.ok(!result.matriculas.some((item) => item.id === pendente.id))
+      assert.deepEqual((await db.query('SELECT situacao FROM public.turma_alunos WHERE id=$1', [pendente.id])).rows, [{ situacao: 'ATIVA' }])
+    })
+
+    await m.test('consulta limita às 50 mais antigas e reaplicar 015 não modifica registros nem permissões de escrita', async () => {
+      // Massa criada apenas no banco local de testes para ultrapassar o limite da tela.
+      const turmas = await queryAs(professor, "INSERT INTO public.turmas(nome) SELECT 'Fila '||n FROM generate_series(1,51) n RETURNING id")
+      for (const turma of turmas.rows as { id: string }[]) {
+        await db.query("INSERT INTO public.turma_alunos(turma_id,aluno_id,solicitado_em) VALUES ($1,$2,'2026-01-01')", [turma.id, aluno])
+      }
+      const before = (await db.query('SELECT * FROM public.turma_alunos ORDER BY id')).rows
+      const events = (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+      await migrate('015_listar_matriculas_pendentes.sql')
+      const { matriculas } = await (await listar()).json() as { matriculas: Pendencia[] }
+      assert.equal(matriculas.length, 50)
+      const expected = (await db.query<{ id: string }>(`SELECT m.id FROM public.turma_alunos m JOIN public.turmas t ON t.id=m.turma_id
+        WHERE t.professor_id=$1 AND m.situacao='PENDENTE' ORDER BY m.solicitado_em,m.id LIMIT 50`, [professor])).rows
+      assert.deepEqual(matriculas.map(({ id }) => ({ id })), expected)
+      assert.deepEqual((await db.query('SELECT * FROM public.turma_alunos ORDER BY id')).rows, before)
+      assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, events)
+      await assert.rejects(queryAs(admin, "UPDATE public.turma_alunos SET situacao='ATIVA'"), /permission denied/)
+      assert.equal((await queryAs(professor, rpc)).rows.length, 1)
+    })
+
+    await m.test('falha de Auth não consulta RPC e resposta inválida do banco não vira lista vazia', async () => {
+      const env = { SUPABASE_URL: 'https://exemplo.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'public-test-key' }
+      for (const status of [401, 500]) {
+        const transport = t.mock.fn(async () => Response.json({ message: 'Falha de teste' }, { status }))
+        assert.equal((await createMatriculasHandler(env, transport).fetch(listRequest())).status, status === 401 ? 401 : 503)
+        assert.equal(transport.mock.callCount(), 1)
+      }
+      assert.equal((await createMatriculasHandler({}).fetch(listRequest())).status, 503)
+      for (const reply of [null, {}, [{ id: randomUUID() }]]) {
+        const handler = createMatriculasHandler(env, async (input) => new URL(String(input)).pathname === '/auth/v1/user'
+          ? Response.json({ id: professor }) : Response.json(reply))
+        assert.equal((await handler.fetch(listRequest())).status, 503)
+      }
     })
   })
 })

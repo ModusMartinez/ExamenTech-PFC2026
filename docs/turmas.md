@@ -1,6 +1,6 @@
 # Turmas
 
-RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação pelo painel do aluno e aprovação no banco/API. Lista de solicitações e botão de aprovação ainda não estão disponíveis.
+RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação pelo painel do aluno e aprovação pela tela do professor responsável ou ADMIN. Inativação e histórico no painel do aluno ficam para outros blocos.
 
 ## Fluxo
 
@@ -35,7 +35,7 @@ RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação pelo
 7. Entrar como administrador: consultar turmas e filtrar **Turma criada** na auditoria.
 8. Conferir que aluno não recebe a opção de turmas nesta etapa.
 
-Usar somente dados demonstrativos. A próxima etapa acrescentará a tela de aprovação de matrícula, sem restaurar a aprovação manual da conta. Antes de liberar o formulário aos participantes, alinhar Termos de Uso e Política de Privacidade com turmas e matrículas, mantendo o prazo da demonstração; este bloco não modifica os documentos nem a política de retenção.
+Usar somente dados demonstrativos. Aprovação de matrícula não restaura a aprovação manual da conta. Antes de liberar o formulário aos participantes, alinhar Termos de Uso e Política de Privacidade com turmas e matrículas, mantendo o prazo da demonstração; estes blocos não modificam os documentos nem a política de retenção.
 
 ## Matrículas — base do banco (012)
 
@@ -78,7 +78,7 @@ Referências: [RPC do Supabase](https://supabase.com/docs/reference/javascript/r
 - Valida o formato do código, aceita minúsculas/espaços externos e bloqueia envio repetido enquanto aguarda a resposta.
 - Usa o token da sessão no cabeçalho; envia somente o código no JSON. As permissões continuam no servidor e no banco.
 - Sucesso informa nome da turma e situação pendente. Falha mantém o código para correção ou nova tentativa.
-- A mensagem de sucesso é temporária; ainda não existe lista/histórico no painel nem tela de aprovação. Recarregar a página não apaga a matrícula salva.
+- A mensagem de sucesso é temporária; ainda não existe lista/histórico no painel do aluno. Recarregar a página não apaga a matrícula salva. Professor e ADMIN têm a tela de aprovação descrita abaixo.
 - Reutiliza estilos das turmas, mantém os links legais no rodapé e não adiciona dependências nem SQL.
 
 Teste manual, com `011`–`013` já aplicadas e `npm run dev:full`:
@@ -106,9 +106,37 @@ Teste manual, com `011`–`013` já aplicadas e `npm run dev:full`:
 
 Aplicar somente `database/014_aprovar_matricula.sql`, depois de `013`, no Supabase de testes. Não reaplicar versões anteriores sobre a nova. A migração não aprova registros automaticamente. O `POST` de solicitação permanece disponível; `PATCH` usa a mesma rota e configuração local, sem dependências novas.
 
-Este bloco não altera telas: lista de pendências, botão e filtro específico de aprovação na auditoria ficam para o próximo commit. O evento já aparece na auditoria pelo nome técnico. Testar banco/API com `node --test tests/turmas.test.ts`; a suíte cobre autorização, mudança de situação, repetição, rollback e reaplicação, usando Auth/HTTP simulados e PostgreSQL local. Não substitui a validação no Supabase nem um teste de concorrência entre conexões reais.
+O bloco 014 implementou somente o servidor. A tela e o filtro de auditoria estão no bloco 015, abaixo. Testar banco/API com `node --test tests/turmas.test.ts`; a suíte cobre autorização, mudança de situação, repetição, rollback e reaplicação, usando Auth/HTTP simulados e PostgreSQL local. Não substitui a validação no Supabase nem um teste de concorrência entre conexões reais.
 
 Referências: [funções e permissões](https://supabase.com/docs/guides/database/functions), [bloqueios de linhas no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html).
+
+## Lista e botão Aprovar (015)
+
+`App` → `MatriculasPanel` → `services/matriculas` → `GET /api/matriculas` → `listar_matriculas_pendentes()`.
+
+- Seção **Matrículas** para professor e ADMIN, após login e MFA. Aluno mantém apenas **Solicitar matrícula**.
+- Professor vê as pendências das próprias turmas; ADMIN vê as de todos os responsáveis. A função reutiliza as permissões de consulta das turmas.
+- Consulta devolve até 50 pendências, ordenadas por data e ID, da mais antiga para a mais recente. Não é uma lista completa quando há mais de 50; a tela informa o limite e busca novamente após cada aprovação.
+- Mostra nome do aluno, RGM (ou ID, quando não informado), turma e data. Não devolve e-mail nem códigos de ingresso. A função identifica somente alunos dos vínculos autorizados; a leitura geral da tabela `perfis` continua restrita.
+- O validador `matriculaValidation.ts` é usado na API e no navegador para manter o contrato da lista em um único lugar. O serviço do frontend compartilha a chamada HTTP entre consulta, solicitação e aprovação. Sem dependências novas.
+- **Aprovar** chama o `PATCH` existente com somente o ID da matrícula. Após confirmar `ATIVA` para o mesmo ID, mostra sucesso, remove a pendência e consulta a lista novamente. Não envia perfil, aluno ou situação pelo navegador.
+- Durante a aprovação, os botões ficam bloqueados contra cliques repetidos. Falhas não simulam sucesso: mantêm a solicitação e orientam atualizar a lista. Sessão inválida, matrícula já aprovada por outro usuário e indisponibilidade têm mensagens próprias.
+- A consulta não garante que a pendência ainda possa ser aprovada: alterações na turma, organização ou aluno são verificadas novamente pela função da 014. Registros que deixaram de atender às condições continuam pendentes; não são apagados nem aprovados automaticamente.
+- A auditoria do ADMIN ganhou **Matrícula aprovada** no filtro, com aprovador e ID do vínculo. Continua usando o evento da 014, sem duplicar registros no frontend.
+
+### Ativação e teste manual deste bloco
+
+1. Com `014` já aplicada, executar somente `database/015_listar_matriculas_pendentes.sql` no Supabase de testes. Não reaplicar migrações antigas. A nova consulta não altera matrículas nem aprova registros.
+2. Rodar `npm run dev:full`.
+3. Como aluno, solicitar matrícula em uma turma fictícia ativa da mesma organização.
+4. Como professor responsável, concluir MFA e abrir **Matrículas**. Conferir nome/identificação do aluno, turma e data; clicar **Aprovar**. A solicitação deve desaparecer da lista e mostrar a confirmação.
+5. Conferir `ATIVA` em `turma_alunos`. Como ADMIN, filtrar **Matrícula aprovada** na Auditoria e conferir o aprovador em `usuario_id` e o vínculo em `recurso_id`.
+6. Gerar outra solicitação. Outro professor não deve vê-la; ADMIN deve conseguir aprová-la. Aluno não deve ter o menu de aprovação.
+7. Abrir a mesma pendência como responsável e ADMIN. Aprovar em uma sessão e tentar na outra: deve informar conflito, sem novo evento. Usar **Atualizar** para remover a entrada desatualizada.
+
+Os testes da consulta estão em `tests/turmas.test.ts`. `tests/matriculas-panel.test.tsx` testa tela e serviço juntos, com sessão/HTTP simulados: carregamento, campos, aprovação, atualização, duplicidade de clique e erros. Navegação e filtro da auditoria permanecem nas suítes existentes. A conferência visual usa dados fictícios isolados; o fluxo no Supabase precisa ser validado manualmente.
+
+Referências: [funções e permissões do Supabase](https://supabase.com/docs/guides/database/functions), [carregamento e limpeza de efeitos no React](https://react.dev/reference/react/useEffect).
 
 ## Verificações
 

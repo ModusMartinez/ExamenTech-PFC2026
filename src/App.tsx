@@ -5,6 +5,7 @@ import { InvitationPanel } from './components/InvitationPanel'
 import { AuditPanel } from './components/AuditPanel'
 import { TurmasPanel } from './components/TurmasPanel'
 import { SolicitarMatriculaPanel } from './components/SolicitarMatriculaPanel'
+import { MatriculasPanel } from './components/MatriculasPanel'
 import { TurnstileWidget } from './components/TurnstileWidget'
 import { LegalModal } from './components/LegalModal'
 import { LegalFooter } from './components/LegalFooter'
@@ -829,7 +830,7 @@ type DashboardProps = {
 
 function Dashboard({ user, onLogout }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
-  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula'>('inicio')
+  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes'>('inicio')
   const nameParts = user.name.split(' ')
 
   const initials = nameParts
@@ -881,6 +882,11 @@ function Dashboard({ user, onLogout }: DashboardProps) {
                 Solicitar matrícula
               </button>
             )}
+            {canViewTurmas && (
+              <button type="button" aria-pressed={dashboardView === 'aprovacoes'} onClick={() => setDashboardView('aprovacoes')}>
+                Matrículas
+              </button>
+            )}
             {user.profile === 'Administrador' && (
               <button type="button" aria-pressed={dashboardView === 'auditoria'} onClick={() => setDashboardView('auditoria')}>
                 Auditoria
@@ -894,6 +900,9 @@ function Dashboard({ user, onLogout }: DashboardProps) {
           <TurmasPanel profile={user.profile} />
         ) : dashboardView === 'matricula' && user.profile === 'Aluno' ? (
           <SolicitarMatriculaPanel />
+        ) : dashboardView === 'aprovacoes' &&
+          (user.profile === 'Administrador' || user.profile === 'Professor') ? (
+          <MatriculasPanel profile={user.profile} />
         ) : (
           <>
             <p className="overline">PAINEL INICIAL</p>

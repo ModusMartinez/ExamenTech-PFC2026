@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { lerMatriculasPendentes } from '../src/services/matriculaValidation.ts'
 
 function jsonResponse(status: number, body: object, headers?: HeadersInit) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
@@ -10,42 +11,45 @@ export function createMatriculasHandler(
 ) {
   return {
     async fetch(request: Request) {
-      if (!['POST', 'PATCH'].includes(request.method)) {
-        return jsonResponse(405, { message: 'Utilize POST ou PATCH.' }, { Allow: 'POST, PATCH' })
+      if (!['GET', 'POST', 'PATCH'].includes(request.method)) {
+        return jsonResponse(405, { message: 'Utilize GET, POST ou PATCH.' }, { Allow: 'GET, POST, PATCH' })
       }
+      const listing = request.method === 'GET'
       const approving = request.method === 'PATCH'
       const token = request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1]
       if (!token) return jsonResponse(401, { message: 'Entre novamente para acessar as matrículas.' })
-      if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+      if (!listing && request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
         return jsonResponse(415, { message: 'Envie os dados no formato JSON.' })
       }
 
-      let params: { p_codigo: string } | { p_matricula_id: string }
-      try {
-        const body: unknown = await request.json()
-        if (!body || typeof body !== 'object' || Array.isArray(body)) {
-          return jsonResponse(400, { message: 'Envie um objeto JSON com os dados da operação.' })
+      let params: { p_codigo: string } | { p_matricula_id: string } | undefined
+      if (!listing) {
+        try {
+          const body: unknown = await request.json()
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return jsonResponse(400, { message: 'Envie um objeto JSON com os dados da operação.' })
+          }
+          if (approving) {
+            if (Object.keys(body).some((key) => key !== 'matricula_id') ||
+                !('matricula_id' in body) || typeof body.matricula_id !== 'string' ||
+                !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.matricula_id)) {
+              return jsonResponse(400, { message: 'Informe somente o ID válido da matrícula.' })
+            }
+            params = { p_matricula_id: body.matricula_id }
+          } else {
+            if (Object.keys(body).some((key) => key !== 'codigo') ||
+                !('codigo' in body) || typeof body.codigo !== 'string') {
+              return jsonResponse(400, { message: 'Informe somente o código da turma.' })
+            }
+            const codigo = body.codigo.trim().toUpperCase()
+            if (!/^[A-F0-9]{12}$/.test(codigo)) {
+              return jsonResponse(400, { message: 'Informe o código da turma com 12 caracteres.' })
+            }
+            params = { p_codigo: codigo }
+          }
+        } catch {
+          return jsonResponse(400, { message: 'JSON inválido.' })
         }
-        if (approving) {
-          if (Object.keys(body).some((key) => key !== 'matricula_id') ||
-              !('matricula_id' in body) || typeof body.matricula_id !== 'string' ||
-              !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.matricula_id)) {
-            return jsonResponse(400, { message: 'Informe somente o ID válido da matrícula.' })
-          }
-          params = { p_matricula_id: body.matricula_id }
-        } else {
-          if (Object.keys(body).some((key) => key !== 'codigo') ||
-              !('codigo' in body) || typeof body.codigo !== 'string') {
-            return jsonResponse(400, { message: 'Informe somente o código da turma.' })
-          }
-          const codigo = body.codigo.trim().toUpperCase()
-          if (!/^[A-F0-9]{12}$/.test(codigo)) {
-            return jsonResponse(400, { message: 'Informe o código da turma com 12 caracteres.' })
-          }
-          params = { p_codigo: codigo }
-        }
-      } catch {
-        return jsonResponse(400, { message: 'JSON inválido.' })
       }
 
       const url = env.SUPABASE_URL ?? env.VITE_SUPABASE_URL
@@ -66,6 +70,16 @@ export function createMatriculasHandler(
           })
         }
         if (!identity.user) return jsonResponse(401, { message: 'Sessão inválida. Entre novamente.' })
+
+        if (listing) {
+          const { data, error } = await supabase.rpc('listar_matriculas_pendentes')
+          if (error?.code === '42501') {
+            return jsonResponse(403, { message: 'Consulta exige professor ou administrador ativo, com MFA.' })
+          }
+          const matriculas = error ? null : lerMatriculasPendentes(data)
+          if (!matriculas) return jsonResponse(503, { message: 'Não foi possível carregar as matrículas pendentes. Tente novamente.' })
+          return jsonResponse(200, { matriculas })
+        }
 
         // Identidade, permissões e transições de situação são conferidas também no banco.
         const { data, error } = await supabase.rpc(approving ? 'aprovar_matricula' : 'solicitar_matricula', params)
