@@ -1,6 +1,6 @@
 # Turmas
 
-RF07–RF11 em desenvolvimento: criação/consulta de turmas e solicitação de matrícula pelo painel do aluno. Aprovação e gestão das matrículas ainda não estão disponíveis.
+RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação pelo painel do aluno e aprovação no banco/API. Lista de solicitações e botão de aprovação ainda não estão disponíveis.
 
 ## Fluxo
 
@@ -35,7 +35,7 @@ RF07–RF11 em desenvolvimento: criação/consulta de turmas e solicitação de 
 7. Entrar como administrador: consultar turmas e filtrar **Turma criada** na auditoria.
 8. Conferir que aluno não recebe a opção de turmas nesta etapa.
 
-Usar somente dados demonstrativos. As próximas etapas acrescentarão a aprovação de matrícula, sem restaurar a aprovação manual da conta. Antes de liberar o formulário aos participantes, alinhar Termos de Uso e Política de Privacidade com turmas e matrículas, mantendo o prazo da demonstração; este bloco não modifica os documentos nem a política de retenção.
+Usar somente dados demonstrativos. A próxima etapa acrescentará a tela de aprovação de matrícula, sem restaurar a aprovação manual da conta. Antes de liberar o formulário aos participantes, alinhar Termos de Uso e Política de Privacidade com turmas e matrículas, mantendo o prazo da demonstração; este bloco não modifica os documentos nem a política de retenção.
 
 ## Matrículas — base do banco (012)
 
@@ -44,7 +44,7 @@ Usar somente dados demonstrativos. As próximas etapas acrescentarão a aprovaç
 - Cada par aluno/turma é único, inclusive após inativação. O aluno pode ter várias turmas.
 - Leitura com MFA e sessão válida: aluno vê seus vínculos, professor vê os de suas turmas, ADMIN vê todos. Os perfis precisam estar ativos; aluno e professor também precisam manter vínculo com a organização ativa da turma.
 - Consulta de histórico não depende da matrícula ou turma estar ativa; isso não autoriza realizar avaliações.
-- Escrita direta está bloqueada para todos os perfis, inclusive ADMIN. A solicitação usa a função controlada da `013`; aprovação e inativação terão etapas próprias, com auditoria.
+- Escrita direta está bloqueada para todos os perfis, inclusive ADMIN. Solicitação e aprovação usam funções controladas das `013` e `014`, com auditoria; inativação terá etapa própria.
 - As referências não apagam registros em cascata. Excluir uma conta ou turma com matrículas exige tratamento explícito do histórico; a rotina de encerramento da demonstração deverá considerar isso.
 
 Aplicar `database/012_matriculas.sql` depois de `011` no Supabase de testes. A migração não cadastra matrículas, não modifica usuários/turmas e não altera telas. Não reaplicar migrações antigas depois dela.
@@ -78,7 +78,7 @@ Referências: [RPC do Supabase](https://supabase.com/docs/reference/javascript/r
 - Valida o formato do código, aceita minúsculas/espaços externos e bloqueia envio repetido enquanto aguarda a resposta.
 - Usa o token da sessão no cabeçalho; envia somente o código no JSON. As permissões continuam no servidor e no banco.
 - Sucesso informa nome da turma e situação pendente. Falha mantém o código para correção ou nova tentativa.
-- A mensagem de sucesso é temporária; ainda não existe lista/histórico no painel nem aprovação. Recarregar a página não apaga a matrícula salva.
+- A mensagem de sucesso é temporária; ainda não existe lista/histórico no painel nem tela de aprovação. Recarregar a página não apaga a matrícula salva.
 - Reutiliza estilos das turmas, mantém os links legais no rodapé e não adiciona dependências nem SQL.
 
 Teste manual, com `011`–`013` já aplicadas e `npm run dev:full`:
@@ -90,6 +90,25 @@ Teste manual, com `011`–`013` já aplicadas e `npm run dev:full`:
 5. Como ADMIN, abrir Auditoria e filtrar **Matrícula solicitada**. Conferir usuário e referência ao vínculo.
 
 `tests/solicitar-matricula.test.tsx` testa o formulário junto do serviço do frontend, simulando sessão e HTTP. Navegação por perfil e filtro da auditoria são cobertos nos testes existentes. Referências: [formulários React](https://react.dev/reference/react-dom/components/input), [sessão no cliente Supabase](https://supabase.com/docs/reference/javascript/auth-getsession).
+
+## Aprovação — servidor (014)
+
+`PATCH /api/matriculas` → `public.aprovar_matricula` → função privada → vínculo `ATIVA` e auditoria.
+
+- Recebe somente `{ "matricula_id": "UUID da matrícula" }`, com `Authorization: Bearer <access_token>`. Não recebe situação, aluno nem aprovador.
+- Professor ativo aprova apenas suas turmas, mantendo vínculo com a organização. ADMIN ativo pode aprovar turmas de qualquer responsável, sem precisar pertencer à organização da turma. Ambos precisam de MFA e sessão válida.
+- A matrícula precisa estar `PENDENTE`. Turma e organização precisam estar ativas; o aluno precisa continuar com perfil ALUNO ativo e pertencer à organização da turma, inclusive quando ADMIN aprova.
+- Só muda `situacao` para `ATIVA`: preserva ID, aluno, turma e data da solicitação. Não altera perfis/contas, não reativa matrículas inativas e não implementa avaliações.
+- Retorna `200` com `matricula`: ID, ID/nome da turma, situação `ATIVA` e data original da solicitação. Aprovar novamente retorna `409`, sem novo evento.
+- Corpo inválido: `400`; sessão ausente/inválida: `401`; perfil/MFA/sessão não autorizado: `403`; vínculo inexistente ou fora do acesso: `404`; situação incompatível: `409`; falha do serviço: `503`. Turma/organização fora do acesso do professor não revela dados, mesmo que exista.
+- Registra `MATRICULA_APROVADA`, o aprovador em `usuario_id` e o vínculo em `recurso_id`. O horário fica no evento. Não registra nome, e-mail, código de ingresso nem token.
+- A matrícula fica bloqueada durante a transação para evitar duas aprovações do mesmo vínculo. Uma falha na auditoria desfaz a aprovação. Escrita direta nas tabelas continua bloqueada.
+
+Aplicar somente `database/014_aprovar_matricula.sql`, depois de `013`, no Supabase de testes. Não reaplicar versões anteriores sobre a nova. A migração não aprova registros automaticamente. O `POST` de solicitação permanece disponível; `PATCH` usa a mesma rota e configuração local, sem dependências novas.
+
+Este bloco não altera telas: lista de pendências, botão e filtro específico de aprovação na auditoria ficam para o próximo commit. O evento já aparece na auditoria pelo nome técnico. Testar banco/API com `node --test tests/turmas.test.ts`; a suíte cobre autorização, mudança de situação, repetição, rollback e reaplicação, usando Auth/HTTP simulados e PostgreSQL local. Não substitui a validação no Supabase nem um teste de concorrência entre conexões reais.
+
+Referências: [funções e permissões](https://supabase.com/docs/guides/database/functions), [bloqueios de linhas no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html).
 
 ## Verificações
 
