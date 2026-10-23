@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { lerMatriculasPendentes, lerMinhasMatriculas } from '../src/services/matriculaValidation.ts'
+import { lerAlunosTurma, lerMatriculasPendentes, lerMinhasMatriculas } from '../src/services/matriculaValidation.ts'
 
 function jsonResponse(status: number, body: object, headers?: HeadersInit) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
@@ -20,9 +20,17 @@ export function createMatriculasHandler(
       if (!token) return jsonResponse(401, { message: 'Entre novamente para acessar as matrículas.' })
       const query = new URL(request.url).searchParams
       const ownEnrollments = query.get('consulta') === 'minhas'
-      if (listing && ([...query.keys()].some((key) => key !== 'consulta') ||
-          query.getAll('consulta').length > 1 || (query.has('consulta') && !ownEnrollments))) {
-        return jsonResponse(400, { message: 'Consulta inválida. Não envie identificação de aluno nem filtros adicionais.' })
+      const turmaId = query.get('turma_id')
+      const pagina = query.get('pagina') ?? '0'
+      if (listing) {
+        const validQuery = query.has('turma_id')
+          ? [...query.keys()].every((key) => key === 'turma_id' || key === 'pagina') &&
+            query.getAll('turma_id').length === 1 && query.getAll('pagina').length <= 1 &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(turmaId ?? '') &&
+            /^(0|[1-9][0-9]{0,6})$/.test(pagina) && Number(pagina) <= 1000000
+          : [...query.keys()].every((key) => key === 'consulta') &&
+            query.getAll('consulta').length <= 1 && (!query.has('consulta') || ownEnrollments)
+        if (!validQuery) return jsonResponse(400, { message: 'Consulta inválida.' })
       }
       if (!listing && request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
         return jsonResponse(415, { message: 'Envie os dados no formato JSON.' })
@@ -78,6 +86,16 @@ export function createMatriculasHandler(
         if (!identity.user) return jsonResponse(401, { message: 'Sessão inválida. Entre novamente.' })
 
         if (listing) {
+          if (turmaId) {
+            const { data, error } = await supabase.rpc('listar_alunos_turma', {
+              p_turma_id: turmaId, p_pagina: Number(pagina),
+            })
+            if (error?.code === '42501') return jsonResponse(403, { message: 'Consulta exige professor ou administrador ativo, com MFA.' })
+            if (error?.code === 'P0002') return jsonResponse(404, { message: 'Turma não encontrada ou acesso não autorizado.' })
+            const alunos = error ? null : lerAlunosTurma(data)
+            if (!alunos) return jsonResponse(503, { message: 'Não foi possível carregar os alunos.' })
+            return jsonResponse(200, { alunos })
+          }
           const { data, error } = await supabase.rpc(ownEnrollments ? 'listar_minhas_matriculas' : 'listar_matriculas_pendentes')
           if (error?.code === '42501') {
             return jsonResponse(403, { message: ownEnrollments

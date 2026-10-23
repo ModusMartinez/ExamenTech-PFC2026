@@ -59,3 +59,23 @@ export function lerMinhasMatriculas(value: unknown): MatriculaDoAluno[] | null {
   }
   return matriculas
 }
+
+export type AlunoMatriculado = {
+  id: string
+  aluno_nome: string
+  aluno_rgm: string | null
+}
+
+export function lerAlunosTurma(value: unknown): AlunoMatriculado[] | null {
+  if (!Array.isArray(value) || value.length > 51) return null
+  const alunos: AlunoMatriculado[] = []
+  const items: unknown[] = value
+  for (const item of items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item) ||
+        !('id' in item) || typeof item.id !== 'string' ||
+        !('aluno_nome' in item) || typeof item.aluno_nome !== 'string' ||
+        !('aluno_rgm' in item) || (item.aluno_rgm !== null && typeof item.aluno_rgm !== 'string')) return null
+    alunos.push({ id: item.id, aluno_nome: item.aluno_nome, aluno_rgm: item.aluno_rgm })
+  }
+  return alunos
+}

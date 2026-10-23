@@ -118,6 +118,19 @@
 .matriculas-list .turma-description p + p { margin-top: 6px; }
 .matricula-situacao { flex-shrink: 0; color: var(--dark-blue); font-weight: 600; }
 
+.turma-com-alunos { flex-wrap: wrap; }
+.turma-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; }
+.alunos-turma { flex-basis: 100%; min-width: 0; width: 100%; }
+.alunos-turma h4 { margin: 0; color: var(--dark-blue); }
+.alunos-turma .turmas-note { margin: 0 0 12px; }
+.alunos-turma table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.alunos-turma th, .alunos-turma td {
+  padding: 12px 8px; text-align: left; border-bottom: 1px solid #dce5ee; overflow-wrap: anywhere;
+}
+.alunos-turma th:first-child { width: 65%; }
+.alunos-turma .alert { overflow-wrap: anywhere; }
+.alunos-paginacao { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; }
+
 @media (max-width: 500px) {
   .turma-form { padding: 18px; }
   .turma-form-fields { flex-direction: column; align-items: stretch; }

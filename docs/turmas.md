@@ -1,6 +1,6 @@
 # Turmas
 
-RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação e consulta das matrículas pelo aluno e aprovação pelo professor responsável ou ADMIN. A ação de inativar matrículas fica para outro bloco.
+RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação e consulta das matrículas pelo aluno, aprovação e listagem dos matriculados pelo professor responsável ou ADMIN. A ação de inativar matrículas fica para outro bloco.
 
 ## Fluxo
 
@@ -162,6 +162,24 @@ Referências: [funções e permissões do Supabase](https://supabase.com/docs/gu
 Banco/API: `tests/turmas.test.ts`. Tela junto do serviço: `tests/minhas-matriculas.test.tsx`. Os testes cobrem isolamento, MFA/sessão, situações, ordem/limite, atualização e erros. Usam PostgreSQL local e Auth/HTTP simulados, sem acessar o Supabase remoto.
 
 Referências: [funções e permissões](https://supabase.com/docs/guides/database/functions), [controle de acesso por linha](https://supabase.com/docs/guides/database/postgres/row-level-security).
+
+## Alunos por turma (017)
+
+Em **Turmas → Alunos**, professor responsável e ADMIN consultam nome e RGM das matrículas `ATIVA`. RGM ausente aparece como **Não informado**. Pendências continuam na seção Matrículas; vínculos inativos não aparecem nesta lista.
+
+`TurmasPanel` → `AlunosTurmaPanel` → `listarAlunosTurma` → `GET /api/matriculas?turma_id=UUID&pagina=0` → `listar_alunos_turma`.
+
+- Sessão, MFA e permissões são conferidos no servidor e no banco, inclusive em chamadas diretas à função. Professor só acessa suas turmas na organização ativa; ADMIN mantém a consulta institucional. Turmas inativas continuam consultáveis, sem liberar avaliações.
+- A consulta retorna apenas ID da matrícula, nome e RGM. Não amplia a RLS de perfis nem devolve e-mail ou identificadores de sessão.
+- Página começa em zero na API. A tela mostra 50 alunos, ordenados por nome e ID da matrícula. O banco busca um registro extra para indicar a próxima página. **Atualizar alunos** volta à primeira página. Alterações entre consultas podem mudar a posição dos alunos.
+- Somente leitura: não aprova, inativa ou exclui vínculos e não cria eventos. Reutiliza rota, estilos e serviço HTTP; sem dependências novas.
+- API: parâmetros inválidos `400`, sessão inválida `401`, perfil/MFA inválido `403`, turma inexistente ou fora do acesso `404`, indisponibilidade/resposta inválida `503`. Erro não aparece como lista vazia.
+
+Aplicar somente `database/017_listar_alunos_turma.sql` após `016`. Rodar `npm run dev:full`, abrir **Turmas → Alunos** como responsável e conferir uma matrícula aprovada. Repetir com ADMIN e outra turma. Professor diferente não deve acessar os alunos da turma; aluno não recebe essa tela. Uma turma sem matrículas ativas mostra lista vazia. Aprovar uma pendência na seção Matrículas e clicar **Atualizar alunos** inclui o novo matriculado.
+
+Testes locais: `tests/turmas.test.ts` (SQL/API, permissões, paginação, campos e preservação dos registros) e `tests/turmas-panel.test.tsx` (tela e serviço HTTP, troca de turma, carregamento, atualização e erros). Nenhuma alteração é aplicada ao Supabase remoto pelos testes.
+
+Referências: [funções do Supabase](https://supabase.com/docs/guides/database/functions), [limpeza de efeitos do React](https://react.dev/reference/react/useEffect).
 
 ## Verificações
 

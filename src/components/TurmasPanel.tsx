@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { criarTurma, listarTurmas } from '../services/turmas'
 import type { Turma } from '../services/turmas'
 import { validateTurmaName } from '../services/turmaValidation'
+import { AlunosTurmaPanel } from './AlunosTurmaPanel'
 import '../styles/turmas.css'
 
 export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor' }) {
@@ -14,6 +15,7 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
   const [formError, setFormError] = useState('')
   const [success, setSuccess] = useState('')
   const [refresh, setRefresh] = useState(0)
+  const [turmaAberta, setTurmaAberta] = useState<string | null>(null)
   const submitting = useRef(false)
   const isTeacher = profile === 'Professor'
 
@@ -65,17 +67,13 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
       <header>
         <p className="overline">TURMAS</p>
         <h1 id="turmas-title">{isTeacher ? 'Minhas turmas' : 'Turmas cadastradas'}</h1>
-        <p className="subtitle">
-          {isTeacher ? 'Crie e consulte as turmas sob sua responsabilidade.'
-            : 'Consulta administrativa das turmas cadastradas pelos professores.'}
-        </p>
       </header>
 
       {isTeacher && (
         <form className="turma-form" onSubmit={handleCreate} noValidate>
           <h2>Nova turma</h2>
           <label htmlFor="turma-nome">Nome da turma</label>
-          <p id="turma-nome-help">Use de 3 a 100 caracteres. Exemplo: Engenharia de Software — 8º B.</p>
+          <p id="turma-nome-help">3 a 100 caracteres.</p>
           <div className="turma-form-fields">
             <input id="turma-nome" value={nome} onChange={(event) => setNome(event.target.value)}
               maxLength={100} required disabled={creating}
@@ -100,24 +98,26 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
       {!loading && !loadError && turmas.length > 0 && (
         <ul className="turmas-list">
           {turmas.map((turma) => (
-            <li key={turma.id}>
+            <li key={turma.id} className="turma-com-alunos">
               <div className="turma-description">
                 <h3>{turma.nome}</h3>
                 <p>{turma.situacao === 'ATIVA' ? 'Ativa' : 'Inativa'}</p>
                 {!isTeacher && <p>Responsável (ID): <span>{turma.professor_id}</span></p>}
               </div>
-              <div className="turma-code">
-                <span>Código de ingresso</span>
-                <code>{turma.codigo_ingresso}</code>
+              <div className="turma-actions">
+                <div className="turma-code">
+                  <span>Código de ingresso</span>
+                  <code>{turma.codigo_ingresso}</code>
+                </div>
+                <button type="button" className="turmas-refresh" aria-expanded={turmaAberta === turma.id}
+                  aria-controls={`alunos-${turma.id}`} aria-label={`Alunos de ${turma.nome}`}
+                  onClick={() => setTurmaAberta((current) => current === turma.id ? null : turma.id)}>Alunos</button>
               </div>
+              {turmaAberta === turma.id && <AlunosTurmaPanel key={turma.id} turmaId={turma.id} turmaNome={turma.nome} />}
             </li>
           ))}
         </ul>
       )}
-      <p className="turmas-note">
-        Alunos podem solicitar matrícula pelo código. Confira as solicitações na seção Matrículas.
-        O código da turma não substitui o convite de cadastro.
-      </p>
     </section>
   )
 }

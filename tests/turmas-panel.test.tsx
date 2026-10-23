@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { TurmasPanel } from '../src/components/TurmasPanel'
 import type { Turma } from '../src/services/turmas'
 
-const mocks = vi.hoisted(() => ({ listar: vi.fn(), criar: vi.fn() }))
+const mocks = vi.hoisted(() => ({ listar: vi.fn(), criar: vi.fn(), getSession: vi.fn(), fetch: vi.fn() }))
 vi.mock('../src/services/turmas', () => ({
   listarTurmas: mocks.listar, criarTurma: mocks.criar,
 }))
+vi.mock('../src/lib/supabase', () => ({ supabase: { auth: { getSession: mocks.getSession } } }))
 const turma: Turma = {
   id: 'turma-teste', nome: 'Engenharia 8B', professor_id: 'professor-teste',
   codigo_ingresso: 'ABCDEF123456', situacao: 'ATIVA', criado_em: '2026-10-20T12:00:00Z',
@@ -16,8 +17,11 @@ beforeEach(() => {
   vi.resetAllMocks()
   mocks.listar.mockResolvedValue([])
   mocks.criar.mockResolvedValue(turma)
+  mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'sessao-simulada' } }, error: null })
+  mocks.fetch.mockImplementation(async () => Response.json({ alunos: [] }))
+  vi.stubGlobal('fetch', mocks.fetch)
 })
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 test('professor consulta lista vazia e cria uma turma com nome normalizado', async () => {
   render(<TurmasPanel profile="Professor" />)
@@ -81,4 +85,104 @@ test('envio em andamento não cria duas turmas e bloqueia atualização concorre
   expect((screen.getByRole('button', { name: 'Atualizar' }) as HTMLButtonElement).disabled).toBe(true)
   finish(turma)
   await waitFor(() => expect(screen.getByText('ABCDEF123456')).toBeTruthy())
+})
+
+const alunos = Array.from({ length: 51 }, (_, index) => ({
+  id: `matricula-${index}`, aluno_nome: `Aluno ${index}`, aluno_rgm: index === 0 ? '12345678901' : null,
+}))
+
+test.each(['Professor', 'Administrador'] as const)('%s abre alunos da turma sem ampliar consulta para outros perfis', async (profile) => {
+  mocks.listar.mockResolvedValue([turma])
+  mocks.fetch.mockResolvedValueOnce(Response.json({ alunos: alunos.slice(0, 2) }))
+  render(<TurmasPanel profile={profile} />)
+  const button = await screen.findByRole('button', { name: `Alunos de ${turma.nome}` })
+  expect(mocks.fetch).not.toHaveBeenCalled()
+  fireEvent.click(button)
+  await screen.findByRole('cell', { name: 'Aluno 0' })
+  expect(screen.getByRole('cell', { name: '12345678901' })).toBeTruthy()
+  expect(screen.getByRole('cell', { name: 'Não informado' })).toBeTruthy()
+  expect(button.getAttribute('aria-expanded')).toBe('true')
+  expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith(`/api/matriculas?turma_id=${turma.id}&pagina=0`, {
+    method: 'GET', headers: { Authorization: 'Bearer sessao-simulada', 'Content-Type': 'application/json' }, body: undefined,
+  })
+  expect(screen.queryByRole('button', { name: /Aprovar|Inativar|Excluir/ })).toBeNull()
+  fireEvent.click(button)
+  expect(screen.queryByRole('table')).toBeNull()
+  expect(button.getAttribute('aria-expanded')).toBe('false')
+})
+
+test('paginação exibe 50 alunos, avança, volta e atualização reinicia na primeira página', async () => {
+  mocks.listar.mockResolvedValue([turma])
+  mocks.fetch.mockImplementation(async (url: string) => Response.json({ alunos: url.endsWith('pagina=1') ? alunos.slice(50) : alunos }))
+  render(<TurmasPanel profile="Professor" />)
+  fireEvent.click(await screen.findByRole('button', { name: `Alunos de ${turma.nome}` }))
+  const table = await screen.findByRole('table')
+  expect(within(table).getAllByRole('row')).toHaveLength(51)
+  expect(screen.queryByRole('cell', { name: 'Aluno 50' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Anterior' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Próxima' }))
+  await screen.findByRole('cell', { name: 'Aluno 50' })
+  expect(screen.getByText('Página 2')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Anterior' }))
+  await screen.findByRole('cell', { name: 'Aluno 0' })
+  fireEvent.click(screen.getByRole('button', { name: 'Próxima' }))
+  await screen.findByRole('cell', { name: 'Aluno 50' })
+  fireEvent.click(screen.getByRole('button', { name: 'Atualizar alunos' }))
+  await screen.findByRole('cell', { name: 'Aluno 0' })
+  expect(screen.getByText('Página 1')).toBeTruthy()
+  expect(mocks.fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true)
+})
+
+test('trocar de turma não mostra resposta atrasada e reinicia a lista', async () => {
+  const outra = { ...turma, id: 'outra-turma', nome: 'Segunda turma' }
+  mocks.listar.mockResolvedValue([turma, outra])
+  let finish!: (value: Response) => void
+  mocks.fetch.mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve }))
+  render(<TurmasPanel profile="Professor" />)
+  fireEvent.click(await screen.findByRole('button', { name: `Alunos de ${turma.nome}` }))
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1))
+  expect(screen.getByRole('button', { name: 'Atualizar alunos' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: `Alunos de ${outra.nome}` }))
+  await screen.findByText('Nenhum aluno nesta página.')
+  await act(async () => finish(Response.json({ alunos: alunos.slice(0, 2) })))
+  expect(screen.queryByRole('table')).toBeNull()
+  expect(screen.getByRole('region', { name: `Alunos de ${outra.nome}` })).toBeTruthy()
+  expect(screen.queryByRole('region', { name: `Alunos de ${turma.nome}` })).toBeNull()
+})
+
+test.each([401, 403, 404, 503])('erro %i oculta lista anterior e permite atualizar', async (status) => {
+  mocks.listar.mockResolvedValue([turma])
+  mocks.fetch.mockResolvedValueOnce(Response.json({ alunos: alunos.slice(0, 1) }))
+  render(<TurmasPanel profile="Administrador" />)
+  fireEvent.click(await screen.findByRole('button', { name: `Alunos de ${turma.nome}` }))
+  await screen.findByRole('table')
+  mocks.fetch.mockResolvedValueOnce(Response.json({ message: 'Consulta indisponível.' }, { status }))
+  fireEvent.click(screen.getByRole('button', { name: 'Atualizar alunos' }))
+  expect((await screen.findByRole('alert')).textContent).toBe('Consulta indisponível.')
+  expect(screen.queryByRole('table')).toBeNull()
+  expect(screen.queryByText('Nenhum aluno nesta página.')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Atualizar alunos' }))
+  await screen.findByText('Nenhum aluno nesta página.')
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test('ausência de sessão, falha de rede ou resposta malformada não simulam lista vazia', async () => {
+  mocks.listar.mockResolvedValue([turma])
+  mocks.getSession.mockResolvedValueOnce({ data: { session: null }, error: null })
+  render(<TurmasPanel profile="Professor" />)
+  fireEvent.click(await screen.findByRole('button', { name: `Alunos de ${turma.nome}` }))
+  await screen.findByText('Sua sessão terminou. Entre novamente.')
+  expect(mocks.fetch).not.toHaveBeenCalled()
+  mocks.fetch.mockRejectedValueOnce(new TypeError('Erro interno'))
+  fireEvent.click(screen.getByRole('button', { name: 'Atualizar alunos' }))
+  await screen.findByText(/Confira sua conexão/)
+  for (const response of [Response.json({ alunos: [{}] }), Response.json({ alunos: null }),
+    Response.json({ alunos: Array(52).fill(alunos[0]) }), new Response('<html>Erro</html>')]) {
+    mocks.fetch.mockResolvedValueOnce(response)
+    fireEvent.click(screen.getByRole('button', { name: 'Atualizar alunos' }))
+    await screen.findByRole('alert')
+    expect(screen.queryByText('Nenhum aluno nesta página.')).toBeNull()
+    expect(screen.queryByRole('table')).toBeNull()
+  }
 })
