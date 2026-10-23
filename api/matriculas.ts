@@ -15,7 +15,8 @@ export function createMatriculasHandler(
         return jsonResponse(405, { message: 'Utilize GET, POST ou PATCH.' }, { Allow: 'GET, POST, PATCH' })
       }
       const listing = request.method === 'GET'
-      const approving = request.method === 'PATCH'
+      const updating = request.method === 'PATCH'
+      let inactivating = false
       const token = request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1]
       if (!token) return jsonResponse(401, { message: 'Entre novamente para acessar as matrículas.' })
       const query = new URL(request.url).searchParams
@@ -43,12 +44,14 @@ export function createMatriculasHandler(
           if (!body || typeof body !== 'object' || Array.isArray(body)) {
             return jsonResponse(400, { message: 'Envie um objeto JSON com os dados da operação.' })
           }
-          if (approving) {
-            if (Object.keys(body).some((key) => key !== 'matricula_id') ||
+          if (updating) {
+            if (Object.keys(body).some((key) => key !== 'matricula_id' && key !== 'acao') ||
+                ('acao' in body && body.acao !== 'aprovar' && body.acao !== 'inativar') ||
                 !('matricula_id' in body) || typeof body.matricula_id !== 'string' ||
                 !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.matricula_id)) {
-              return jsonResponse(400, { message: 'Informe somente o ID válido da matrícula.' })
+              return jsonResponse(400, { message: 'Informe o ID válido da matrícula e uma ação válida.' })
             }
+            inactivating = 'acao' in body && body.acao === 'inativar'
             params = { p_matricula_id: body.matricula_id }
           } else {
             if (Object.keys(body).some((key) => key !== 'codigo') ||
@@ -110,9 +113,17 @@ export function createMatriculasHandler(
         }
 
         // Identidade, permissões e transições de situação são conferidas também no banco.
-        const { data, error } = await supabase.rpc(approving ? 'aprovar_matricula' : 'solicitar_matricula', params)
+        const operation = inactivating ? 'inativar_matricula' : updating ? 'aprovar_matricula' : 'solicitar_matricula'
+        const expectedStatus = inactivating ? 'INATIVA' : updating ? 'ATIVA' : 'PENDENTE'
+        const { data, error } = await supabase.rpc(operation, params)
         if (error) {
-          if (approving) {
+          if (inactivating) {
+            if (error.code === '42501') return jsonResponse(403, { message: 'Inativação exige professor responsável ou administrador ativo, com MFA.' })
+            if (error.code === 'P0002') return jsonResponse(404, { message: 'Matrícula não encontrada ou acesso não autorizado.' })
+            if (error.code === '55000') return jsonResponse(409, { message: 'A matrícula não está ativa.' })
+            return jsonResponse(503, { message: 'Não foi possível inativar a matrícula. Atualize a lista antes de tentar novamente.' })
+          }
+          if (updating) {
             if (error.code === '42501') return jsonResponse(403, { message: 'Aprovação exige professor responsável ou administrador ativo, com MFA.' })
             if (error.code === 'P0002') return jsonResponse(404, { message: 'Matrícula não encontrada ou acesso não autorizado.' })
             if (error.code === '55000') return jsonResponse(409, { message: 'A matrícula não está pendente ou não pode ser aprovada.' })
@@ -128,11 +139,11 @@ export function createMatriculasHandler(
             !('id' in matricula) || typeof matricula.id !== 'string' ||
             !('turma_id' in matricula) || typeof matricula.turma_id !== 'string' ||
             !('turma_nome' in matricula) || typeof matricula.turma_nome !== 'string' ||
-            !('situacao' in matricula) || matricula.situacao !== (approving ? 'ATIVA' : 'PENDENTE') ||
+            !('situacao' in matricula) || matricula.situacao !== expectedStatus ||
             !('solicitado_em' in matricula) || typeof matricula.solicitado_em !== 'string') {
           return jsonResponse(503, { message: 'Não foi possível confirmar a operação.' })
         }
-        return jsonResponse(approving ? 200 : 201, { matricula })
+        return jsonResponse(updating ? 200 : 201, { matricula })
       } catch {
         return jsonResponse(503, { message: 'Não foi possível conectar ao serviço de matrículas.' })
       }

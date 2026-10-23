@@ -1,6 +1,6 @@
 # Turmas
 
-RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação e consulta das matrículas pelo aluno, aprovação e listagem dos matriculados pelo professor responsável ou ADMIN. A ação de inativar matrículas fica para outro bloco.
+RF07–RF11: criação/consulta de turmas, solicitação e consulta das matrículas pelo aluno, aprovação, listagem e inativação pelo professor responsável ou ADMIN. Inativação preserva o histórico; reativação não está disponível.
 
 ## Fluxo
 
@@ -44,7 +44,7 @@ Usar somente dados demonstrativos. Aprovação de matrícula não restaura a apr
 - Cada par aluno/turma é único, inclusive após inativação. O aluno pode ter várias turmas.
 - Leitura com MFA e sessão válida: aluno vê seus vínculos, professor vê os de suas turmas, ADMIN vê todos. Os perfis precisam estar ativos; aluno e professor também precisam manter vínculo com a organização ativa da turma.
 - Consulta de histórico não depende da matrícula ou turma estar ativa; isso não autoriza realizar avaliações.
-- Escrita direta está bloqueada para todos os perfis, inclusive ADMIN. Solicitação e aprovação usam funções controladas das `013` e `014`, com auditoria; inativação terá etapa própria.
+- Escrita direta está bloqueada para todos os perfis, inclusive ADMIN. Solicitação, aprovação e inativação usam funções controladas das `013`, `014` e `018`, com auditoria.
 - As referências não apagam registros em cascata. Excluir uma conta ou turma com matrículas exige tratamento explícito do histórico; a rotina de encerramento da demonstração deverá considerar isso.
 
 Aplicar `database/012_matriculas.sql` depois de `011` no Supabase de testes. A migração não cadastra matrículas, não modifica usuários/turmas e não altera telas. Não reaplicar migrações antigas depois dela.
@@ -172,7 +172,7 @@ Em **Turmas → Alunos**, professor responsável e ADMIN consultam nome e RGM da
 - Sessão, MFA e permissões são conferidos no servidor e no banco, inclusive em chamadas diretas à função. Professor só acessa suas turmas na organização ativa; ADMIN mantém a consulta institucional. Turmas inativas continuam consultáveis, sem liberar avaliações.
 - A consulta retorna apenas ID da matrícula, nome e RGM. Não amplia a RLS de perfis nem devolve e-mail ou identificadores de sessão.
 - Página começa em zero na API. A tela mostra 50 alunos, ordenados por nome e ID da matrícula. O banco busca um registro extra para indicar a próxima página. **Atualizar alunos** volta à primeira página. Alterações entre consultas podem mudar a posição dos alunos.
-- Somente leitura: não aprova, inativa ou exclui vínculos e não cria eventos. Reutiliza rota, estilos e serviço HTTP; sem dependências novas.
+- A consulta é somente leitura e não cria eventos. A ação **Inativar** foi adicionada no bloco `018`, abaixo. Reutiliza rota, estilos e serviço HTTP; sem dependências novas.
 - API: parâmetros inválidos `400`, sessão inválida `401`, perfil/MFA inválido `403`, turma inexistente ou fora do acesso `404`, indisponibilidade/resposta inválida `503`. Erro não aparece como lista vazia.
 
 Aplicar somente `database/017_listar_alunos_turma.sql` após `016`. Rodar `npm run dev:full`, abrir **Turmas → Alunos** como responsável e conferir uma matrícula aprovada. Repetir com ADMIN e outra turma. Professor diferente não deve acessar os alunos da turma; aluno não recebe essa tela. Uma turma sem matrículas ativas mostra lista vazia. Aprovar uma pendência na seção Matrículas e clicar **Atualizar alunos** inclui o novo matriculado.
@@ -180,6 +180,32 @@ Aplicar somente `database/017_listar_alunos_turma.sql` após `016`. Rodar `npm r
 Testes locais: `tests/turmas.test.ts` (SQL/API, permissões, paginação, campos e preservação dos registros) e `tests/turmas-panel.test.tsx` (tela e serviço HTTP, troca de turma, carregamento, atualização e erros). Nenhuma alteração é aplicada ao Supabase remoto pelos testes.
 
 Referências: [funções do Supabase](https://supabase.com/docs/guides/database/functions), [limpeza de efeitos do React](https://react.dev/reference/react/useEffect).
+
+## Inativação de matrícula (018)
+
+Em **Turmas → Alunos → Inativar**, a confirmação identifica aluno e turma. Somente `ATIVA → INATIVA`: não cancela pendências, reativa matrículas, exclui vínculos ou altera contas.
+
+`AlunosTurmaPanel` → `inativarMatricula` → `PATCH /api/matriculas` com `{ "matricula_id": "UUID", "acao": "inativar" }` → `public.inativar_matricula` → função privada.
+
+- Professor responsável e ADMIN ativos, com sessão válida e MFA. Professor precisa manter vínculo com a organização ativa da turma; ADMIN mantém acesso institucional. Turma ou conta do aluno inativa não impede encerrar a matrícula. Não ocorre reativação de nenhum registro.
+- Preserva ID, aluno, turma e data da solicitação. A lista da turma deixa de mostrar o vínculo, mas **Minhas matrículas** continua mostrando **Inativa**, conforme as permissões existentes.
+- `MATRICULA_INATIVADA` registra autor, vínculo e horário. Auditoria e atualização pertencem à mesma transação; falha no evento desfaz a mudança. O ADMIN tem o filtro **Matrícula inativada** na Auditoria.
+- Bloqueio da linha evita duas inativações do mesmo vínculo. Repetição retorna `409` sem novo evento. Escrita direta permanece bloqueada; não há `DELETE`.
+- Botões da lista ficam bloqueados durante o envio. Sucesso atualiza a primeira página; erro mantém a linha e não mostra confirmação. O foco vai para a mensagem do resultado.
+- O `PATCH` antigo, sem `acao`, continua aprovando. `acao: "aprovar"` também é aceito; valores desconhecidos são recusados. Não aceita situação, usuário ou aluno fornecidos pelo cliente.
+- API: corpo inválido `400`, sessão inválida `401`, perfil/MFA inválido `403`, vínculo inexistente/fora do acesso `404`, vínculo não ativo `409`, indisponibilidade `503`.
+
+### Teste manual
+
+1. Aplicar somente `database/018_inativar_matricula.sql`, após `017`. Não reaplicar migrações antigas.
+2. Rodar `npm run dev:full`. Como responsável, abrir **Turmas → Alunos** com uma matrícula fictícia ativa.
+3. Clicar **Inativar** e cancelar: nada muda. Repetir e confirmar: a linha sai da lista de ativos.
+4. Como aluno, atualizar **Minhas matrículas**: deve aparecer **Inativa**. A conta continua ativa, e outras matrículas não mudam.
+5. Como ADMIN, conferir **Matrícula inativada** na Auditoria. Testar também inativação administrativa em outra turma.
+
+SQL/API, recusa de acesso, repetição, preservação e rollback estão em `tests/turmas.test.ts`. Tela/serviço e confirmação estão em `tests/turmas-panel.test.tsx`; filtro em `tests/audit-panel.test.tsx`. Testes usam banco local e Auth/HTTP simulados, não alteram o Supabase remoto nem substituem a conferência de concorrência entre conexões reais.
+
+Referências: [funções do Supabase](https://supabase.com/docs/guides/database/functions), [bloqueios do PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html), [confirmação do navegador](https://developer.mozilla.org/en-US/docs/Web/API/Window/confirm).
 
 ## Verificações
 

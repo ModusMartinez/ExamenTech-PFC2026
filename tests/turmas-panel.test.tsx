@@ -20,8 +20,9 @@ beforeEach(() => {
   mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'sessao-simulada' } }, error: null })
   mocks.fetch.mockImplementation(async () => Response.json({ alunos: [] }))
   vi.stubGlobal('fetch', mocks.fetch)
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
 })
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 test('professor consulta lista vazia e cria uma turma com nome normalizado', async () => {
   render(<TurmasPanel profile="Professor" />)
@@ -99,13 +100,13 @@ test.each(['Professor', 'Administrador'] as const)('%s abre alunos da turma sem 
   expect(mocks.fetch).not.toHaveBeenCalled()
   fireEvent.click(button)
   await screen.findByRole('cell', { name: 'Aluno 0' })
-  expect(screen.getByRole('cell', { name: '12345678901' })).toBeTruthy()
-  expect(screen.getByRole('cell', { name: 'Não informado' })).toBeTruthy()
+  expect(screen.getByText('12345678901')).toBeTruthy()
+  expect(screen.getByText('Não informado')).toBeTruthy()
   expect(button.getAttribute('aria-expanded')).toBe('true')
   expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith(`/api/matriculas?turma_id=${turma.id}&pagina=0`, {
     method: 'GET', headers: { Authorization: 'Bearer sessao-simulada', 'Content-Type': 'application/json' }, body: undefined,
   })
-  expect(screen.queryByRole('button', { name: /Aprovar|Inativar|Excluir/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: /Aprovar|Excluir/ })).toBeNull()
   fireEvent.click(button)
   expect(screen.queryByRole('table')).toBeNull()
   expect(button.getAttribute('aria-expanded')).toBe('false')
@@ -185,4 +186,92 @@ test('ausência de sessão, falha de rede ou resposta malformada não simulam li
     expect(screen.queryByText('Nenhum aluno nesta página.')).toBeNull()
     expect(screen.queryByRole('table')).toBeNull()
   }
+})
+
+const inativada = {
+  id: alunos[0].id, turma_id: turma.id, turma_nome: turma.nome,
+  situacao: 'INATIVA', solicitado_em: '2026-10-23T12:00:00Z',
+}
+
+async function abrirAlunos(profile: 'Professor' | 'Administrador' = 'Professor') {
+  mocks.listar.mockResolvedValue([turma])
+  mocks.fetch.mockResolvedValueOnce(Response.json({ alunos: alunos.slice(0, 2) }))
+  render(<TurmasPanel profile={profile} />)
+  fireEvent.click(await screen.findByRole('button', { name: `Alunos de ${turma.nome}` }))
+  return screen.findByRole('button', { name: 'Inativar matrícula de Aluno 0' })
+}
+
+test('cancelar confirmação mantém matrícula sem enviar PATCH', async () => {
+  vi.mocked(window.confirm).mockReturnValue(false)
+  fireEvent.click(await abrirAlunos())
+  expect(window.confirm).toHaveBeenCalledExactlyOnceWith('Inativar a matrícula de Aluno 0 em “Engenharia 8B”?\nO histórico será mantido.')
+  expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  expect(screen.getByRole('cell', { name: 'Aluno 0' })).toBeTruthy()
+})
+
+test.each(['Professor', 'Administrador'] as const)('%s confirma inativação e atualiza lista somente após sucesso', async (profile) => {
+  const button = await abrirAlunos(profile)
+  mocks.fetch.mockResolvedValueOnce(Response.json({ matricula: inativada }))
+  fireEvent.click(button)
+  const notice = await screen.findByText('Matrícula de Aluno 0 inativada.')
+  await screen.findByText('Nenhum aluno nesta página.')
+  expect(mocks.fetch).toHaveBeenNthCalledWith(2, '/api/matriculas', {
+    method: 'PATCH', headers: { Authorization: 'Bearer sessao-simulada', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ matricula_id: alunos[0].id, acao: 'inativar' }),
+  })
+  expect(mocks.fetch.mock.calls[2][0]).toBe(`/api/matriculas?turma_id=${turma.id}&pagina=0`)
+  expect(document.activeElement).toBe(notice.parentElement)
+  expect(screen.queryByRole('button', { name: 'Inativar matrícula de Aluno 0' })).toBeNull()
+})
+
+test('inativação em andamento bloqueia repetição, outra matrícula e navegação da lista', async () => {
+  const button = await abrirAlunos()
+  let finish!: (value: Response) => void
+  mocks.fetch.mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve }))
+  fireEvent.click(button)
+  fireEvent.click(button)
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2))
+  for (const name of ['Inativar matrícula de Aluno 0', 'Inativar matrícula de Aluno 1', 'Atualizar alunos', 'Anterior', 'Próxima']) {
+    expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true)
+  }
+  expect(window.confirm).toHaveBeenCalledTimes(1)
+  expect(screen.getByText('Inativando...')).toBeTruthy()
+  await act(async () => finish(Response.json({ matricula: inativada })))
+  await screen.findByText('Matrícula de Aluno 0 inativada.')
+})
+
+test.each([401, 403, 404, 409, 503])('inativação recusada (%i) mantém a linha sem mostrar sucesso', async (status) => {
+  const button = await abrirAlunos()
+  mocks.fetch.mockResolvedValueOnce(Response.json({ message: 'Inativação não confirmada.' }, { status }))
+  fireEvent.click(button)
+  expect((await screen.findByRole('alert')).textContent).toBe('Inativação não confirmada.')
+  expect(screen.getByRole('cell', { name: 'Aluno 0' })).toBeTruthy()
+  expect(screen.queryByText('Matrícula de Aluno 0 inativada.')).toBeNull()
+  expect(mocks.fetch).toHaveBeenCalledTimes(2)
+  expect(button.hasAttribute('disabled')).toBe(false)
+})
+
+test('resposta com outro ID/situação ou falha de rede não remove a matrícula', async () => {
+  const button = await abrirAlunos()
+  for (const matricula of [{ ...inativada, id: 'outra-matricula' }, { ...inativada, situacao: 'ATIVA' }, {}]) {
+    mocks.fetch.mockResolvedValueOnce(Response.json({ matricula }))
+    fireEvent.click(button)
+    await screen.findByRole('alert')
+    expect(screen.getByRole('cell', { name: 'Aluno 0' })).toBeTruthy()
+    expect(screen.queryByText('Matrícula de Aluno 0 inativada.')).toBeNull()
+  }
+  mocks.fetch.mockRejectedValueOnce(new TypeError('Falha de rede'))
+  fireEvent.click(button)
+  await screen.findByText(/Confira sua conexão/)
+  expect(screen.getByRole('cell', { name: 'Aluno 0' })).toBeTruthy()
+})
+
+test('inativação confirmada não vira falha quando a consulta seguinte está indisponível', async () => {
+  const button = await abrirAlunos()
+  mocks.fetch.mockResolvedValueOnce(Response.json({ matricula: inativada }))
+  mocks.fetch.mockResolvedValueOnce(Response.json({ message: 'Lista indisponível.' }, { status: 503 }))
+  fireEvent.click(button)
+  await screen.findByText('Matrícula de Aluno 0 inativada.')
+  await screen.findByText('Lista indisponível.')
+  expect(screen.queryByRole('table')).toBeNull()
 })

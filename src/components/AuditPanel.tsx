@@ -24,6 +24,7 @@ const eventNames: Record<string, string> = {
   TURMA_CRIADA: 'Turma criada',
   MATRICULA_SOLICITADA: 'Matrícula solicitada',
   MATRICULA_APROVADA: 'Matrícula aprovada',
+  MATRICULA_INATIVADA: 'Matrícula inativada',
 }
 
 function formatDate(value: string) {

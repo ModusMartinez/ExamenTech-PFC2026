@@ -5,7 +5,7 @@ type Matricula = {
   id: string
   turma_id: string
   turma_nome: string
-  situacao: 'PENDENTE' | 'ATIVA'
+  situacao: 'PENDENTE' | 'ATIVA' | 'INATIVA'
   solicitado_em: string
 }
 
@@ -89,5 +89,12 @@ export async function aprovarMatricula(id: string) {
   const result = await requisicaoMatriculas('PATCH', { matricula_id: id })
   const matricula = lerMatricula(result, 'ATIVA')
   if (matricula.id !== id) throw new Error('Não foi possível confirmar a matrícula aprovada.')
+  return matricula
+}
+
+export async function inativarMatricula(id: string) {
+  const result = await requisicaoMatriculas('PATCH', { matricula_id: id, acao: 'inativar' })
+  const matricula = lerMatricula(result, 'INATIVA')
+  if (matricula.id !== id) throw new Error('Não foi possível confirmar a matrícula inativada.')
   return matricula
 }

@@ -71,6 +71,7 @@ test('atualizar busca novamente e mostra o estado vazio sem manter eventos antig
 test.each([
   ['MATRICULA_SOLICITADA', 'Matrícula solicitada', 'solicitar_matricula'],
   ['MATRICULA_APROVADA', 'Matrícula aprovada', 'aprovar_matricula'],
+  ['MATRICULA_INATIVADA', 'Matrícula inativada', 'inativar_matricula'],
 ])('%s tem filtro, nome legível e referência ao vínculo', async (evento, nome, acao) => {
   render(<AuditPanel />)
   await screen.findByText('LOGIN_SUCESSO')
