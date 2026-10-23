@@ -31,6 +31,7 @@ declare global {
 
 type TurnstileWidgetProps = {
   siteKey: string
+  action?: 'login' | 'cadastro'
   resetSignal: number
   onVerify: (token: string) => void
   onExpire: () => void
@@ -89,6 +90,7 @@ function loadTurnstileScript() {
 
 export function TurnstileWidget({
   siteKey,
+  action = 'login',
   resetSignal,
   onVerify,
   onExpire,
@@ -132,7 +134,7 @@ export function TurnstileWidget({
 
         widgetIdRef.current = turnstile.render(containerRef.current, {
           sitekey: siteKey,
-          action: 'login',
+          action,
           theme: 'light',
           language: 'pt-br',
           appearance: 'always',
@@ -176,7 +178,7 @@ export function TurnstileWidget({
         widgetIdRef.current = null
       }
     }
-  }, [siteKey])
+  }, [siteKey, action])
 
   useEffect(() => {
     if (!resetSignal || !widgetIdRef.current || !window.turnstile) {

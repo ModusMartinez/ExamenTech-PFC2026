@@ -1,6 +1,8 @@
 import { createServer } from 'node:http'
 import type { IncomingHttpHeaders, IncomingMessage } from 'node:http'
 import turnstileHandler from '../api/validar-turnstile.ts'
+import turmasHandler from '../api/turmas.ts'
+import matriculasHandler from '../api/matriculas.ts'
 
 const MAX_BODY_SIZE = 16 * 1024
 const port = Number(process.env.API_PORT ?? 8787)
@@ -42,7 +44,11 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
     const host = incomingRequest.headers.host ?? `127.0.0.1:${port}`
     const url = new URL(incomingRequest.url ?? '/', `http://${host}`)
 
-    if (url.pathname !== '/api/validar-turnstile') {
+    const handler = url.pathname === '/api/validar-turnstile' ? turnstileHandler
+      : url.pathname === '/api/turmas' ? turmasHandler
+      : url.pathname === '/api/matriculas' ? matriculasHandler : null
+
+    if (!handler) {
       outgoingResponse.writeHead(404, { 'Content-Type': 'application/json' })
       outgoingResponse.end(JSON.stringify({ message: 'Rota não encontrada.' }))
       return
@@ -58,7 +64,7 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
       body: body?.length ? body : undefined,
     })
 
-    const response = await turnstileHandler.fetch(request)
+    const response = await handler.fetch(request)
     const responseBody = Buffer.from(await response.arrayBuffer())
 
     outgoingResponse.statusCode = response.status
