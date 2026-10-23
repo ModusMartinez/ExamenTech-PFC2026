@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { lerMatriculasPendentes } from '../src/services/matriculaValidation.ts'
+import { lerMatriculasPendentes, lerMinhasMatriculas } from '../src/services/matriculaValidation.ts'
 
 function jsonResponse(status: number, body: object, headers?: HeadersInit) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
@@ -18,6 +18,12 @@ export function createMatriculasHandler(
       const approving = request.method === 'PATCH'
       const token = request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1]
       if (!token) return jsonResponse(401, { message: 'Entre novamente para acessar as matrículas.' })
+      const query = new URL(request.url).searchParams
+      const ownEnrollments = query.get('consulta') === 'minhas'
+      if (listing && ([...query.keys()].some((key) => key !== 'consulta') ||
+          query.getAll('consulta').length > 1 || (query.has('consulta') && !ownEnrollments))) {
+        return jsonResponse(400, { message: 'Consulta inválida. Não envie identificação de aluno nem filtros adicionais.' })
+      }
       if (!listing && request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
         return jsonResponse(415, { message: 'Envie os dados no formato JSON.' })
       }
@@ -72,12 +78,16 @@ export function createMatriculasHandler(
         if (!identity.user) return jsonResponse(401, { message: 'Sessão inválida. Entre novamente.' })
 
         if (listing) {
-          const { data, error } = await supabase.rpc('listar_matriculas_pendentes')
+          const { data, error } = await supabase.rpc(ownEnrollments ? 'listar_minhas_matriculas' : 'listar_matriculas_pendentes')
           if (error?.code === '42501') {
-            return jsonResponse(403, { message: 'Consulta exige professor ou administrador ativo, com MFA.' })
+            return jsonResponse(403, { message: ownEnrollments
+              ? 'Consulta exige aluno ativo, organização ativa e MFA.'
+              : 'Consulta exige professor ou administrador ativo, com MFA.' })
           }
-          const matriculas = error ? null : lerMatriculasPendentes(data)
-          if (!matriculas) return jsonResponse(503, { message: 'Não foi possível carregar as matrículas pendentes. Tente novamente.' })
+          const matriculas = error ? null : ownEnrollments ? lerMinhasMatriculas(data) : lerMatriculasPendentes(data)
+          if (!matriculas) return jsonResponse(503, { message: ownEnrollments
+            ? 'Não foi possível carregar suas matrículas. Tente novamente.'
+            : 'Não foi possível carregar as matrículas pendentes. Tente novamente.' })
           return jsonResponse(200, { matriculas })
         }
 

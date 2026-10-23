@@ -1,6 +1,6 @@
 # Turmas
 
-RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação pelo painel do aluno e aprovação pela tela do professor responsável ou ADMIN. Inativação e histórico no painel do aluno ficam para outros blocos.
+RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação e consulta das matrículas pelo aluno e aprovação pelo professor responsável ou ADMIN. A ação de inativar matrículas fica para outro bloco.
 
 ## Fluxo
 
@@ -8,7 +8,7 @@ RF07–RF11 em desenvolvimento: criação/consulta de turmas, solicitação pelo
 
 - Professor ativo com MFA cria várias turmas e consulta somente as próprias.
 - Administrador ativo com MFA consulta as turmas; não cria no lugar do professor.
-- Aluno e visitante não criam nem consultam turmas nesta etapa.
+- Aluno e visitante não criam nem consultam a lista geral de turmas. O aluno vê somente a identificação das turmas nas próprias matrículas.
 - O nome tem de 3 a 100 caracteres.
 - Professor responsável, organização e código de 12 caracteres são definidos no banco.
 - O professor precisa estar vinculado a uma organização ativa.
@@ -78,7 +78,7 @@ Referências: [RPC do Supabase](https://supabase.com/docs/reference/javascript/r
 - Valida o formato do código, aceita minúsculas/espaços externos e bloqueia envio repetido enquanto aguarda a resposta.
 - Usa o token da sessão no cabeçalho; envia somente o código no JSON. As permissões continuam no servidor e no banco.
 - Sucesso informa nome da turma e situação pendente. Falha mantém o código para correção ou nova tentativa.
-- A mensagem de sucesso é temporária; ainda não existe lista/histórico no painel do aluno. Recarregar a página não apaga a matrícula salva. Professor e ADMIN têm a tela de aprovação descrita abaixo.
+- A mensagem de sucesso é temporária. O aluno acompanha o registro em **Minhas matrículas**, descrito no bloco 016. Recarregar a página não apaga a matrícula salva. Professor e ADMIN têm a tela de aprovação descrita abaixo.
 - Reutiliza estilos das turmas, mantém os links legais no rodapé e não adiciona dependências nem SQL.
 
 Teste manual, com `011`–`013` já aplicadas e `npm run dev:full`:
@@ -114,7 +114,7 @@ Referências: [funções e permissões](https://supabase.com/docs/guides/databas
 
 `App` → `MatriculasPanel` → `services/matriculas` → `GET /api/matriculas` → `listar_matriculas_pendentes()`.
 
-- Seção **Matrículas** para professor e ADMIN, após login e MFA. Aluno mantém apenas **Solicitar matrícula**.
+- Seção **Matrículas** para professor e ADMIN, após login e MFA. O aluno tem **Solicitar matrícula** e **Minhas matrículas**, sem ações de aprovação.
 - Professor vê as pendências das próprias turmas; ADMIN vê as de todos os responsáveis. A função reutiliza as permissões de consulta das turmas.
 - Consulta devolve até 50 pendências, ordenadas por data e ID, da mais antiga para a mais recente. Não é uma lista completa quando há mais de 50; a tela informa o limite e busca novamente após cada aprovação.
 - Mostra nome do aluno, RGM (ou ID, quando não informado), turma e data. Não devolve e-mail nem códigos de ingresso. A função identifica somente alunos dos vínculos autorizados; a leitura geral da tabela `perfis` continua restrita.
@@ -137,6 +137,31 @@ Referências: [funções e permissões](https://supabase.com/docs/guides/databas
 Os testes da consulta estão em `tests/turmas.test.ts`. `tests/matriculas-panel.test.tsx` testa tela e serviço juntos, com sessão/HTTP simulados: carregamento, campos, aprovação, atualização, duplicidade de clique e erros. Navegação e filtro da auditoria permanecem nas suítes existentes. A conferência visual usa dados fictícios isolados; o fluxo no Supabase precisa ser validado manualmente.
 
 Referências: [funções e permissões do Supabase](https://supabase.com/docs/guides/database/functions), [carregamento e limpeza de efeitos no React](https://react.dev/reference/react/useEffect).
+
+## Minhas matrículas — painel do aluno (016)
+
+`App` → `MinhasMatriculasPanel` → `services/matriculas` → `GET /api/matriculas?consulta=minhas` → `listar_minhas_matriculas()`.
+
+- Menu exclusivo do aluno. Mostra turma, data da solicitação e situação **Pendente**, **Ativa** ou **Inativa**. Sem botões de aprovação, cancelamento ou inativação.
+- A identidade vem da sessão, não de um ID informado pelo navegador. A API valida o token; a função exige ALUNO ativo, organização ativa, sessão válida e MFA, reutilizando as regras de consulta da 012.
+- Retorna somente os próprios vínculos na organização atual, inclusive matrículas e turmas inativas. Não libera leitura geral de turmas, códigos de ingresso ou dados dos colegas.
+- Lista até 50 matrículas, ordenadas por data e ID, da solicitação mais recente para a mais antiga. Não há paginação neste bloco; o limite fica indicado na tela.
+- **Atualizar** consulta novamente a situação no banco. Ao sair da tela e voltar, a lista também é consultada. Não há atualização em tempo real nem mudança automática de situação no frontend.
+- Estado ativo indica matrícula aprovada, não liberação de avaliações; esse fluxo ainda não foi implementado.
+- Reutiliza a rota, o serviço HTTP e os estilos existentes. A SQL cria apenas funções de consulta, sem alterar registros, eventos, permissões de escrita ou aprovação de contas. Não adiciona dependências.
+
+### Teste manual deste bloco
+
+1. Com `015` já aplicada, executar somente `database/016_listar_minhas_matriculas.sql` no Supabase de testes. Não reaplicar migrações anteriores.
+2. Rodar `npm run dev:full`, entrar como aluno e concluir o MFA. Abrir **Minhas matrículas**.
+3. Sem vínculos, deve aparecer a orientação para solicitar matrícula. Solicitar ingresso pelo formulário existente e voltar à lista: a turma deve aparecer como **Pendente**.
+4. Aprovar com o professor responsável ou ADMIN. Na sessão do aluno, clicar **Atualizar**: a mesma matrícula deve aparecer como **Ativa**.
+5. Outro aluno deve ver apenas as próprias matrículas. Professor e ADMIN não recebem o menu **Minhas matrículas**.
+6. Caso já exista matrícula fictícia `INATIVA`, conferir sua exibição. A suíte local cobre esse estado e turma inativa; não é necessário alterar registros reais para testar.
+
+Banco/API: `tests/turmas.test.ts`. Tela junto do serviço: `tests/minhas-matriculas.test.tsx`. Os testes cobrem isolamento, MFA/sessão, situações, ordem/limite, atualização e erros. Usam PostgreSQL local e Auth/HTTP simulados, sem acessar o Supabase remoto.
+
+Referências: [funções e permissões](https://supabase.com/docs/guides/database/functions), [controle de acesso por linha](https://supabase.com/docs/guides/database/postgres/row-level-security).
 
 ## Verificações
 

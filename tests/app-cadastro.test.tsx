@@ -28,6 +28,9 @@ vi.mock('../src/components/AuditPanel', () => ({ AuditPanel: () => <p>Consulta d
 vi.mock('../src/components/MatriculasPanel', () => ({
   MatriculasPanel: ({ profile }: { profile: string }) => <p>Pendências para {profile}</p>,
 }))
+vi.mock('../src/components/MinhasMatriculasPanel', () => ({
+  MinhasMatriculasPanel: () => <p>Consulta das minhas matrículas</p>,
+}))
 vi.mock('../src/components/MfaStep', () => ({
   MfaStep: ({ mode }: { mode: string }) => <p>Etapa MFA: {mode}</p>,
 }))
@@ -405,10 +408,15 @@ for (const profile of ['Professor', 'Aluno', 'Administrador']) {
       fireEvent.click(screen.getByRole('button', { name: 'Solicitar matrícula' }))
       expect(screen.getByLabelText('Código da turma')).toBeTruthy()
       expect(screen.getByRole('link', { name: 'Termos de Uso (abre em nova aba)' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Minhas matrículas' }))
+      expect(screen.getByText('Consulta das minhas matrículas')).toBeTruthy()
+      expect(screen.getByRole('link', { name: 'Termos de Uso (abre em nova aba)' })).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: 'Início' }))
       expect(screen.queryByLabelText('Código da turma')).toBeNull()
+      expect(screen.queryByText('Consulta das minhas matrículas')).toBeNull()
     } else {
       expect(screen.queryByRole('button', { name: 'Solicitar matrícula' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Minhas matrículas' })).toBeNull()
       expect(screen.queryByLabelText('Código da turma')).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: 'Matrículas' }))
       expect(screen.getByText(`Pendências para ${profile}`)).toBeTruthy()

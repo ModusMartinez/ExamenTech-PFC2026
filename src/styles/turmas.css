@@ -116,6 +116,7 @@
 .matriculas-notice:focus-visible { outline: 3px solid #69a4d3; outline-offset: 2px; }
 .matriculas-list .btn-primary { width: auto; min-width: 112px; padding: 0 20px; margin: 0; flex-shrink: 0; }
 .matriculas-list .turma-description p + p { margin-top: 6px; }
+.matricula-situacao { flex-shrink: 0; color: var(--dark-blue); font-weight: 600; }
 
 @media (max-width: 500px) {
   .turma-form { padding: 18px; }

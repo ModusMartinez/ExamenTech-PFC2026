@@ -30,3 +30,32 @@ export function lerMatriculasPendentes(value: unknown): MatriculaPendente[] | nu
   }
   return matriculas
 }
+
+export type MatriculaDoAluno = {
+  id: string
+  turma_id: string
+  turma_nome: string
+  situacao: 'PENDENTE' | 'ATIVA' | 'INATIVA'
+  solicitado_em: string
+}
+
+export function lerMinhasMatriculas(value: unknown): MatriculaDoAluno[] | null {
+  if (!Array.isArray(value) || value.length > 50) return null
+  const matriculas: MatriculaDoAluno[] = []
+  const items: unknown[] = value
+  for (const item of items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item) ||
+        !('id' in item) || typeof item.id !== 'string' ||
+        !('turma_id' in item) || typeof item.turma_id !== 'string' ||
+        !('turma_nome' in item) || typeof item.turma_nome !== 'string' ||
+        !('situacao' in item) || (item.situacao !== 'PENDENTE' && item.situacao !== 'ATIVA' && item.situacao !== 'INATIVA') ||
+        !('solicitado_em' in item) || typeof item.solicitado_em !== 'string' ||
+        !Number.isFinite(Date.parse(item.solicitado_em))) return null
+
+    matriculas.push({
+      id: item.id, turma_id: item.turma_id, turma_nome: item.turma_nome,
+      situacao: item.situacao, solicitado_em: item.solicitado_em,
+    })
+  }
+  return matriculas
+}

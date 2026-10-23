@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase'
-import { lerMatriculasPendentes } from './matriculaValidation'
+import { lerMatriculasPendentes, lerMinhasMatriculas } from './matriculaValidation'
 
 type Matricula = {
   id: string
@@ -9,13 +9,13 @@ type Matricula = {
   solicitado_em: string
 }
 
-async function requisicaoMatriculas(method: 'GET' | 'POST' | 'PATCH', body?: object) {
+async function requisicaoMatriculas(method: 'GET' | 'POST' | 'PATCH', body?: object, consulta?: 'minhas') {
   const { data, error } = await supabase.auth.getSession()
   if (error || !data.session) throw new Error('Sua sessão terminou. Entre novamente.')
 
   let response: Response
   try {
-    response = await fetch('/api/matriculas', {
+    response = await fetch(consulta === 'minhas' ? '/api/matriculas?consulta=minhas' : '/api/matriculas', {
       method,
       headers: {
         Authorization: `Bearer ${data.session.access_token}`,
@@ -68,6 +68,13 @@ export async function listarMatriculasPendentes() {
   const result = await requisicaoMatriculas('GET')
   const matriculas = lerMatriculasPendentes('matriculas' in result ? result.matriculas : null)
   if (!matriculas) throw new Error('Não foi possível conferir a lista de matrículas pendentes.')
+  return matriculas
+}
+
+export async function listarMinhasMatriculas() {
+  const result = await requisicaoMatriculas('GET', undefined, 'minhas')
+  const matriculas = lerMinhasMatriculas('matriculas' in result ? result.matriculas : null)
+  if (!matriculas) throw new Error('Não foi possível conferir sua lista de matrículas.')
   return matriculas
 }
 

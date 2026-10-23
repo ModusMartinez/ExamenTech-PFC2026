@@ -65,6 +65,7 @@ export function SolicitarMatriculaPanel() {
 
       <p className="turmas-note">
         A solicitação fica pendente até a aprovação pelo professor responsável ou administrador.
+        Acompanhe a situação em Minhas matrículas.
         O acesso às avaliações ainda não está disponível.
       </p>
     </section>
