@@ -1,6 +1,6 @@
 # Avaliações em rascunho (019)
 
-Primeiro bloco de RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação e consulta no banco. Sem API própria, telas, edição, questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação e consulta de rascunhos no banco e na API. Sem telas, edição, questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -66,8 +66,61 @@ SELECT
 
 Esperado: RLS e consulta `true`; escrita direta, alteração e exclusão `false`. A consulta continua limitada pela RLS, não é acesso geral aos rascunhos.
 
-O SQL Editor executa como administrador do banco, normalmente sem a sessão do aplicativo. Chamar a função por lá sem contexto autenticado deve falhar; não remover MFA/RLS para fazê-la funcionar. O teste pelo navegador fica para a API e a tela.
+O SQL Editor executa como administrador do banco, normalmente sem a sessão do aplicativo. Chamar a função por lá sem contexto autenticado deve falhar; não remover MFA/RLS para fazê-la funcionar. A API abaixo permite testar com a sessão do aplicativo; o formulário fica para o próximo bloco.
 
 Os testes executam as funções e políticas reais no PostgreSQL local via PGlite, com Auth e sessões simulados. Cobrem campos, perfis, isolamento, aluno já matriculado, sessão de outro usuário, MFA, bloqueio de escrita, preservação dos eventos e rollback. Não acessam Supabase remoto nem substituem teste com Auth real ou concorrência entre conexões reais.
 
 Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), [constraints do PostgreSQL](https://www.postgresql.org/docs/current/ddl-constraints.html).
+
+## API de criação e consulta
+
+Sem nova query: requer a `019` já aplicada. Rota registrada no servidor local e no diretório `api` da Vercel. Usa chave pública e `Authorization: Bearer <access_token>` do usuário, nunca chave administrativa. `getUser` valida a identidade; perfil e RLS/função conferem as permissões.
+
+- `POST /api/avaliacoes`: cria pela função `criar_avaliacao_rascunho`. Recebe somente `turma_id`, `titulo`, `tipo`, `inicio_em`, `fim_em`, `duracao_minutos`. Retorna `201` com `{ avaliacao }`, incluindo ID, autor, situação e data de criação definidos pelo banco.
+- `GET /api/avaliacoes?turma_id=UUID`: consulta os rascunhos visíveis da turma, por data de criação decrescente e ID decrescente. Retorna `200` com `{ avaliacoes, limite: 50 }`. Ainda sem paginação; não é uma lista completa quando há mais de 50 rascunhos.
+- Professor cria apenas nas próprias turmas. ADMIN consulta, mas não cria. Aluno é recusado mesmo matriculado. Consulta de turma inexistente ou fora do acesso retorna a mesma resposta `404`; turma acessível sem rascunhos retorna lista vazia. Turma inativa permite consulta, mas criação retorna `409`.
+- Não recebe professor, organização, situação, data de criação ou aluno no corpo. Campos extras, parâmetros de URL extras/repetidos e JSON inválido são recusados.
+- Datas na API usam ISO com segundos e fuso (`Z` ou `±HH:MM`); calendário inválido e fim anterior/igual ao início são recusados. Respostas normalizam datas em UTC com precisão de milissegundos. Minutos devem ser número inteiro positivo dentro do tipo INTEGER do PostgreSQL, não texto.
+- O contrato em `src/services/avaliacaoValidation.ts` valida entrada e resposta do banco. Resposta inválida não confirma criação nem vira lista vazia; campos extras do banco não são devolvidos. Todos os retornos usam `Cache-Control: no-store`.
+- Não repete o POST automaticamente. Em falha de conexão/resposta, consultar antes de reenviar: a transação pode ter sido concluída, e duas criações válidas geram registros diferentes.
+- Erros HTTP: `400` dados/consulta inválidos, `401` token ausente/recusado, `403` perfil/MFA não permitido, `404` turma inacessível, `405` método, `409` turma inativa, `415` conteúdo diferente de JSON e `503` indisponibilidade/resposta inválida. Sessão encerrada recusada pela RLS pode retornar `404` na consulta, sem expor a turma.
+
+### Teste manual da API
+
+Rodar `npm run dev:full` com o Supabase de testes. Entrar como professor e concluir MFA. Ainda não há botão de avaliação. No console do navegador, apenas no ambiente local:
+
+```js
+const { supabase } = await import('/src/lib/supabase.ts');
+const { data, error } = await supabase.auth.getSession();
+if (error || !data.session) throw new Error('Entre novamente e conclua o MFA.');
+const headers = {
+  Authorization: `Bearer ${data.session.access_token}`,
+  'Content-Type': 'application/json',
+};
+const turmasResponse = await fetch('/api/turmas', { headers });
+const { turmas } = await turmasResponse.json();
+console.table(turmas.map(({ id, nome }) => ({ id, nome })));
+```
+
+Escolher uma turma ativa própria e preencher seu UUID abaixo. O POST cria um rascunho real no ambiente de testes; executar uma vez:
+
+```js
+const turmaId = 'UUID_DA_TURMA';
+const criacao = await fetch('/api/avaliacoes', {
+  method: 'POST', headers,
+  body: JSON.stringify({
+    turma_id: turmaId, titulo: 'Prova demonstrativa', tipo: 'PROVA',
+    inicio_em: '2026-11-09T19:00:00-03:00', fim_em: '2026-11-09T21:00:00-03:00',
+    duracao_minutos: 60,
+  }),
+});
+console.log(criacao.status, await criacao.json());
+const consulta = await fetch(`/api/avaliacoes?turma_id=${turmaId}`, { headers });
+console.log(consulta.status, await consulta.json());
+```
+
+Esperado: `201` com `RASCUNHO`, depois `200` contendo o mesmo ID. Conferir `AVALIACAO_CRIADA` no banco; GET não gera evento. Não compartilhar token, sessão, cabeçalhos ou capturas deles. Ao trocar de conta, recarregar a página e obter os cabeçalhos da nova sessão; ADMIN deve consultar e receber `403` ao criar, aluno deve receber `403` nas duas operações e outro professor deve receber `404` para a turma alheia.
+
+`tests/avaliacoes-sql.test.ts` agora também cobre API integrada ao banco local, limite/ordem, métodos, validação, isolamento, auditoria e falhas de Auth/transporte/contrato. Auth e HTTP são simulados; nenhum registro é criado no Supabase remoto pelos testes. Executar `node --test tests/avaliacoes-sql.test.ts`, `npm test`, `npm run lint` e `npm run build`.
+
+Referências da API: [identidade no servidor](https://supabase.com/docs/reference/javascript/auth-getuser), [RPC](https://supabase.com/docs/reference/javascript/rpc), [consulta](https://supabase.com/docs/reference/javascript/select), [Vercel Functions](https://vercel.com/docs/functions/runtimes/node-js).

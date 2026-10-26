@@ -3,6 +3,7 @@ import type { IncomingHttpHeaders, IncomingMessage } from 'node:http'
 import turnstileHandler from '../api/validar-turnstile.ts'
 import turmasHandler from '../api/turmas.ts'
 import matriculasHandler from '../api/matriculas.ts'
+import avaliacoesHandler from '../api/avaliacoes.ts'
 
 const MAX_BODY_SIZE = 16 * 1024
 const port = Number(process.env.API_PORT ?? 8787)
@@ -46,7 +47,8 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
 
     const handler = url.pathname === '/api/validar-turnstile' ? turnstileHandler
       : url.pathname === '/api/turmas' ? turmasHandler
-      : url.pathname === '/api/matriculas' ? matriculasHandler : null
+      : url.pathname === '/api/matriculas' ? matriculasHandler
+      : url.pathname === '/api/avaliacoes' ? avaliacoesHandler : null
 
     if (!handler) {
       outgoingResponse.writeHead(404, { 'Content-Type': 'application/json' })

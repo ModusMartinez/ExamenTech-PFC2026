@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
+import { createAvaliacoesHandler } from '../api/avaliacoes.ts'
+import { lerDadosAvaliacao } from '../src/services/avaliacaoValidation.ts'
 
 test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', async (t) => {
   const db = new PGlite()
@@ -238,4 +240,233 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
     assert.equal((await queryAs(professor, listSql)).rows.length, 4)
     assert.deepEqual((await queryAs(aluno, listSql)).rows, [])
   })
+
+  // O transporte simula Auth/PostgREST; funções, RLS e persistência são reais no PGlite.
+  const env = { SUPABASE_URL: 'https://exemplo.supabase.co', VITE_SUPABASE_PUBLISHABLE_KEY: 'public-test-key' }
+  const body = {
+    turma_id: turmaId, titulo: '  Rascunho pela API  ', tipo: 'PROVA',
+    inicio_em: String(valid[3]), fim_em: String(valid[4]), duracao_minutos: 60,
+  }
+  function request(method = 'GET', payload: unknown = body, query = `?turma_id=${turmaId}`) {
+    return new Request(`http://localhost/api/avaliacoes${method === 'POST' ? '' : query}`, {
+      method, headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' },
+      body: method === 'POST' ? JSON.stringify(payload) : undefined,
+    })
+  }
+  function apiFor(id: string, aal = 'aal2') {
+    const transport = t.mock.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init)
+      const url = new URL(req.url)
+      assert.equal(req.headers.get('apikey'), 'public-test-key')
+      assert.equal(req.headers.get('authorization'), 'Bearer test-session')
+      if (url.pathname === '/auth/v1/user') {
+        return Response.json({ id, email: `${id}@example.test`, app_metadata: {}, user_metadata: {} })
+      }
+      try {
+        if (url.pathname === '/rest/v1/perfis') {
+          assert.equal(url.searchParams.get('id'), `eq.${id}`)
+          return Response.json((await queryAs(id, 'SELECT perfil,situacao FROM public.perfis WHERE id=$1', [id], aal)).rows)
+        }
+        if (url.pathname === '/rest/v1/turmas') {
+          assert.equal(url.searchParams.get('select'), 'id')
+          return Response.json((await queryAs(id, 'SELECT id FROM public.turmas WHERE id=$1',
+            [url.searchParams.get('id')?.slice(3)], aal)).rows)
+        }
+        if (url.pathname === '/rest/v1/avaliacoes') {
+          assert.equal(url.searchParams.get('select'), 'id,turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,criado_em')
+          assert.equal(url.searchParams.get('situacao'), 'eq.RASCUNHO')
+          assert.equal(url.searchParams.get('order'), 'criado_em.desc,id.desc')
+          assert.equal(url.searchParams.get('limit'), '50')
+          return Response.json((await queryAs(id, `SELECT * FROM public.avaliacoes
+            WHERE turma_id=$1 AND situacao='RASCUNHO' ORDER BY criado_em DESC,id DESC LIMIT 50`,
+          [url.searchParams.get('turma_id')?.slice(3)], aal)).rows)
+        }
+        if (url.pathname === '/rest/v1/rpc/criar_avaliacao_rascunho') {
+          const params = await req.json()
+          assert.deepEqual(Object.keys(params).sort(), ['p_duracao_minutos', 'p_fim_em', 'p_inicio_em', 'p_tipo', 'p_titulo', 'p_turma_id'])
+          const result = await queryAs<{ avaliacao: unknown }>(id, createSql,
+            [params.p_turma_id, params.p_titulo, params.p_tipo, params.p_inicio_em, params.p_fim_em, params.p_duracao_minutos], aal)
+          return Response.json(result.rows[0].avaliacao)
+        }
+        assert.fail(`Rota inesperada: ${url.pathname}`)
+      } catch (error) {
+        if (error instanceof assert.AssertionError) throw error
+        const code = error instanceof Error && 'code' in error ? error.code : 'XX000'
+        return Response.json({ code, message: 'Detalhe interno não deve sair na API' }, { status: 400 })
+      }
+    })
+    return { transport, handler: createAvaliacoesHandler(env, transport) }
+  }
+
+  await t.test('API cria ambos os tipos, persiste, consulta e não duplica auditoria na leitura', async () => {
+    const { handler } = apiFor(professor)
+    for (const tipo of ['PROVA', 'ATIVIDADE']) {
+      const response = await handler.fetch(request('POST', { ...body, tipo }))
+      assert.equal(response.status, 201)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+      const { avaliacao } = await response.json()
+      assert.equal(avaliacao.turma_id, turmaId)
+      assert.equal(avaliacao.professor_id, professor)
+      assert.equal(avaliacao.situacao, 'RASCUNHO')
+      assert.equal(avaliacao.tipo, tipo)
+      assert.equal(avaliacao.titulo, body.titulo.trim())
+      assert.equal(avaliacao.inicio_em, '2026-11-09T22:00:00.000Z')
+      const before = (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+      const listed = await handler.fetch(request())
+      assert.equal(listed.status, 200)
+      assert.equal(listed.headers.get('cache-control'), 'no-store')
+      const { avaliacoes, limite } = await listed.json()
+      assert.equal(limite, 50)
+      assert.deepEqual(avaliacoes.find((item: { id: string }) => item.id === avaliacao.id), avaliacao)
+      assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, before)
+    }
+    const emptyTurma = (await queryAs<{ id: string }>(professor,
+      "INSERT INTO public.turmas(nome) VALUES ('Sem rascunhos') RETURNING id")).rows[0].id
+    const empty = await handler.fetch(request('GET', null, `?turma_id=${emptyTurma}`))
+    assert.equal(empty.status, 200)
+    assert.deepEqual(await empty.json(), { avaliacoes: [], limite: 50 })
+  })
+
+  await t.test('API respeita perfis, MFA, sessão, organização e turma sem revelar dados alheios', async () => {
+    const adminApi = apiFor(admin).handler
+    assert.equal((await adminApi.fetch(request())).status, 200)
+    assert.equal((await adminApi.fetch(request('GET', null, `?turma_id=${otherTurmaId}`))).status, 200)
+    assert.equal((await adminApi.fetch(request('POST'))).status, 403)
+    for (const [id, aal] of [[aluno, 'aal2'], [professor, 'aal1'], [admin, 'aal1']]) {
+      const { handler } = apiFor(id, aal)
+      for (const method of ['GET', 'POST']) assert.equal((await handler.fetch(request(method))).status, 403)
+    }
+    const other = await apiFor(colleague).handler.fetch(request())
+    const missing = await apiFor(professor).handler.fetch(request('GET', null, `?turma_id=${randomUUID()}`))
+    assert.equal(other.status, 404)
+    assert.equal(missing.status, 404)
+    assert.deepEqual(await other.json(), await missing.json())
+    assert.equal((await apiFor(colleague).handler.fetch(request('POST'))).status, 404)
+    const sessionId = sessions.get(professor)!
+    sessions.set(professor, randomUUID())
+    assert.equal((await apiFor(professor).handler.fetch(request())).status, 404)
+    assert.equal((await apiFor(professor).handler.fetch(request('POST'))).status, 403)
+    sessions.set(professor, sessionId)
+    await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [professor])
+    for (const method of ['GET', 'POST']) assert.equal((await apiFor(professor).handler.fetch(request(method))).status, 403)
+    await db.query("UPDATE public.perfis SET situacao='ATIVO',organizacao_id=$1 WHERE id=$2", [otherOrg, professor])
+    for (const method of ['GET', 'POST']) assert.equal((await apiFor(professor).handler.fetch(request(method))).status, 404)
+    await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [org, professor])
+    await db.query("UPDATE public.turmas SET situacao='INATIVA' WHERE id=$1", [turmaId])
+    assert.equal((await apiFor(professor).handler.fetch(request())).status, 200)
+    assert.equal((await apiFor(professor).handler.fetch(request('POST'))).status, 409)
+    await db.query("UPDATE public.turmas SET situacao='ATIVA' WHERE id=$1", [turmaId])
+  })
+
+  await t.test('API rejeita campos/consultas adulterados, datas inválidas e falta de sessão antes de chamar serviços', async () => {
+    const { handler, transport } = apiFor(professor)
+    for (const payload of [null, [], 'texto', {}, { ...body, professor_id: colleague },
+      { ...body, situacao: 'PUBLICADA' }, { ...body, organizacao_id: org }, { ...body, id: randomUUID() },
+      { ...body, tipo: 'OUTRO' }, { ...body, turma_id: 'inválido' }, { ...body, duracao_minutos: '60' },
+      { ...body, duracao_minutos: 1.5 }, { ...body, duracao_minutos: 0 }, { ...body, duracao_minutos: 2147483648 },
+      { ...body, titulo: '\t\t\t' }, { ...body, titulo: 'A'.repeat(151) }, { ...body, fim_em: body.inicio_em },
+      { ...body, inicio_em: '2026-02-30T19:00:00-03:00' }, { ...body, inicio_em: '2026-11-09T19:00:00' }]) {
+      assert.equal((await handler.fetch(request('POST', payload))).status, 400)
+    }
+    for (const query of ['', '?turma_id=', '?turma_id=123', `?turma_id=${turmaId}&turma_id=${turmaId}`,
+      `?turma_id=${turmaId}&professor_id=${colleague}`, `?turma_id=${turmaId}&situacao=PUBLICADA`]) {
+      assert.equal((await handler.fetch(request('GET', null, query))).status, 400)
+    }
+    const noToken = new Request(`http://localhost/api/avaliacoes?turma_id=${turmaId}`)
+    assert.equal((await handler.fetch(noToken)).status, 401)
+    const invalidJson = new Request('http://localhost/api/avaliacoes', {
+      method: 'POST', headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' }, body: '{',
+    })
+    assert.equal((await handler.fetch(invalidJson)).status, 400)
+    const wrongType = request('POST')
+    wrongType.headers.set('Content-Type', 'text/plain')
+    assert.equal((await handler.fetch(wrongType)).status, 415)
+    const withQuery = new Request(`http://localhost/api/avaliacoes?turma_id=${turmaId}`, {
+      method: 'POST', headers: request('POST').headers, body: JSON.stringify(body),
+    })
+    assert.equal((await handler.fetch(withQuery)).status, 400)
+    const forbidden = await handler.fetch(request('DELETE'))
+    assert.equal(forbidden.status, 405)
+    assert.equal(forbidden.headers.get('allow'), 'GET, POST')
+    assert.equal(transport.mock.callCount(), 0)
+  })
+
+  await t.test('API limita aos 50 rascunhos recentes da turma, com desempate por ID', async () => {
+    await db.query(`INSERT INTO public.avaliacoes(turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,criado_em)
+      SELECT $1,$2,'Rascunho ' || n,'PROVA',$3,$4,60,'2026-10-26T12:00:00Z'::timestamptz
+      FROM generate_series(1,55) AS n`, [turmaId, professor, body.inicio_em, body.fim_em])
+    const response = await apiFor(professor).handler.fetch(request())
+    const expected = await queryAs(professor,
+      'SELECT id FROM public.avaliacoes WHERE turma_id=$1 ORDER BY criado_em DESC,id DESC LIMIT 50', [turmaId])
+    assert.equal(response.status, 200)
+    const { avaliacoes } = await response.json()
+    assert.equal(avaliacoes.length, 50)
+    assert.deepEqual(avaliacoes.map((item: { id: string }) => ({ id: item.id })), expected.rows)
+  })
+
+  await t.test('API não confirma criação nem retorna lista vazia quando Auth, banco ou contrato falham', async () => {
+    for (const [status, expected] of [[401, 401], [403, 401], [429, 503]]) {
+      const fetchAuth = t.mock.fn(async () => Response.json({ message: 'Auth indisponível' }, { status }))
+      const response = await createAvaliacoesHandler(env, fetchAuth).fetch(request('POST'))
+      assert.equal(response.status, expected)
+      assert.equal(fetchAuth.mock.callCount(), 1)
+    }
+    const unconfigured = createAvaliacoesHandler({}, async () => { throw new Error('Não deveria conectar') })
+    assert.equal((await unconfigured.fetch(request('POST'))).status, 503)
+    const sample = (await apiFor(professor).handler.fetch(request('POST')).then((res) => res.json())).avaliacao
+    for (const [path, method, responseBody, status, expected] of [
+      ['/rest/v1/perfis', 'GET', { code: 'XX000' }, 500, 503],
+      ['/rest/v1/turmas', 'GET', { code: 'XX000' }, 500, 503],
+      ['/rest/v1/avaliacoes', 'GET', { code: 'XX000' }, 500, 503],
+      ['/rest/v1/avaliacoes', 'GET', null, 200, 503],
+      ['/rest/v1/avaliacoes', 'GET', [sample, sample], 200, 503],
+      ['/rest/v1/avaliacoes', 'GET', [{ ...sample, turma_id: otherTurmaId }], 200, 503],
+      ['/rest/v1/avaliacoes', 'GET', [{ ...sample, situacao: 'PUBLICADA' }], 200, 503],
+      ['/rest/v1/rpc/criar_avaliacao_rascunho', 'POST', null, 200, 503],
+      ['/rest/v1/rpc/criar_avaliacao_rascunho', 'POST', { ...sample, professor_id: colleague }, 200, 503],
+      ['/rest/v1/rpc/criar_avaliacao_rascunho', 'POST', { ...sample, titulo: 'Outro rascunho' }, 200, 503],
+      ['/rest/v1/rpc/criar_avaliacao_rascunho', 'POST', { code: '23514', message: 'Detalhe interno' }, 400, 400],
+      ['/rest/v1/rpc/criar_avaliacao_rascunho', 'POST', { code: 'P0001', message: 'Detalhe interno' }, 400, 503],
+    ] as const) {
+      const { transport } = apiFor(professor)
+      const handler = createAvaliacoesHandler(env, async (input, init) => {
+        if (new URL(new Request(input, init).url).pathname === path) return Response.json(responseBody, { status })
+        return transport(input, init)
+      })
+      const response = await handler.fetch(request(method))
+      assert.equal(response.status, expected)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+      assert.equal(JSON.stringify(await response.json()).includes('Detalhe interno'), false)
+    }
+    const disconnected = createAvaliacoesHandler(env, async () => { throw new Error('Rede indisponível') })
+    assert.equal((await disconnected.fetch(request())).status, 503)
+    const withExtra = createAvaliacoesHandler(env, async (input, init) => {
+      if (new URL(new Request(input, init).url).pathname === '/rest/v1/rpc/criar_avaliacao_rascunho') {
+        return Response.json({ ...sample, segredo: 'não retornar' })
+      }
+      return apiFor(professor).transport(input, init)
+    })
+    const sanitized = await withExtra.fetch(request('POST'))
+    assert.equal(sanitized.status, 201)
+    assert.equal('segredo' in (await sanitized.json()).avaliacao, false)
+  })
+})
+
+test('contrato de rascunho valida calendário, fuso, Unicode e limites sem coerção numérica', () => {
+  const valid = {
+    turma_id: randomUUID(), titulo: ' Prova 1 ', tipo: 'PROVA',
+    inicio_em: '2028-02-29T19:00:00-03:00', fim_em: '2028-03-01T00:00:00Z', duracao_minutos: 1,
+  }
+  assert.equal(lerDadosAvaliacao(valid)?.inicio_em, '2028-02-29T22:00:00.000Z')
+  for (const titulo of ['ABC', 'A'.repeat(150), '📝'.repeat(150)]) assert.ok(lerDadosAvaliacao({ ...valid, titulo }))
+  for (const inicio_em of ['2026-02-29T19:00:00Z', '2028-04-31T19:00:00Z', '2028-02-29T24:00:00Z',
+    '2028-02-29', 'infinity', '2028-02-29T19:00:00+99:00', '0000-01-01T00:00:00Z']) {
+    assert.equal(lerDadosAvaliacao({ ...valid, inicio_em }), null)
+  }
+  for (const duracao_minutos of [null, '60', 0, -1, 1.5, NaN, Infinity, 2147483648]) {
+    assert.equal(lerDadosAvaliacao({ ...valid, duracao_minutos }), null)
+  }
+  for (const field of Object.keys(valid)) {
+    assert.equal(lerDadosAvaliacao({ ...valid, [field]: undefined }), null)
+  }
 })
