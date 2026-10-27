@@ -1,6 +1,6 @@
 # Avaliações em rascunho (019)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação e consulta de rascunhos no banco e na API. Sem telas, edição, questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação e consulta de rascunhos no banco e na API, com formulário de criação para o professor. Sem tela de listagem, edição, questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -34,7 +34,7 @@ SELECT public.criar_avaliacao_rascunho(
 - Turma inativa continua consultável, mas não recebe novos rascunhos. Professor perde a consulta se a organização ficar inativa ou se deixar de ser responsável; ADMIN mantém a consulta institucional.
 - Escrita direta, edição, exclusão e publicação estão bloqueadas para os perfis da aplicação, inclusive ADMIN. Somente a função controlada cria registros. A função pública usa `SECURITY INVOKER`; a privada usa `SECURITY DEFINER`, `search_path` vazio e permissões explícitas.
 - `ON DELETE RESTRICT` impede apagar turma/autor referenciados. Não modifica matrículas, contas ou avaliações já existentes ao aplicar a query.
-- `AVALIACAO_CRIADA` registra autor, ID da avaliação e horário, sem título, código ou dados dos alunos. Falha na auditoria desfaz o rascunho. O filtro/rótulo desse evento na tela fica para a integração; não há mudança de interface neste bloco.
+- `AVALIACAO_CRIADA` registra autor, ID da avaliação e horário, sem título, código ou dados dos alunos. Falha na auditoria desfaz o rascunho. O filtro/rótulo desse evento na tela de auditoria ainda está pendente.
 - Locks mantêm perfil, organização, sessão e turma estáveis durante a criação. Não há alteração nos helpers ou nas permissões dos módulos anteriores.
 
 Erros SQL: `42501` para perfil/sessão/MFA/permissão; `P0002` para turma inexistente ou fora do acesso; `55000` para turma inativa; `23502` para campo obrigatório e `23514` para regra de campo. UUID, data ou inteiro malformado é recusado pelo PostgreSQL antes da gravação.
@@ -66,7 +66,7 @@ SELECT
 
 Esperado: RLS e consulta `true`; escrita direta, alteração e exclusão `false`. A consulta continua limitada pela RLS, não é acesso geral aos rascunhos.
 
-O SQL Editor executa como administrador do banco, normalmente sem a sessão do aplicativo. Chamar a função por lá sem contexto autenticado deve falhar; não remover MFA/RLS para fazê-la funcionar. A API abaixo permite testar com a sessão do aplicativo; o formulário fica para o próximo bloco.
+O SQL Editor executa como administrador do banco, normalmente sem a sessão do aplicativo. Chamar a função por lá sem contexto autenticado deve falhar; não remover MFA/RLS para fazê-la funcionar. A API e o formulário permitem testar com a sessão do aplicativo.
 
 Os testes executam as funções e políticas reais no PostgreSQL local via PGlite, com Auth e sessões simulados. Cobrem campos, perfis, isolamento, aluno já matriculado, sessão de outro usuário, MFA, bloqueio de escrita, preservação dos eventos e rollback. Não acessam Supabase remoto nem substituem teste com Auth real ou concorrência entre conexões reais.
 
@@ -87,7 +87,7 @@ Sem nova query: requer a `019` já aplicada. Rota registrada no servidor local e
 
 ### Teste manual da API
 
-Rodar `npm run dev:full` com o Supabase de testes. Entrar como professor e concluir MFA. Ainda não há botão de avaliação. No console do navegador, apenas no ambiente local:
+Rodar `npm run dev:full` com o Supabase de testes. Entrar como professor e concluir MFA. Para testar a API diretamente, no console do navegador, apenas no ambiente local:
 
 ```js
 const { supabase } = await import('/src/lib/supabase.ts');
@@ -124,3 +124,27 @@ Esperado: `201` com `RASCUNHO`, depois `200` contendo o mesmo ID. Conferir `AVAL
 `tests/avaliacoes-sql.test.ts` agora também cobre API integrada ao banco local, limite/ordem, métodos, validação, isolamento, auditoria e falhas de Auth/transporte/contrato. Auth e HTTP são simulados; nenhum registro é criado no Supabase remoto pelos testes. Executar `node --test tests/avaliacoes-sql.test.ts`, `npm test`, `npm run lint` e `npm run build`.
 
 Referências da API: [identidade no servidor](https://supabase.com/docs/reference/javascript/auth-getuser), [RPC](https://supabase.com/docs/reference/javascript/rpc), [consulta](https://supabase.com/docs/reference/javascript/select), [Vercel Functions](https://vercel.com/docs/functions/runtimes/node-js).
+
+## Formulário do professor
+
+Painel → **Nova avaliação**. Campos: turma ativa, título, tipo (Prova/Atividade), início, fim e duração em minutos. A consulta existente de turmas já limita o professor às próprias turmas. API e banco continuam responsáveis pela autorização; esconder o botão não substitui essas regras.
+
+`NovaAvaliacaoPanel` → `criarAvaliacaoRascunho` em `src/services/avaliacoes.ts` → `POST /api/avaliacoes` → função SQL da `019`. Sem nova query ou dependência.
+
+- Datas usam o fuso do navegador, informado junto aos campos, e são convertidas para ISO/UTC antes do envio.
+- Validação indica e foca o campo inválido. Reutiliza o contrato `lerDadosAvaliacao` antes de enviar.
+- Durante o envio, campos e atualização de turmas ficam bloqueados. Um segundo envio simultâneo é ignorado.
+- Sucesso somente após `201` com rascunho válido e correspondente aos dados enviados. Limpa o formulário; erros preservam os campos.
+- Falha de rede/resposta não repete o POST. Como a tela de listagem ainda não existe, conferir a criação pela consulta da API acima ou pela tabela `avaliacoes` antes de reenviar.
+
+### Teste manual do formulário
+
+1. `npm run dev:full`; entrar como professor e concluir MFA.
+2. Abrir **Nova avaliação**, selecionar uma turma ativa própria e criar uma Prova. Repetir com Atividade.
+3. Conferir `RASCUNHO` em `avaliacoes` e `AVALIACAO_CRIADA` em `eventos_seguranca`. A avaliação pertence à turma inteira.
+4. Tentar título vazio/curto, fim igual ou anterior ao início e duração zero/fracionada. Nenhum registro deve ser criado.
+5. Conferir que turma inativa não aparece, professor sem turma ativa não consegue enviar e aluno/administrador não têm esse botão.
+
+Teste automatizado do formulário e serviço: `npm run test:ui -- tests/nova-avaliacao.test.tsx tests/app-cadastro.test.tsx`. Usa respostas simuladas; não grava no Supabase.
+
+Referências do formulário: [inputs no React](https://react.dev/reference/react-dom/components/input), [datas locais e fuso horário](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/datetime-local).

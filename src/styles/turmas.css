@@ -132,6 +132,20 @@
 .alunos-turma .matricula-inativar { display: block; margin-top: 8px; padding: 8px; max-width: 100%; color: #8f2e24; }
 .alunos-paginacao { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; }
 
+.avaliacao-form fieldset { display: grid; gap: 10px; min-width: 0; padding: 0; margin: 0; border: 0; }
+.avaliacao-form legend { padding: 0 0 18px; font-size: 1.2rem; font-weight: 600; color: var(--dark-blue); }
+.avaliacao-form input, .avaliacao-form select { width: 100%; min-width: 0; margin-bottom: 8px; }
+.avaliacao-form select {
+  height: 48px; padding: 10px 12px; border: 1px solid #cbddec; border-radius: 7px;
+  font: inherit; color: var(--text); background: #fff;
+}
+.avaliacao-form .turmas-note { margin: 0 0 6px; }
+.avaliacao-form select:focus-visible, .avaliacao-form .alert:focus-visible {
+  outline: 3px solid #69a4d3; outline-offset: 2px;
+}
+.avaliacao-form fieldset:disabled { opacity: 0.65; }
+.avaliacao-form fieldset:disabled button { cursor: not-allowed; }
+
 @media (max-width: 500px) {
   .turma-form { padding: 18px; }
   .turma-form-fields { flex-direction: column; align-items: stretch; }

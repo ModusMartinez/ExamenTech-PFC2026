@@ -25,6 +25,7 @@ vi.mock('../src/lib/supabase', () => ({
 vi.mock('../src/services/access', () => ({ resolveAccess: mocks.resolveAccess }))
 vi.mock('../src/components/InvitationPanel', () => ({ InvitationPanel: () => null }))
 vi.mock('../src/components/AuditPanel', () => ({ AuditPanel: () => <p>Consulta de auditoria</p> }))
+vi.mock('../src/components/NovaAvaliacaoPanel', () => ({ NovaAvaliacaoPanel: () => <p>Cadastro de rascunho</p> }))
 vi.mock('../src/components/MatriculasPanel', () => ({
   MatriculasPanel: ({ profile }: { profile: string }) => <p>Pendências para {profile}</p>,
 }))
@@ -402,6 +403,15 @@ for (const profile of ['Professor', 'Aluno', 'Administrador']) {
     await screen.findByRole('heading', { name: 'Olá, Conta.' })
     expect(screen.getByRole('contentinfo').querySelectorAll('a')).toHaveLength(2)
     expect(screen.getByRole('link', { name: 'Política de Privacidade (abre em nova aba)' }).getAttribute('href')).toBe('/privacidade')
+    if (profile === 'Professor') {
+      fireEvent.click(screen.getByRole('button', { name: 'Nova avaliação' }))
+      expect(screen.getByText('Cadastro de rascunho')).toBeTruthy()
+      expect(screen.getByRole('link', { name: 'Termos de Uso (abre em nova aba)' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Início' }))
+      expect(screen.queryByText('Cadastro de rascunho')).toBeNull()
+    } else {
+      expect(screen.queryByRole('button', { name: 'Nova avaliação' })).toBeNull()
+    }
     if (profile === 'Aluno') {
       expect(screen.queryByRole('button', { name: 'Turmas' })).toBeNull()
       expect(screen.queryByRole('button', { name: 'Matrículas' })).toBeNull()

@@ -4,6 +4,7 @@ import { MfaStep } from './components/MfaStep'
 import { InvitationPanel } from './components/InvitationPanel'
 import { AuditPanel } from './components/AuditPanel'
 import { TurmasPanel } from './components/TurmasPanel'
+import { NovaAvaliacaoPanel } from './components/NovaAvaliacaoPanel'
 import { SolicitarMatriculaPanel } from './components/SolicitarMatriculaPanel'
 import { MatriculasPanel } from './components/MatriculasPanel'
 import { MinhasMatriculasPanel } from './components/MinhasMatriculasPanel'
@@ -831,7 +832,7 @@ type DashboardProps = {
 
 function Dashboard({ user, onLogout }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
-  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas'>('inicio')
+  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao'>('inicio')
   const nameParts = user.name.split(' ')
 
   const initials = nameParts
@@ -888,6 +889,11 @@ function Dashboard({ user, onLogout }: DashboardProps) {
                 </button>
               </>
             )}
+            {user.profile === 'Professor' && (
+              <button type="button" aria-pressed={dashboardView === 'nova-avaliacao'} onClick={() => setDashboardView('nova-avaliacao')}>
+                Nova avaliação
+              </button>
+            )}
             {canViewTurmas && (
               <button type="button" aria-pressed={dashboardView === 'aprovacoes'} onClick={() => setDashboardView('aprovacoes')}>
                 Matrículas
@@ -904,6 +910,8 @@ function Dashboard({ user, onLogout }: DashboardProps) {
         {showingAudit ? <AuditPanel /> : dashboardView === 'turmas' &&
           (user.profile === 'Administrador' || user.profile === 'Professor') ? (
           <TurmasPanel profile={user.profile} />
+        ) : dashboardView === 'nova-avaliacao' && user.profile === 'Professor' ? (
+          <NovaAvaliacaoPanel />
         ) : dashboardView === 'matricula' && user.profile === 'Aluno' ? (
           <SolicitarMatriculaPanel />
         ) : dashboardView === 'minhas-matriculas' && user.profile === 'Aluno' ? (
