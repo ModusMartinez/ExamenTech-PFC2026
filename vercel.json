@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/termos", "destination": "/index.html" },
+    { "source": "/privacidade", "destination": "/index.html" }
+  ]
+}

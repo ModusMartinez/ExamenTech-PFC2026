@@ -1,0 +1,155 @@
+.turmas-panel {
+  margin-bottom: 48px;
+}
+
+.turmas-panel .subtitle,
+.turmas-panel .overline,
+.turmas-note,
+.turma-description p {
+  color: #536b80;
+  line-height: 1.5;
+}
+
+.turma-form {
+  margin: 28px 0;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #dce5ee;
+  border-radius: 7px;
+}
+
+.turmas-panel h2 {
+  margin: 0 0 18px;
+  font-size: 1.2rem;
+  color: var(--dark-blue);
+}
+
+.turma-form label {
+  font-weight: 600;
+}
+
+.turma-form > p:not(.alert) {
+  margin: 8px 0 12px;
+  color: #536b80;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.turma-form-fields {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.turma-form input {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  padding: 10px 12px;
+  border: 1px solid #cbddec;
+  border-radius: 7px;
+  font: inherit;
+  color: var(--text);
+}
+
+.turma-form .btn-primary {
+  width: auto;
+  padding: 0 20px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.turma-form .alert {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.turmas-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.turmas-list-heading h2 { margin: 0; }
+
+.turmas-refresh {
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid #cbddec;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--dark-blue);
+  font: inherit;
+  cursor: pointer;
+}
+
+.turmas-refresh:disabled { opacity: 0.65; cursor: not-allowed; }
+
+.turmas-panel input:focus-visible,
+.turmas-panel button:focus-visible {
+  outline: 3px solid #69a4d3;
+  outline-offset: 2px;
+}
+
+.turmas-list { list-style: none; padding: 0; margin: 0; }
+
+.turmas-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 0;
+  border-bottom: 1px solid #dce5ee;
+}
+
+.turma-description { min-width: 0; overflow-wrap: anywhere; }
+.turma-description h3 { margin: 0 0 8px; color: var(--dark-blue); font-size: 1.05rem; }
+.turma-description p { margin: 0; font-size: 0.85rem; }
+.turma-code { flex-shrink: 0; }
+.turma-code span { display: block; margin-bottom: 8px; color: #536b80; font-size: 0.8rem; }
+.turma-code code { user-select: all; color: var(--dark-blue); font-size: 1rem; letter-spacing: 0.05em; }
+.turmas-note { margin-top: 24px; font-size: 0.85rem; }
+
+.matriculas-panel .alert { overflow-wrap: anywhere; line-height: 1.5; }
+.matriculas-panel .turmas-list-heading { margin-top: 24px; }
+.matriculas-notice:focus-visible { outline: 3px solid #69a4d3; outline-offset: 2px; }
+.matriculas-list .btn-primary { width: auto; min-width: 112px; padding: 0 20px; margin: 0; flex-shrink: 0; }
+.matriculas-list .turma-description p + p { margin-top: 6px; }
+.matricula-situacao { flex-shrink: 0; color: var(--dark-blue); font-weight: 600; }
+
+.turma-com-alunos { flex-wrap: wrap; }
+.turma-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; }
+.alunos-turma { flex-basis: 100%; min-width: 0; width: 100%; }
+.alunos-turma h4 { margin: 0; color: var(--dark-blue); }
+.alunos-turma .turmas-note { margin: 0 0 12px; }
+.alunos-turma table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.alunos-turma th, .alunos-turma td {
+  padding: 12px 8px; text-align: left; border-bottom: 1px solid #dce5ee; overflow-wrap: anywhere;
+}
+.alunos-turma th:first-child { width: 65%; }
+.alunos-turma .alert { overflow-wrap: anywhere; }
+.alunos-turma .matricula-inativar { display: block; margin-top: 8px; padding: 8px; max-width: 100%; color: #8f2e24; }
+.alunos-paginacao { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; }
+
+.avaliacao-form fieldset { display: grid; gap: 10px; min-width: 0; padding: 0; margin: 0; border: 0; }
+.avaliacao-form legend { padding: 0 0 18px; font-size: 1.2rem; font-weight: 600; color: var(--dark-blue); }
+.avaliacao-form input, .avaliacao-form select { width: 100%; min-width: 0; margin-bottom: 8px; }
+.avaliacao-form select {
+  height: 48px; padding: 10px 12px; border: 1px solid #cbddec; border-radius: 7px;
+  font: inherit; color: var(--text); background: #fff;
+}
+.avaliacao-form .turmas-note { margin: 0 0 6px; }
+.avaliacao-form select:focus-visible, .avaliacao-form .alert:focus-visible {
+  outline: 3px solid #69a4d3; outline-offset: 2px;
+}
+.avaliacao-form fieldset:disabled { opacity: 0.65; }
+.avaliacao-form fieldset:disabled button { cursor: not-allowed; }
+
+@media (max-width: 500px) {
+  .turma-form { padding: 18px; }
+  .turma-form-fields { flex-direction: column; align-items: stretch; }
+  .turma-form input { flex: auto; width: 100%; }
+  .turmas-list li { flex-direction: column; gap: 14px; }
+  .dashboard-section-nav { flex-wrap: wrap; }
+}
