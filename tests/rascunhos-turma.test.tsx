@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { TurmasPanel } from '../src/components/TurmasPanel'
-import { listarAvaliacoesRascunho } from '../src/services/avaliacoes'
+import { editarAvaliacaoRascunho, listarAvaliacoesRascunho } from '../src/services/avaliacoes'
 import type { Turma } from '../src/services/turmas'
 
 const mocks = vi.hoisted(() => ({ listar: vi.fn(), getSession: vi.fn(), fetch: vi.fn() }))
@@ -23,7 +23,7 @@ const atividade = { ...avaliacao, id: '30000000-0000-0000-0000-000000000002', ti
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.listar.mockResolvedValue([turma, outra])
-  mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'sessao-simulada' } }, error: null })
+  mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'sessao-simulada', user: { id: turma.professor_id } } }, error: null })
   mocks.fetch.mockImplementation(async () => Response.json({ avaliacoes: [], limite: 50 }))
   vi.stubGlobal('fetch', mocks.fetch)
 })
@@ -37,11 +37,13 @@ async function abrir(profile: 'Professor' | 'Administrador' = 'Professor', nome 
   return button
 }
 
-test.each(['Professor', 'Administrador'] as const)('%s abre e fecha rascunhos, mostrando campos e ordem recebida sem ações de escrita', async (profile) => {
+test.each(['Professor', 'Administrador'] as const)('%s abre e fecha rascunhos com campos, ordem e ações do perfil', async (profile) => {
   mocks.fetch.mockResolvedValueOnce(Response.json({ avaliacoes: [atividade, avaliacao], limite: 50 }))
   const button = await abrir(profile)
   const table = await screen.findByRole('table', { name: `Avaliações em rascunho de ${turma.nome}` })
-  expect(within(table).getAllByRole('columnheader').map((item) => item.textContent)).toEqual(['Título', 'Tipo', 'Início', 'Fim', 'Duração', 'Situação'])
+  expect(within(table).getAllByRole('columnheader').map((item) => item.textContent)).toEqual([
+    'Título', 'Tipo', 'Início', 'Fim', 'Duração', 'Situação', ...(profile === 'Professor' ? ['Ações'] : []),
+  ])
   expect(within(table).getAllByRole('rowheader').map((item) => item.textContent)).toEqual([atividade.titulo, avaliacao.titulo])
   expect(within(table).getByRole('cell', { name: 'Prova' })).toBeTruthy()
   expect(within(table).getByRole('cell', { name: 'Atividade' })).toBeTruthy()
@@ -55,7 +57,8 @@ test.each(['Professor', 'Administrador'] as const)('%s abre e fecha rascunhos, m
     method: 'GET', headers: { Authorization: 'Bearer sessao-simulada' }, cache: 'no-store',
   })
   expect(button.getAttribute('aria-expanded')).toBe('true')
-  expect(screen.queryByRole('button', { name: /Publicar|Editar|Excluir/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: /Publicar|Excluir/ })).toBeNull()
+  expect(screen.queryAllByRole('button', { name: /^Editar / })).toHaveLength(profile === 'Professor' ? 2 : 0)
   fireEvent.click(button)
   expect(screen.queryByRole('table')).toBeNull()
   expect(button.getAttribute('aria-expanded')).toBe('false')
@@ -141,5 +144,156 @@ test('ID inválido não consulta sessão nem rede; erro de sessão não envia re
   expect(mocks.getSession).not.toHaveBeenCalled()
   mocks.getSession.mockResolvedValueOnce({ data: { session: null }, error: new Error('Falha de sessão') })
   await expect(listarAvaliacoesRascunho(turma.id)).rejects.toThrow('Sua sessão terminou.')
+  expect(mocks.fetch).not.toHaveBeenCalled()
+})
+
+async function abrirEdicao(item = avaliacao) {
+  mocks.fetch.mockResolvedValueOnce(Response.json({ avaliacoes: [item, atividade], limite: 50 }))
+  await abrir()
+  const button = await screen.findByRole('button', { name: `Editar ${item.titulo}` })
+  fireEvent.click(button)
+  mocks.fetch.mockClear()
+  return screen.getByRole('form', { name: 'Editar avaliação em rascunho' })
+}
+
+test.each(['PROVA', 'ATIVIDADE'])('edita %s com campos preenchidos, fuso local e atualização da linha', async (tipo) => {
+  const form = await abrirEdicao()
+  expect(document.activeElement).toBe(screen.getByLabelText('Título'))
+  expect((screen.getByLabelText('Título') as HTMLInputElement).value).toBe(avaliacao.titulo)
+  expect(new Date((screen.getByLabelText('Início') as HTMLInputElement).value).toISOString()).toBe('2026-11-09T22:00:00.000Z')
+  expect((screen.getByLabelText('Duração (minutos)') as HTMLInputElement).value).toBe('60')
+  expect(within(form).queryByLabelText('Turma')).toBeNull()
+  for (const [label, value] of [['Título', '  Revisão 2  '], ['Tipo', tipo], ['Início', '2026-11-12T19:00'],
+    ['Fim', '2026-11-12T21:00'], ['Duração (minutos)', '45']]) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value } })
+  }
+  const campos = { titulo: 'Revisão 2', tipo, inicio_em: new Date('2026-11-12T19:00').toISOString(),
+    fim_em: new Date('2026-11-12T21:00').toISOString(), duracao_minutos: 45 }
+  mocks.fetch.mockResolvedValueOnce(Response.json({ avaliacao: { ...avaliacao, ...campos } }))
+  fireEvent.submit(form)
+  const success = await screen.findByText('Avaliação “Revisão 2” salva.')
+  expect(document.activeElement).toBe(success)
+  expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/avaliacoes', {
+    method: 'PATCH', headers: { Authorization: 'Bearer sessao-simulada', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ avaliacao_id: avaliacao.id, ...campos }),
+  })
+  expect(screen.queryByRole('form', { name: 'Editar avaliação em rascunho' })).toBeNull()
+  expect(screen.getAllByRole('rowheader').map((item) => item.textContent)).toEqual(['Revisão 2', atividade.titulo])
+  expect(screen.getByRole('cell', { name: '45 min' })).toBeTruthy()
+})
+
+test('cancelar descarta alterações, não grava e devolve foco ao botão Editar', async () => {
+  await abrirEdicao()
+  fireEvent.change(screen.getByLabelText('Título'), { target: { value: 'Não salvar' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+  const button = screen.getByRole('button', { name: `Editar ${avaliacao.titulo}` })
+  expect(document.activeElement).toBe(button)
+  expect(mocks.fetch).not.toHaveBeenCalled()
+  fireEvent.click(button)
+  expect((screen.getByLabelText('Título') as HTMLInputElement).value).toBe(avaliacao.titulo)
+})
+
+test('professor não recebe botão Editar em turma inativa', async () => {
+  mocks.fetch.mockResolvedValueOnce(Response.json({ avaliacoes: [{ ...avaliacao, turma_id: outra.id }], limite: 50 }))
+  await abrir('Professor', outra.nome)
+  await screen.findByRole('table')
+  expect(screen.queryByRole('button', { name: /^Editar / })).toBeNull()
+})
+
+test.each([
+  ['Título', 'AB'], ['Título', '📝'.repeat(151)], ['Tipo', ''], ['Início', ''],
+  ['Fim', '2026-11-08T19:00'], ['Duração (minutos)', '0'], ['Duração (minutos)', '1.5'],
+])('edição recusa %s inválido (%s) e foca o campo', async (label, value) => {
+  const form = await abrirEdicao()
+  const input = screen.getByLabelText(label)
+  fireEvent.change(input, { target: { value } })
+  fireEvent.submit(form)
+  expect(screen.getByRole('alert')).toBeTruthy()
+  expect(document.activeElement).toBe(input)
+  expect(input.getAttribute('aria-invalid')).toBe('true')
+  expect(mocks.fetch).not.toHaveBeenCalled()
+})
+
+test('edição bloqueia envio duplo, atualização e cancelamento enquanto salva', async () => {
+  const form = await abrirEdicao()
+  let finish!: (value: Response) => void
+  mocks.fetch.mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve }))
+  fireEvent.submit(form)
+  fireEvent.submit(form)
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1))
+  for (const label of ['Título', 'Tipo', 'Início', 'Fim', 'Duração (minutos)']) {
+    expect(screen.getByLabelText(label).matches(':disabled')).toBe(true)
+  }
+  for (const name of ['Cancelar', 'Atualizar rascunhos', `Editar ${atividade.titulo}`]) {
+    expect(screen.getByRole('button', { name }).matches(':disabled')).toBe(true)
+  }
+  await act(async () => finish(Response.json({ avaliacao })))
+  await screen.findByText(`Avaliação “${avaliacao.titulo}” salva.`)
+})
+
+test.each([400, 401, 403, 404, 409, 503])('erro %i mantém a edição e não altera a tabela', async (status) => {
+  const form = await abrirEdicao()
+  fireEvent.change(screen.getByLabelText('Título'), { target: { value: 'Alteração pendente' } })
+  mocks.fetch.mockResolvedValueOnce(Response.json({ message: 'Edição recusada.' }, { status }))
+  fireEvent.submit(form)
+  const alert = await screen.findByRole('alert')
+  expect(document.activeElement).toBe(alert)
+  expect(alert.textContent).toBe('Edição recusada.')
+  expect((screen.getByLabelText('Título') as HTMLInputElement).value).toBe('Alteração pendente')
+  expect(screen.getByRole('rowheader', { name: avaliacao.titulo })).toBeTruthy()
+  expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  expect(screen.queryByText(/salva\./)).toBeNull()
+})
+
+test('edição preserva segundos quando o horário não foi modificado', async () => {
+  const item = { ...avaliacao, inicio_em: '2026-11-09T22:00:15.123Z', fim_em: '2026-11-10T00:00:20.456Z' }
+  const form = await abrirEdicao(item)
+  mocks.fetch.mockResolvedValueOnce(Response.json({ avaliacao: item }))
+  fireEvent.submit(form)
+  await screen.findByText(`Avaliação “${avaliacao.titulo}” salva.`)
+  const body = JSON.parse(mocks.fetch.mock.calls[0][1].body)
+  expect(body.inicio_em).toBe(item.inicio_em)
+  expect(body.fim_em).toBe(item.fim_em)
+})
+
+test('fechar a turma ignora resposta de edição atrasada', async () => {
+  const form = await abrirEdicao()
+  let finish!: (value: Response) => void
+  mocks.fetch.mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve }))
+  fireEvent.submit(form)
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1))
+  fireEvent.click(screen.getByRole('button', { name: `Rascunhos de ${outra.nome}` }))
+  await screen.findByText('Nenhum rascunho nesta turma.')
+  await act(async () => finish(Response.json({ avaliacao })))
+  expect(screen.queryByText(/salva\./)).toBeNull()
+  expect(screen.queryByRole('form', { name: 'Editar avaliação em rascunho' })).toBeNull()
+})
+
+test('sessão ausente e falha de rede não confirmam edição nem repetem PATCH', async () => {
+  const form = await abrirEdicao()
+  mocks.getSession.mockResolvedValueOnce({ data: { session: null }, error: null })
+  fireEvent.submit(form)
+  await screen.findByText('Sua sessão terminou. Entre novamente.')
+  expect(mocks.fetch).not.toHaveBeenCalled()
+  mocks.fetch.mockRejectedValueOnce(new TypeError('Sem conexão'))
+  fireEvent.submit(form)
+  await screen.findByText(/Não foi possível confirmar a edição/)
+  expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  expect(screen.getByRole('rowheader', { name: avaliacao.titulo })).toBeTruthy()
+})
+
+test('resposta inválida ou de outra avaliação nunca confirma a edição', async () => {
+  const dados = { avaliacao_id: avaliacao.id, titulo: avaliacao.titulo, tipo: 'PROVA' as const,
+    inicio_em: avaliacao.inicio_em, fim_em: avaliacao.fim_em, duracao_minutos: 60 }
+  for (const response of [new Response('<html>Erro</html>'), Response.json(null), Response.json({ avaliacao }, { status: 201 }),
+    ...[{}, { ...avaliacao, id: atividade.id }, { ...avaliacao, professor_id: outra.id }, { ...avaliacao, situacao: 'PUBLICADA' },
+      { ...avaliacao, titulo: 'Outro título' }, { ...avaliacao, tipo: 'ATIVIDADE' }, { ...avaliacao, duracao_minutos: 45 },
+      { ...avaliacao, inicio_em: '2026-11-09T21:00:00Z' }, { ...avaliacao, fim_em: '2026-11-10T01:00:00Z' }]
+      .map((item) => Response.json({ avaliacao: item }))]) {
+    mocks.fetch.mockResolvedValueOnce(response)
+    await expect(editarAvaliacaoRascunho(dados)).rejects.toThrow('Não foi possível confirmar a edição.')
+  }
+  mocks.fetch.mockClear()
+  await expect(editarAvaliacaoRascunho({ ...dados, avaliacao_id: 'inválido' })).rejects.toThrow('Confira os campos')
   expect(mocks.fetch).not.toHaveBeenCalled()
 })

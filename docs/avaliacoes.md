@@ -1,6 +1,6 @@
 # Avaliações em rascunho (019–020)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulário de criação para o professor e listagem por turma para professor/admin. O formulário de edição fica para o próximo bloco. Sem questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Sem questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -108,7 +108,7 @@ console.log(resultadoEdicao);
 
 4. Esperado: `error: null` e os dados atualizados. Em **Turmas → Rascunhos → Atualizar rascunhos**, conferir os novos valores. ID, turma, autor e data de criação permanecem iguais.
 5. Conferir `AVALIACAO_EDITADA` em `eventos_seguranca`, com `recurso_id` igual ao ID escolhido. Repetir a chamada com os mesmos valores: nenhum evento adicional. Testar uma duração zero: erro e nenhuma alteração.
-6. Recarregar a página ao trocar de conta e repetir como admin, aluno e outro professor: acesso recusado. A tela ainda não tem botão de edição.
+6. Recarregar a página ao trocar de conta e repetir como admin, aluno e outro professor: acesso recusado.
 
 Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Inclui edição válida, permissões, MFA/sessão, conta/organização/turma inativas, troca de responsável, campos inválidos, preservação do histórico, situação diferente de rascunho, rollback da auditoria e reaplicação da `020`. Usa banco local e Auth simulado; não testa Supabase remoto nem concorrência entre conexões reais.
 
@@ -200,7 +200,7 @@ await (async () => {
 3. Trocar duração por `0`, remover um campo ou acrescentar `turma_id`: `400`, sem alteração nem evento.
 4. Recarregar a página ao trocar de conta e repetir com o mesmo ID: admin/aluno recebem `403`; outro professor recebe `404`. Sem MFA, `403`.
 
-Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Cobre o PATCH integrado ao banco local, permissões, normalização, auditoria, repetição sem mudanças, rollback e falhas de Auth/RPC/resposta. Auth e HTTP são simulados; não acessa Supabase remoto. A tela de edição fica para o próximo bloco.
+Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Cobre o PATCH integrado ao banco local, permissões, normalização, auditoria, repetição sem mudanças, rollback e falhas de Auth/RPC/resposta. Auth e HTTP são simulados; não acessa Supabase remoto.
 
 ## Formulário do professor
 
@@ -236,10 +236,33 @@ Em **Turmas → Rascunhos**, professor consulta as próprias turmas e admin cons
 - Até 50 rascunhos, na ordem recebida da API (criação mais recente primeiro). Ainda sem paginação.
 - Consulta somente ao abrir a turma ou clicar em **Atualizar rascunhos**. Trocar de turma ou fechar o painel ignora respostas atrasadas.
 - Resposta inválida ou erro não aparece como lista vazia. Uma falha ao atualizar oculta o resultado anterior.
-- Apenas leitura: não publica, edita, exclui ou gera novos eventos de auditoria.
+- A consulta não gera eventos. Professor pode abrir a edição nas turmas ativas; admin e turmas inativas permanecem somente para consulta.
 
 Teste manual: executar `npm run dev:full`, entrar como professor com MFA, abrir **Turmas → Rascunhos** e conferir os registros criados no bloco anterior. Testar **Atualizar rascunhos**, outra turma sem avaliações e uma turma inativa. Repetir como admin e confirmar que aluno não acessa Turmas. Conferir datas/duração e, no celular, rolar a tabela para ler as últimas colunas.
 
 Teste automatizado: `npm run test:ui -- tests/rascunhos-turma.test.tsx`. Cobre consulta por perfil, turma inativa, campos/ordem, lista vazia, atualização, respostas atrasadas, sessão, falhas e validação do contrato. HTTP/Auth simulados, sem acesso ao Supabase remoto.
 
 Referências da listagem: [consultas em efeitos React](https://react.dev/reference/react/useEffect#fetching-data-with-effects), [tabelas HTML acessíveis](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/table).
+
+## Formulário de edição
+
+**Turmas → Rascunhos → Editar**. Disponível ao professor nas turmas ativas retornadas pela API. As regras de autoria, sessão e MFA continuam sendo conferidas no servidor e no banco.
+
+`RascunhosTurmaPanel` → `EditarAvaliacaoForm` → `editarAvaliacaoRascunho` → `PATCH /api/avaliacoes` → função SQL da `020`. Sem nova query ou dependência.
+
+- Campos preenchidos: título, tipo, início, fim e duração. Turma e autor não são editáveis.
+- `CamposAvaliacao` e `avaliacaoForm.ts` concentram os campos, mensagens e conversão de datas usados também na criação. Cada formulário mantém sua operação de envio.
+- Datas aparecem no fuso do navegador. Se o horário não mudar, o envio preserva o instante original, inclusive segundos existentes no banco.
+- Erro de validação foca o campo; erro da API mantém os valores e foca a mensagem. Enquanto salva, campos, cancelamento e outros botões de edição ficam bloqueados. Não há repetição automática da gravação.
+- Sucesso atualiza somente a linha correspondente, mantém a ordem e foca a confirmação. Cancelar descarta os valores locais e devolve o foco ao botão Editar.
+- Fechar ou trocar de turma ignora uma resposta atrasada na tela; uma gravação já enviada pode concluir no servidor. Consultar novamente antes de reenviar. Ainda não há detecção de alterações simultâneas: vale a última gravação aceita.
+
+Teste manual, com a `020` aplicada e `npm run dev:full`:
+
+1. Entrar como professor com MFA; abrir **Turmas → Rascunhos → Editar** e conferir os valores preenchidos.
+2. Alterar título, tipo, datas ou duração e salvar. Conferir a linha, atualizar a lista e verificar `AVALIACAO_EDITADA` no banco quando houver mudança.
+3. Alterar um campo e cancelar: a linha permanece igual. Abrir novamente e salvar sem mudanças: nenhum evento adicional.
+4. Testar título curto, fim anterior ao início e duração zero. O campo recebe foco e nada é enviado.
+5. Conferir que admin e turma inativa não apresentam Editar. Testar teclado e celular, incluindo rolagem horizontal da tabela.
+
+Teste automatizado: `npm run test:ui -- tests/nova-avaliacao.test.tsx tests/rascunhos-turma.test.tsx`. Cobre criação após o reaproveitamento dos campos, preenchimento/edição, cancelamento, perfis, fuso, preservação de segundos, validação, envio duplicado e respostas atrasadas ou inválidas. Usa Auth/HTTP simulados, sem gravar no Supabase.

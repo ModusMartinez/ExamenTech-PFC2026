@@ -119,7 +119,8 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
                   onClick={() => setRascunhosAbertos((current) => current === turma.id ? null : turma.id)}>Rascunhos</button>
               </div>
               {turmaAberta === turma.id && <AlunosTurmaPanel key={turma.id} turmaId={turma.id} turmaNome={turma.nome} />}
-              {rascunhosAbertos === turma.id && <RascunhosTurmaPanel key={`rascunhos-${turma.id}`} turmaId={turma.id} turmaNome={turma.nome} />}
+              {rascunhosAbertos === turma.id && <RascunhosTurmaPanel key={`rascunhos-${turma.id}`} turmaId={turma.id} turmaNome={turma.nome}
+                podeEditar={isTeacher && turma.situacao === 'ATIVA'} />}
             </li>
           ))}
         </ul>
