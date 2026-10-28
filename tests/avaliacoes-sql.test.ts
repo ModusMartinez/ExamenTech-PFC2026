@@ -241,6 +241,164 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
     assert.deepEqual((await queryAs(aluno, listSql)).rows, [])
   })
 
+  await t.test('020: edição controlada de avaliações em rascunho', async (t) => {
+    const beforeMigration = (await db.query(listSql)).rows
+    const oldEvents = (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+    await migrate('020_editar_avaliacao_rascunho.sql')
+    assert.deepEqual((await db.query(listSql)).rows, beforeMigration)
+    assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, oldEvents)
+    const original = (await queryAs<{ avaliacao: Record<string, unknown> }>(professor, createSql, valid)).rows[0].avaliacao
+    const editSql = 'SELECT public.editar_avaliacao_rascunho($1,$2,$3,$4,$5,$6) AS avaliacao'
+    const edited = [original.id, '  Atividade revisada  ', 'ATIVIDADE', '2026-11-10T18:00:00-03:00', '2026-11-10T20:00:00-03:00', 45]
+    const readEdited = async () => (await db.query<Record<string, unknown>>('SELECT * FROM public.avaliacoes WHERE id=$1', [original.id])).rows
+    const readEvents = async () => (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+
+    await t.test('altera somente os cinco campos permitidos e registra autor, recurso e horário', async () => {
+      const otherRows = (await db.query('SELECT * FROM public.avaliacoes WHERE id<>$1 ORDER BY id', [original.id])).rows
+      const result = (await queryAs<{ avaliacao: Record<string, unknown> }>(professor, editSql, edited)).rows[0].avaliacao
+      assert.equal(result.titulo, 'Atividade revisada')
+      assert.equal(result.tipo, 'ATIVIDADE')
+      assert.equal(result.duracao_minutos, 45)
+      assert.equal(new Date(String(result.inicio_em)).toISOString(), '2026-11-10T21:00:00.000Z')
+      assert.equal(new Date(String(result.fim_em)).toISOString(), '2026-11-10T23:00:00.000Z')
+      for (const field of ['id', 'turma_id', 'professor_id', 'situacao', 'criado_em']) assert.equal(result[field], original[field])
+      assert.deepEqual((await db.query('SELECT * FROM public.avaliacoes WHERE id<>$1 ORDER BY id', [original.id])).rows, otherRows)
+      const events = (await db.query<Record<string, unknown>>("SELECT * FROM public.eventos_seguranca WHERE evento='AVALIACAO_EDITADA'")).rows
+      assert.equal(events.length, 1)
+      assert.equal(events[0].usuario_id, professor)
+      assert.equal(events[0].recurso_id, original.id)
+      assert.equal(events[0].acao, 'editar_avaliacao_rascunho')
+      assert.equal(events[0].provedor, 'EXAMENTECH')
+      assert.equal(events[0].sucesso, true)
+      assert.ok(events[0].criado_em)
+      assert.equal(JSON.stringify(events[0]).includes('Atividade revisada'), false)
+      assert.equal((await queryAs(admin, 'SELECT titulo FROM public.avaliacoes WHERE id=$1', [original.id])).rows[0].titulo, result.titulo)
+      const before = await readEdited()
+      const beforeEvents = await readEvents()
+      await queryAs(professor, editSql, edited)
+      assert.deepEqual(await readEdited(), before)
+      assert.deepEqual(await readEvents(), beforeEvents)
+    })
+
+    await t.test('nega ADMIN, aluno, outro professor, falta de MFA e sessão ausente/inexistente/alheia', async () => {
+      const before = await readEdited()
+      const events = await readEvents()
+      for (const schema of ['public', 'examentech_private']) {
+        const sql = editSql.replace('public.', `${schema}.`)
+        for (const id of [admin, aluno]) await assert.rejects(queryAs(id, sql, edited), { code: '42501' })
+        await assert.rejects(queryAs(colleague, sql, edited), { code: 'P0002' })
+        for (const aal of ['aal1', '']) await assert.rejects(queryAs(professor, sql, edited, aal), { code: '42501' })
+        await assert.rejects(db.transaction(async (tx) => {
+          await tx.exec('SET LOCAL ROLE anon')
+          return tx.query(sql, edited)
+        }), { code: '42501' })
+      }
+      const sessionId = sessions.get(professor)!
+      sessions.delete(professor)
+      await assert.rejects(queryAs(professor, editSql, edited), { code: '42501' })
+      for (const invalidSession of [randomUUID(), sessions.get(colleague)!]) {
+        sessions.set(professor, invalidSession)
+        await assert.rejects(queryAs(professor, editSql, edited), { code: '42501' })
+      }
+      sessions.set(professor, sessionId)
+      assert.deepEqual(await readEdited(), before)
+      assert.deepEqual(await readEvents(), events)
+    })
+
+    await t.test('exige perfil/organização/turma ativos e mantém autoria após troca de responsável', async () => {
+      const before = await readEdited()
+      const events = await readEvents()
+      await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [professor])
+      await assert.rejects(queryAs(professor, editSql, edited), { code: '42501' })
+      await db.query("UPDATE public.perfis SET situacao='ATIVO' WHERE id=$1", [professor])
+      await db.query("UPDATE public.organizacoes SET situacao='INATIVO' WHERE id=$1", [org])
+      await assert.rejects(queryAs(professor, editSql, edited), { code: '42501' })
+      await db.query("UPDATE public.organizacoes SET situacao='ATIVO' WHERE id=$1", [org])
+      for (const orgId of [null, otherOrg]) {
+        await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [orgId, professor])
+        await assert.rejects(queryAs(professor, editSql, edited), { code: orgId === null ? '42501' : 'P0002' })
+      }
+      await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [org, professor])
+      await db.query("UPDATE public.turmas SET situacao='INATIVA' WHERE id=$1", [turmaId])
+      await assert.rejects(queryAs(professor, editSql, edited), { code: '55000' })
+      assert.equal((await queryAs(professor, 'SELECT id FROM public.avaliacoes WHERE id=$1', [original.id])).rows.length, 1)
+      await db.query("UPDATE public.turmas SET situacao='ATIVA',professor_id=$1 WHERE id=$2", [colleague, turmaId])
+      for (const id of [professor, colleague]) await assert.rejects(queryAs(id, editSql, edited), { code: 'P0002' })
+      await db.query('UPDATE public.turmas SET professor_id=$1 WHERE id=$2', [professor, turmaId])
+      for (const id of [randomUUID(), null]) {
+        await assert.rejects(queryAs(professor, editSql, [id, ...edited.slice(1)]), { code: 'P0002' })
+      }
+      assert.deepEqual(await readEdited(), before)
+      assert.deepEqual(await readEvents(), events)
+    })
+
+    await t.test('constraints recusam campos inválidos sem alteração parcial ou evento', async () => {
+      const before = await readEdited()
+      const events = await readEvents()
+      const invalidCases: [number, unknown, string][] = [
+        [1, '', '23514'], [1, '\t\t\t', '23514'], [1, 'AB', '23514'], [1, 'A'.repeat(151), '23514'],
+        [2, 'OUTRO', '23514'], [3, edited[4], '23514'], [4, edited[3], '23514'],
+        [3, 'infinity', '23514'], [4, 'infinity', '23514'], [3, '2026-02-30', '22008'],
+        [5, 0, '23514'], [5, -1, '23514'], [5, '1.5', '22P02'], [5, '2147483648', '22003'],
+      ]
+      for (let index = 1; index < edited.length; index++) invalidCases.push([index, null, '23502'])
+      for (const [index, value, code] of invalidCases) {
+        const params: unknown[] = [...edited]
+        params[index] = value
+        await assert.rejects(queryAs(professor, editSql, params), { code })
+      }
+      assert.deepEqual(await readEdited(), before)
+      assert.deepEqual(await readEvents(), events)
+    })
+
+    await t.test('recusa situação diferente de RASCUNHO mesmo quando os campos não mudam', async () => {
+      // Só no banco local: simula estados futuros e o rollback restaura a constraint da 019.
+      for (const situacao of ['PUBLICADA', 'CANCELADA']) {
+        await assert.rejects(db.transaction(async (tx) => {
+          await tx.exec('ALTER TABLE public.avaliacoes DROP CONSTRAINT avaliacoes_situacao_check')
+          await tx.query('UPDATE public.avaliacoes SET situacao=$1 WHERE id=$2', [situacao, original.id])
+          await tx.query("SELECT set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub: professor, aal: 'aal2', session_id: sessions.get(professor) })])
+          await tx.exec('SET LOCAL ROLE authenticated')
+          return tx.query(editSql, edited)
+        }), { code: '55000' })
+      }
+      assert.equal((await readEdited())[0].situacao, 'RASCUNHO')
+      await assert.rejects(db.query("UPDATE public.avaliacoes SET situacao='PUBLICADA' WHERE id=$1", [original.id]), { code: '23514' })
+    })
+
+    await t.test('falha de auditoria desfaz a edição; reaplicar 020 preserva dados e permissões', async () => {
+      const before = await readEdited()
+      const events = await readEvents()
+      await db.exec(`
+        CREATE FUNCTION public.falhar_edicao_avaliacao() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.evento = 'AVALIACAO_EDITADA' THEN RAISE EXCEPTION 'Falha de edição simulada'; END IF;
+          RETURN NEW;
+        END; $$;
+        CREATE TRIGGER falhar_edicao_avaliacao BEFORE INSERT ON public.eventos_seguranca
+        FOR EACH ROW EXECUTE FUNCTION public.falhar_edicao_avaliacao();
+      `)
+      await assert.rejects(queryAs(professor, editSql, [original.id, 'Título alterado', ...edited.slice(2)]), /Falha de edição simulada/)
+      await db.exec('DROP TRIGGER falhar_edicao_avaliacao ON public.eventos_seguranca; DROP FUNCTION public.falhar_edicao_avaliacao();')
+      await migrate('020_editar_avaliacao_rascunho.sql')
+      assert.deepEqual(await readEdited(), before)
+      assert.deepEqual(await readEvents(), events)
+      for (const id of [professor, colleague, aluno, admin]) {
+        for (const sql of ["UPDATE public.avaliacoes SET titulo='Alteração direta'", 'DELETE FROM public.avaliacoes']) {
+          await assert.rejects(queryAs(id, sql), { code: '42501' })
+        }
+      }
+      for (const field of ['p_turma_id', 'p_professor_id', 'p_situacao', 'p_criado_em']) {
+        await assert.rejects(queryAs(professor,
+          `SELECT public.editar_avaliacao_rascunho($1,$2,$3,$4,$5,$6,${field} => $7)`, [...edited, randomUUID()]), { code: '42883' })
+      }
+      assert.deepEqual((await queryAs(aluno, listSql)).rows, [])
+      assert.equal((await queryAs(admin, 'SELECT * FROM public.avaliacoes WHERE id=$1', [original.id])).rows.length, 1)
+      await queryAs(professor, editSql, [original.id, 'Prova revisada', 'PROVA', ...edited.slice(3)])
+      assert.equal((await readEdited())[0].tipo, 'PROVA')
+    })
+  })
+
   // O transporte simula Auth/PostgREST; funções, RLS e persistência são reais no PGlite.
   const env = { SUPABASE_URL: 'https://exemplo.supabase.co', VITE_SUPABASE_PUBLISHABLE_KEY: 'public-test-key' }
   const body = {

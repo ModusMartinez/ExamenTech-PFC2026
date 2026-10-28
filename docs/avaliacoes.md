@@ -1,6 +1,6 @@
-# Avaliações em rascunho (019)
+# Avaliações em rascunho (019–020)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação e consulta de rascunhos no banco e na API, com formulário de criação para o professor e listagem por turma para professor/admin. Sem edição, questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação e consulta de rascunhos no banco e na API, com formulário de criação para o professor e listagem por turma para professor/admin. Edição disponível somente por função do banco; API e formulário de edição ficam para os próximos blocos. Sem questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -31,15 +31,15 @@ SELECT public.criar_avaliacao_rascunho(
 
 - Criação: somente professor responsável, com perfil e organização ativos, sessão existente pertencente ao usuário e MFA `aal2`. Turma precisa estar ativa e na organização atual do professor.
 - Consulta: professor autor que continua responsável pela turma, ou ADMIN. Reutiliza RLS de turmas e `pode_consultar_turma`, incluindo sessão/MFA e situação da conta. Aluno não lê rascunhos, mesmo matriculado.
-- Turma inativa continua consultável, mas não recebe novos rascunhos. Professor perde a consulta se a organização ficar inativa ou se deixar de ser responsável; ADMIN mantém a consulta institucional.
-- Escrita direta, edição, exclusão e publicação estão bloqueadas para os perfis da aplicação, inclusive ADMIN. Somente a função controlada cria registros. A função pública usa `SECURITY INVOKER`; a privada usa `SECURITY DEFINER`, `search_path` vazio e permissões explícitas.
+- Turma inativa continua consultável, mas não recebe novos rascunhos nem permite edição. Professor perde a consulta se a organização ficar inativa ou se deixar de ser responsável; ADMIN mantém a consulta institucional.
+- Escrita direta, exclusão e publicação estão bloqueadas para os perfis da aplicação, inclusive ADMIN. Criação e edição usam funções controladas. As funções públicas usam `SECURITY INVOKER`; as privadas usam `SECURITY DEFINER`, `search_path` vazio e permissões explícitas.
 - `ON DELETE RESTRICT` impede apagar turma/autor referenciados. Não modifica matrículas, contas ou avaliações já existentes ao aplicar a query.
 - `AVALIACAO_CRIADA` registra autor, ID da avaliação e horário, sem título, código ou dados dos alunos. Falha na auditoria desfaz o rascunho. O filtro/rótulo desse evento na tela de auditoria ainda está pendente.
 - Locks mantêm perfil, organização, sessão e turma estáveis durante a criação. Não há alteração nos helpers ou nas permissões dos módulos anteriores.
 
 Erros SQL: `42501` para perfil/sessão/MFA/permissão; `P0002` para turma inexistente ou fora do acesso; `55000` para turma inativa; `23502` para campo obrigatório e `23514` para regra de campo. UUID, data ou inteiro malformado é recusado pelo PostgreSQL antes da gravação.
 
-## Aplicação e teste
+## Base 019: aplicação e teste
 
 1. No Supabase de testes com `018` aplicada, executar somente `database/019_avaliacoes_rascunho.sql`. Não reaplicar migrações anteriores. A query cria a estrutura, mas não cria avaliações automaticamente.
 2. No terminal, dentro do repositório, executar:
@@ -71,6 +71,48 @@ O SQL Editor executa como administrador do banco, normalmente sem a sessão do a
 Os testes executam as funções e políticas reais no PostgreSQL local via PGlite, com Auth e sessões simulados. Cobrem campos, perfis, isolamento, aluno já matriculado, sessão de outro usuário, MFA, bloqueio de escrita, preservação dos eventos e rollback. Não acessam Supabase remoto nem substituem teste com Auth real ou concorrência entre conexões reais.
 
 Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), [constraints do PostgreSQL](https://www.postgresql.org/docs/current/ddl-constraints.html).
+
+## Edição no banco (020)
+
+Com a `019` já aplicada, executar somente `database/020_editar_avaliacao_rascunho.sql` no SQL Editor. A aplicação da query preserva avaliações e eventos existentes. Não reaplicar as queries anteriores.
+
+`public.editar_avaliacao_rascunho` → função privada → atualização de `avaliacoes` e inserção em `eventos_seguranca`, na mesma transação.
+
+- Recebe ID da avaliação e os cinco campos completos: título, tipo, início, fim e duração. Reutiliza as constraints da criação. Não altera ID, turma, autor, situação ou data de criação.
+- Exige professor autor ainda responsável pela turma, perfil/organização/turma ativos, sessão do próprio usuário e MFA `aal2`. ADMIN continua apenas consultando; aluno e outro professor não editam.
+- Somente `RASCUNHO` pode ser editado. A função confere a situação após bloquear a linha. Turma inativa permite consulta, mas impede edição.
+- Uma alteração efetiva gera `AVALIACAO_EDITADA`, com usuário, avaliação e horário. Não registra o título nem os valores anteriores/novos. Falha no evento desfaz a edição; reenviar os mesmos valores não altera a linha nem duplica o evento. O filtro/rótulo na tela de auditoria ainda está pendente.
+- Locks mantêm perfil, organização, sessão e turma estáveis. Edições simultâneas da mesma avaliação aguardam a liberação da linha; a última gravação válida prevalece. Ainda não há controle de versão para detectar formulário desatualizado.
+
+Erros: `42501` para perfil/sessão/MFA; `P0002` para avaliação inexistente ou fora do acesso; `55000` para turma inativa ou avaliação fora de rascunho. Campos continuam usando os erros de constraints da `019`.
+
+### Teste manual da edição
+
+1. Aplicar a `020`, rodar `npm run dev:full` e entrar como professor com MFA.
+2. Escolher um rascunho de teste de uma turma ativa própria. Copiar seu ID da tabela `avaliacoes` no Supabase.
+3. No console do navegador, no ambiente local, executar o exemplo abaixo com esse ID. A chamada altera o rascunho escolhido usando a sessão atual:
+
+```js
+const { supabase: supabaseEdicao } = await import('/src/lib/supabase.ts');
+const camposEdicao = {
+  p_avaliacao_id: 'UUID_DA_AVALIACAO',
+  p_titulo: 'Prova revisada',
+  p_tipo: 'PROVA',
+  p_inicio_em: '2026-11-09T19:00:00-03:00',
+  p_fim_em: '2026-11-09T21:00:00-03:00',
+  p_duracao_minutos: 60,
+};
+const resultadoEdicao = await supabaseEdicao.rpc('editar_avaliacao_rascunho', camposEdicao);
+console.log(resultadoEdicao);
+```
+
+4. Esperado: `error: null` e os dados atualizados. Em **Turmas → Rascunhos → Atualizar rascunhos**, conferir os novos valores. ID, turma, autor e data de criação permanecem iguais.
+5. Conferir `AVALIACAO_EDITADA` em `eventos_seguranca`, com `recurso_id` igual ao ID escolhido. Repetir a chamada com os mesmos valores: nenhum evento adicional. Testar uma duração zero: erro e nenhuma alteração.
+6. Recarregar a página ao trocar de conta e repetir como admin, aluno e outro professor: acesso recusado. A tela ainda não tem botão de edição.
+
+Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Inclui edição válida, permissões, MFA/sessão, conta/organização/turma inativas, troca de responsável, campos inválidos, preservação do histórico, situação diferente de rascunho, rollback da auditoria e reaplicação da `020`. Usa banco local e Auth simulado; não testa Supabase remoto nem concorrência entre conexões reais.
+
+Referências da edição: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [bloqueios de linha no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html).
 
 ## API de criação e consulta
 
