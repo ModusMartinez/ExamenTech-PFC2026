@@ -1,13 +1,15 @@
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export type DadosAvaliacaoRascunho = {
-  turma_id: string
+type CamposAvaliacaoRascunho = {
   titulo: string
   tipo: 'PROVA' | 'ATIVIDADE'
   inicio_em: string
   fim_em: string
   duracao_minutos: number
 }
+
+export type DadosAvaliacaoRascunho = CamposAvaliacaoRascunho & { turma_id: string }
+export type DadosEdicaoAvaliacaoRascunho = CamposAvaliacaoRascunho & { avaliacao_id: string }
 
 export type AvaliacaoRascunho = DadosAvaliacaoRascunho & {
   id: string
@@ -30,10 +32,9 @@ function lerDataComFuso(value: unknown): string | null {
   return new Date(value).toISOString()
 }
 
-// Usado para validar a entrada e a resposta do banco, sem repassar campos extras.
-export function lerDadosAvaliacao(value: unknown): DadosAvaliacaoRascunho | null {
-  if (!isRecord(value) || typeof value.turma_id !== 'string' || !UUID_PATTERN.test(value.turma_id) ||
-      typeof value.titulo !== 'string' || (value.tipo !== 'PROVA' && value.tipo !== 'ATIVIDADE') ||
+// Campos compartilhados pela criação, edição e resposta do banco.
+function lerCamposAvaliacao(value: unknown): CamposAvaliacaoRascunho | null {
+  if (!isRecord(value) || typeof value.titulo !== 'string' || (value.tipo !== 'PROVA' && value.tipo !== 'ATIVIDADE') ||
       typeof value.duracao_minutos !== 'number' || !Number.isInteger(value.duracao_minutos) ||
       value.duracao_minutos < 1 || value.duracao_minutos > 2147483647) return null
 
@@ -43,9 +44,21 @@ export function lerDadosAvaliacao(value: unknown): DadosAvaliacaoRascunho | null
   const fim = lerDataComFuso(value.fim_em)
   if (tamanho < 3 || tamanho > 150 || !inicio || !fim || Date.parse(fim) <= Date.parse(inicio)) return null
   return {
-    turma_id: value.turma_id.toLowerCase(), titulo, tipo: value.tipo,
+    titulo, tipo: value.tipo,
     inicio_em: inicio, fim_em: fim, duracao_minutos: value.duracao_minutos,
   }
+}
+
+export function lerDadosAvaliacao(value: unknown): DadosAvaliacaoRascunho | null {
+  if (!isRecord(value) || typeof value.turma_id !== 'string' || !UUID_PATTERN.test(value.turma_id)) return null
+  const campos = lerCamposAvaliacao(value)
+  return campos ? { turma_id: value.turma_id.toLowerCase(), ...campos } : null
+}
+
+export function lerDadosEdicaoAvaliacao(value: unknown): DadosEdicaoAvaliacaoRascunho | null {
+  if (!isRecord(value) || typeof value.avaliacao_id !== 'string' || !UUID_PATTERN.test(value.avaliacao_id)) return null
+  const campos = lerCamposAvaliacao(value)
+  return campos ? { avaliacao_id: value.avaliacao_id.toLowerCase(), ...campos } : null
 }
 
 export function lerAvaliacaoRascunho(value: unknown): AvaliacaoRascunho | null {

@@ -1,6 +1,6 @@
 # Avaliações em rascunho (019–020)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação e consulta de rascunhos no banco e na API, com formulário de criação para o professor e listagem por turma para professor/admin. Edição disponível somente por função do banco; API e formulário de edição ficam para os próximos blocos. Sem questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulário de criação para o professor e listagem por turma para professor/admin. O formulário de edição fica para o próximo bloco. Sem questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -114,16 +114,18 @@ Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Inclui edição 
 
 Referências da edição: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [bloqueios de linha no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html).
 
-## API de criação e consulta
+## API de criação, consulta e edição
 
-Sem nova query: requer a `019` já aplicada. Rota registrada no servidor local e no diretório `api` da Vercel. Usa chave pública e `Authorization: Bearer <access_token>` do usuário, nunca chave administrativa. `getUser` valida a identidade; perfil e RLS/função conferem as permissões.
+Requer a `019` para criação/consulta e a `020` para edição, sem nova query neste bloco. Rota registrada no servidor local e no diretório `api` da Vercel. Usa chave pública e `Authorization: Bearer <access_token>` do usuário, nunca chave administrativa. `getUser` valida a identidade; perfil e RLS/função conferem as permissões.
 
 - `POST /api/avaliacoes`: cria pela função `criar_avaliacao_rascunho`. Recebe somente `turma_id`, `titulo`, `tipo`, `inicio_em`, `fim_em`, `duracao_minutos`. Retorna `201` com `{ avaliacao }`, incluindo ID, autor, situação e data de criação definidos pelo banco.
 - `GET /api/avaliacoes?turma_id=UUID`: consulta os rascunhos visíveis da turma, por data de criação decrescente e ID decrescente. Retorna `200` com `{ avaliacoes, limite: 50 }`. Ainda sem paginação; não é uma lista completa quando há mais de 50 rascunhos.
+- `PATCH /api/avaliacoes`: edita pela função `editar_avaliacao_rascunho`. Recebe somente `avaliacao_id`, `titulo`, `tipo`, `inicio_em`, `fim_em`, `duracao_minutos`, todos obrigatórios. Retorna `200` com `{ avaliacao }`, inclusive ao salvar os mesmos valores. Não recebe `turma_id`; turma e autor permanecem os da avaliação.
+- Edição exige professor autor ainda responsável pela turma e as regras da `020`. ADMIN e aluno recebem `403`; avaliação inexistente ou de outro professor recebem a mesma resposta `404`. Turma inativa ou avaliação fora de rascunho retornam `409`. Não repete o PATCH automaticamente: em falha, consultar os valores atuais antes de reenviar.
 - Professor cria apenas nas próprias turmas. ADMIN consulta, mas não cria. Aluno é recusado mesmo matriculado. Consulta de turma inexistente ou fora do acesso retorna a mesma resposta `404`; turma acessível sem rascunhos retorna lista vazia. Turma inativa permite consulta, mas criação retorna `409`.
 - Não recebe professor, organização, situação, data de criação ou aluno no corpo. Campos extras, parâmetros de URL extras/repetidos e JSON inválido são recusados.
 - Datas na API usam ISO com segundos e fuso (`Z` ou `±HH:MM`); calendário inválido e fim anterior/igual ao início são recusados. Respostas normalizam datas em UTC com precisão de milissegundos. Minutos devem ser número inteiro positivo dentro do tipo INTEGER do PostgreSQL, não texto.
-- O contrato em `src/services/avaliacaoValidation.ts` valida entrada e resposta do banco. Resposta inválida não confirma criação nem vira lista vazia; campos extras do banco não são devolvidos. Todos os retornos usam `Cache-Control: no-store`.
+- O contrato em `src/services/avaliacaoValidation.ts` compartilha a validação de título, tipo, datas e duração entre criação e edição. Resposta inválida não confirma gravação nem vira lista vazia; campos extras do banco não são devolvidos. Todos os retornos usam `Cache-Control: no-store`.
 - Não repete o POST automaticamente. Em falha de conexão/resposta, consultar antes de reenviar: a transação pode ter sido concluída, e duas criações válidas geram registros diferentes.
 - Erros HTTP: `400` dados/consulta inválidos, `401` token ausente/recusado, `403` perfil/MFA não permitido, `404` turma inacessível, `405` método, `409` turma inativa, `415` conteúdo diferente de JSON e `503` indisponibilidade/resposta inválida. Sessão encerrada recusada pela RLS pode retornar `404` na consulta, sem expor a turma.
 
@@ -166,6 +168,39 @@ Esperado: `201` com `RASCUNHO`, depois `200` contendo o mesmo ID. Conferir `AVAL
 `tests/avaliacoes-sql.test.ts` agora também cobre API integrada ao banco local, limite/ordem, métodos, validação, isolamento, auditoria e falhas de Auth/transporte/contrato. Auth e HTTP são simulados; nenhum registro é criado no Supabase remoto pelos testes. Executar `node --test tests/avaliacoes-sql.test.ts`, `npm test`, `npm run lint` e `npm run build`.
 
 Referências da API: [identidade no servidor](https://supabase.com/docs/reference/javascript/auth-getuser), [RPC](https://supabase.com/docs/reference/javascript/rpc), [consulta](https://supabase.com/docs/reference/javascript/select), [Vercel Functions](https://vercel.com/docs/functions/runtimes/node-js).
+
+### Teste manual da API de edição
+
+Com a `020` aplicada, rodar `npm run dev:full` e entrar como professor com MFA. Escolher uma avaliação de teste da própria turma ativa e substituir o ID abaixo. Executar no console do navegador; a chamada altera esse rascunho:
+
+```js
+await (async () => {
+  const { supabase } = await import('/src/lib/supabase.ts');
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session) throw new Error('Entre novamente e conclua o MFA.');
+  const resposta = await fetch('/api/avaliacoes', {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${data.session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      avaliacao_id: 'UUID_DA_AVALIACAO',
+      titulo: 'Atividade revisada pela API', tipo: 'ATIVIDADE',
+      inicio_em: '2026-11-09T19:00:00-03:00', fim_em: '2026-11-09T21:00:00-03:00',
+      duracao_minutos: 45,
+    }),
+  });
+  console.log(resposta.status, await resposta.json());
+})();
+```
+
+1. Esperado: `200` com a avaliação atualizada. Conferir em **Turmas → Rascunhos → Atualizar rascunhos** e na tabela `avaliacoes`. ID, turma, autor e data de criação permanecem iguais.
+2. Conferir um novo `AVALIACAO_EDITADA` em `eventos_seguranca` quando houver mudança. Repetir os mesmos valores: `200`, sem outro evento.
+3. Trocar duração por `0`, remover um campo ou acrescentar `turma_id`: `400`, sem alteração nem evento.
+4. Recarregar a página ao trocar de conta e repetir com o mesmo ID: admin/aluno recebem `403`; outro professor recebe `404`. Sem MFA, `403`.
+
+Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Cobre o PATCH integrado ao banco local, permissões, normalização, auditoria, repetição sem mudanças, rollback e falhas de Auth/RPC/resposta. Auth e HTTP são simulados; não acessa Supabase remoto. A tela de edição fica para o próximo bloco.
 
 ## Formulário do professor
 

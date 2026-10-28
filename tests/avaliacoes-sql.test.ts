@@ -405,10 +405,15 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
     turma_id: turmaId, titulo: '  Rascunho pela API  ', tipo: 'PROVA',
     inicio_em: String(valid[3]), fim_em: String(valid[4]), duracao_minutos: 60,
   }
-  function request(method = 'GET', payload: unknown = body, query = `?turma_id=${turmaId}`) {
-    return new Request(`http://localhost/api/avaliacoes${method === 'POST' ? '' : query}`, {
+  const editBody = {
+    avaliacao_id: avaliacaoId.toUpperCase(), titulo: '  Atividade editada pela API  ', tipo: 'ATIVIDADE',
+    inicio_em: '2026-11-10T19:00:00-03:00', fim_em: '2026-11-10T21:00:00-03:00', duracao_minutos: 45,
+  }
+  function request(method = 'GET', payload: unknown = method === 'PATCH' ? editBody : body, query = `?turma_id=${turmaId}`) {
+    const writing = method === 'POST' || method === 'PATCH'
+    return new Request(`http://localhost/api/avaliacoes${writing ? '' : query}`, {
       method, headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' },
-      body: method === 'POST' ? JSON.stringify(payload) : undefined,
+      body: writing ? JSON.stringify(payload) : undefined,
     })
   }
   function apiFor(id: string, aal = 'aal2') {
@@ -444,6 +449,15 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
           assert.deepEqual(Object.keys(params).sort(), ['p_duracao_minutos', 'p_fim_em', 'p_inicio_em', 'p_tipo', 'p_titulo', 'p_turma_id'])
           const result = await queryAs<{ avaliacao: unknown }>(id, createSql,
             [params.p_turma_id, params.p_titulo, params.p_tipo, params.p_inicio_em, params.p_fim_em, params.p_duracao_minutos], aal)
+          return Response.json(result.rows[0].avaliacao)
+        }
+        if (url.pathname === '/rest/v1/rpc/editar_avaliacao_rascunho') {
+          assert.equal(req.method, 'POST')
+          const params = await req.json()
+          assert.deepEqual(Object.keys(params).sort(), ['p_avaliacao_id', 'p_duracao_minutos', 'p_fim_em', 'p_inicio_em', 'p_tipo', 'p_titulo'])
+          const result = await queryAs<{ avaliacao: unknown }>(id,
+            'SELECT public.editar_avaliacao_rascunho($1,$2,$3,$4,$5,$6) AS avaliacao',
+            [params.p_avaliacao_id, params.p_titulo, params.p_tipo, params.p_inicio_em, params.p_fim_em, params.p_duracao_minutos], aal)
           return Response.json(result.rows[0].avaliacao)
         }
         assert.fail(`Rota inesperada: ${url.pathname}`)
@@ -489,10 +503,10 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
     const adminApi = apiFor(admin).handler
     assert.equal((await adminApi.fetch(request())).status, 200)
     assert.equal((await adminApi.fetch(request('GET', null, `?turma_id=${otherTurmaId}`))).status, 200)
-    assert.equal((await adminApi.fetch(request('POST'))).status, 403)
+    for (const method of ['POST', 'PATCH']) assert.equal((await adminApi.fetch(request(method))).status, 403)
     for (const [id, aal] of [[aluno, 'aal2'], [professor, 'aal1'], [admin, 'aal1']]) {
       const { handler } = apiFor(id, aal)
-      for (const method of ['GET', 'POST']) assert.equal((await handler.fetch(request(method))).status, 403)
+      for (const method of ['GET', 'POST', 'PATCH']) assert.equal((await handler.fetch(request(method))).status, 403)
     }
     const other = await apiFor(colleague).handler.fetch(request())
     const missing = await apiFor(professor).handler.fetch(request('GET', null, `?turma_id=${randomUUID()}`))
@@ -504,15 +518,17 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
     sessions.set(professor, randomUUID())
     assert.equal((await apiFor(professor).handler.fetch(request())).status, 404)
     assert.equal((await apiFor(professor).handler.fetch(request('POST'))).status, 403)
+    assert.equal((await apiFor(professor).handler.fetch(request('PATCH'))).status, 403)
     sessions.set(professor, sessionId)
     await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [professor])
-    for (const method of ['GET', 'POST']) assert.equal((await apiFor(professor).handler.fetch(request(method))).status, 403)
+    for (const method of ['GET', 'POST', 'PATCH']) assert.equal((await apiFor(professor).handler.fetch(request(method))).status, 403)
     await db.query("UPDATE public.perfis SET situacao='ATIVO',organizacao_id=$1 WHERE id=$2", [otherOrg, professor])
-    for (const method of ['GET', 'POST']) assert.equal((await apiFor(professor).handler.fetch(request(method))).status, 404)
+    for (const method of ['GET', 'POST', 'PATCH']) assert.equal((await apiFor(professor).handler.fetch(request(method))).status, 404)
     await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [org, professor])
     await db.query("UPDATE public.turmas SET situacao='INATIVA' WHERE id=$1", [turmaId])
     assert.equal((await apiFor(professor).handler.fetch(request())).status, 200)
     assert.equal((await apiFor(professor).handler.fetch(request('POST'))).status, 409)
+    assert.equal((await apiFor(professor).handler.fetch(request('PATCH'))).status, 409)
     await db.query("UPDATE public.turmas SET situacao='ATIVA' WHERE id=$1", [turmaId])
   })
 
@@ -545,7 +561,7 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
     assert.equal((await handler.fetch(withQuery)).status, 400)
     const forbidden = await handler.fetch(request('DELETE'))
     assert.equal(forbidden.status, 405)
-    assert.equal(forbidden.headers.get('allow'), 'GET, POST')
+    assert.equal(forbidden.headers.get('allow'), 'GET, POST, PATCH')
     assert.equal(transport.mock.callCount(), 0)
   })
 
@@ -607,6 +623,141 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
     const sanitized = await withExtra.fetch(request('POST'))
     assert.equal(sanitized.status, 201)
     assert.equal('segredo' in (await sanitized.json()).avaliacao, false)
+  })
+
+  await t.test('PATCH edita, preserva dados fixos e registra uma auditoria por alteração efetiva', async () => {
+    const { handler } = apiFor(professor)
+    const original = (await db.query<Record<string, unknown>>('SELECT * FROM public.avaliacoes WHERE id=$1', [avaliacaoId])).rows[0]
+    const oldEvents = (await db.query('SELECT * FROM public.eventos_seguranca WHERE recurso_id=$1 ORDER BY id', [avaliacaoId])).rows
+    const response = await handler.fetch(request('PATCH'))
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    const { avaliacao } = await response.json()
+    for (const field of ['id', 'turma_id', 'professor_id', 'situacao']) assert.equal(avaliacao[field], original[field])
+    assert.ok(original.criado_em instanceof Date)
+    assert.equal(avaliacao.criado_em, original.criado_em.toISOString())
+    assert.equal(avaliacao.titulo, editBody.titulo.trim())
+    assert.equal(avaliacao.tipo, 'ATIVIDADE')
+    assert.equal(avaliacao.inicio_em, '2026-11-10T22:00:00.000Z')
+    assert.equal(avaliacao.fim_em, '2026-11-11T00:00:00.000Z')
+    assert.equal(avaliacao.duracao_minutos, 45)
+    const saved = (await db.query<Record<string, unknown>>('SELECT * FROM public.avaliacoes WHERE id=$1', [avaliacaoId])).rows[0]
+    assert.equal(saved.titulo, avaliacao.titulo)
+    const events = (await db.query<Record<string, unknown>>('SELECT * FROM public.eventos_seguranca WHERE recurso_id=$1 ORDER BY id', [avaliacaoId])).rows
+    assert.equal(events.length, oldEvents.length + 1)
+    assert.deepEqual(events.filter((event) => event.evento !== 'AVALIACAO_EDITADA'), oldEvents)
+    const event = events.find((event) => event.evento === 'AVALIACAO_EDITADA')!
+    assert.equal(event.usuario_id, professor)
+    assert.equal(event.acao, 'editar_avaliacao_rascunho')
+    assert.equal(event.sucesso, true)
+    assert.ok(event.criado_em)
+    assert.deepEqual(await (await handler.fetch(request('PATCH'))).json(), { avaliacao })
+    assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca WHERE recurso_id=$1 ORDER BY id', [avaliacaoId])).rows, events)
+    const listed = await (await handler.fetch(request())).json()
+    assert.deepEqual(listed.avaliacoes.find((item: { id: string }) => item.id === avaliacaoId), avaliacao)
+    const missing = await handler.fetch(request('PATCH', { ...editBody, avaliacao_id: randomUUID() }))
+    const other = await apiFor(colleague).handler.fetch(request('PATCH'))
+    assert.equal(missing.status, 404)
+    assert.equal(other.status, 404)
+    assert.deepEqual(await other.json(), await missing.json())
+    await db.query("UPDATE public.organizacoes SET situacao='INATIVO' WHERE id=$1", [org])
+    assert.equal((await handler.fetch(request('PATCH'))).status, 403)
+    await db.query("UPDATE public.organizacoes SET situacao='ATIVO' WHERE id=$1", [org])
+    assert.equal((await handler.fetch(request('PATCH', { ...editBody, tipo: 'PROVA' }))).status, 200)
+  })
+
+  await t.test('PATCH recusa identidade forjada, campos incompletos e entradas inválidas antes de acessar serviços', async () => {
+    const { handler, transport } = apiFor(professor)
+    for (const payload of [null, [], 'texto', {}, ...Object.keys(editBody).map((field) => ({ ...editBody, [field]: undefined })),
+      ...['id', 'turma_id', 'professor_id', 'organizacao_id', 'situacao', 'criado_em', 'aluno_id'].map((field) => ({ ...editBody, [field]: randomUUID() })),
+      { ...editBody, avaliacao_id: 'inválido' }, { ...editBody, titulo: 'AB' }, { ...editBody, titulo: '\t\t\t' },
+      { ...editBody, titulo: '📝'.repeat(151) }, { ...editBody, tipo: 'OUTRO' }, { ...editBody, duracao_minutos: '45' },
+      { ...editBody, duracao_minutos: 0 }, { ...editBody, duracao_minutos: 1.5 }, { ...editBody, duracao_minutos: 2147483648 },
+      { ...editBody, inicio_em: '2026-02-30T19:00:00-03:00' }, { ...editBody, inicio_em: '2026-11-10T19:00:00' },
+      { ...editBody, fim_em: editBody.inicio_em }]) {
+      assert.equal((await handler.fetch(request('PATCH', payload))).status, 400)
+    }
+    for (const [query, payload, contentType, expected] of [
+      ['?avaliacao_id=' + avaliacaoId, JSON.stringify(editBody), 'application/json', 400],
+      ['', '{', 'application/json', 400], ['', JSON.stringify(editBody), 'text/plain', 415],
+    ] as const) {
+      assert.equal((await handler.fetch(new Request(`http://localhost/api/avaliacoes${query}`, {
+        method: 'PATCH', headers: { Authorization: 'Bearer test-session', 'Content-Type': contentType }, body: payload,
+      }))).status, expected)
+    }
+    const noToken = request('PATCH')
+    noToken.headers.delete('Authorization')
+    assert.equal((await handler.fetch(noToken)).status, 401)
+    assert.equal(transport.mock.callCount(), 0)
+  })
+
+  await t.test('PATCH trata falhas de Auth, RPC e resposta sem confirmar edição nem vazar detalhes', async () => {
+    for (const [status, expected] of [[401, 401], [429, 503]]) {
+      const transport = t.mock.fn(async () => Response.json({ message: 'Detalhe interno' }, { status }))
+      assert.equal((await createAvaliacoesHandler(env, transport).fetch(request('PATCH'))).status, expected)
+      assert.equal(transport.mock.callCount(), 1)
+    }
+    assert.equal((await createAvaliacoesHandler({}, async () => { throw new Error('Sem configuração') }).fetch(request('PATCH'))).status, 503)
+    const sample = (await (await apiFor(professor).handler.fetch(request('PATCH'))).json()).avaliacao
+    const invalidResponses = [null, [], { ...sample, id: randomUUID() }, { ...sample, professor_id: colleague },
+      { ...sample, titulo: 'Outro título' }, { ...sample, tipo: 'PROVA' }, { ...sample, duracao_minutos: 60 },
+      { ...sample, inicio_em: body.inicio_em }, { ...sample, fim_em: body.fim_em },
+      { ...sample, situacao: 'PUBLICADA' }, { ...sample, criado_em: null }]
+    for (const [responseBody, status, expected] of [
+      ...invalidResponses.map((value) => [value, 200, 503] as const),
+      ...[['42501', 403], ['P0002', 404], ['55000', 409], ['23514', 400], ['P0001', 503], ['PGRST202', 503]]
+        .map(([code, expected]) => [{ code, message: 'Detalhe interno' }, 400, expected] as const),
+      [{ ...sample, segredo: 'não retornar' }, 200, 200],
+    ] as const) {
+      const { transport } = apiFor(professor)
+      let rpcCalls = 0
+      const handler = createAvaliacoesHandler(env, async (input, init) => {
+        if (new URL(new Request(input, init).url).pathname === '/rest/v1/rpc/editar_avaliacao_rascunho') {
+          rpcCalls++
+          return Response.json(responseBody, { status })
+        }
+        return transport(input, init)
+      })
+      const response = await handler.fetch(request('PATCH'))
+      assert.equal(response.status, expected)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+      const result = await response.json()
+      if (expected === 200) assert.deepEqual(result, { avaliacao: sample })
+      else assert.equal('avaliacao' in result, false)
+      assert.equal(JSON.stringify(result).includes('Detalhe interno'), false)
+      assert.equal(rpcCalls, 1)
+    }
+    const { transport } = apiFor(professor)
+    let failedCalls = 0
+    const disconnected = createAvaliacoesHandler(env, async (input, init) => {
+      if (new URL(new Request(input, init).url).pathname.includes('/rpc/')) {
+        failedCalls++
+        throw new Error('Rede indisponível')
+      }
+      return transport(input, init)
+    })
+    assert.equal((await disconnected.fetch(request('PATCH'))).status, 503)
+    assert.equal(failedCalls, 1)
+  })
+
+  await t.test('PATCH retorna 503 quando a auditoria falha e preserva a avaliação e os eventos', async () => {
+    const before = (await db.query(listSql)).rows
+    const events = (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+    await db.exec(`
+      CREATE FUNCTION public.falhar_edicao_api() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.evento = 'AVALIACAO_EDITADA' THEN RAISE EXCEPTION 'Detalhe interno'; END IF;
+        RETURN NEW;
+      END; $$;
+      CREATE TRIGGER falhar_edicao_api BEFORE INSERT ON public.eventos_seguranca
+      FOR EACH ROW EXECUTE FUNCTION public.falhar_edicao_api();
+    `)
+    const response = await apiFor(professor).handler.fetch(request('PATCH', { ...editBody, titulo: 'Alteração que deve falhar' }))
+    assert.equal(response.status, 503)
+    assert.equal(JSON.stringify(await response.json()).includes('Detalhe interno'), false)
+    assert.deepEqual((await db.query(listSql)).rows, before)
+    assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, events)
+    await db.exec('DROP TRIGGER falhar_edicao_api ON public.eventos_seguranca; DROP FUNCTION public.falhar_edicao_api();')
   })
 })
 
