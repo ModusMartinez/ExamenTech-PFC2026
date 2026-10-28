@@ -1,6 +1,6 @@
 # Avaliações em rascunho (019)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação e consulta de rascunhos no banco e na API, com formulário de criação para o professor. Sem tela de listagem, edição, questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação e consulta de rascunhos no banco e na API, com formulário de criação para o professor e listagem por turma para professor/admin. Sem edição, questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -135,7 +135,7 @@ Painel → **Nova avaliação**. Campos: turma ativa, título, tipo (Prova/Ativi
 - Validação indica e foca o campo inválido. Reutiliza o contrato `lerDadosAvaliacao` antes de enviar.
 - Durante o envio, campos e atualização de turmas ficam bloqueados. Um segundo envio simultâneo é ignorado.
 - Sucesso somente após `201` com rascunho válido e correspondente aos dados enviados. Limpa o formulário; erros preservam os campos.
-- Falha de rede/resposta não repete o POST. Como a tela de listagem ainda não existe, conferir a criação pela consulta da API acima ou pela tabela `avaliacoes` antes de reenviar.
+- Falha de rede/resposta não repete o POST. Conferir a criação em **Turmas → Rascunhos** antes de reenviar. A tela mostra até 50 registros; a consulta direta ao banco permite conferir registros anteriores a esse limite.
 
 ### Teste manual do formulário
 
@@ -148,3 +148,21 @@ Painel → **Nova avaliação**. Campos: turma ativa, título, tipo (Prova/Ativi
 Teste automatizado do formulário e serviço: `npm run test:ui -- tests/nova-avaliacao.test.tsx tests/app-cadastro.test.tsx`. Usa respostas simuladas; não grava no Supabase.
 
 Referências do formulário: [inputs no React](https://react.dev/reference/react-dom/components/input), [datas locais e fuso horário](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/datetime-local).
+
+## Listagem por turma
+
+Em **Turmas → Rascunhos**, professor consulta as próprias turmas e admin consulta as turmas disponíveis pela RLS. Turmas inativas continuam consultáveis. Aluno não tem acesso à tela nem à API.
+
+`TurmasPanel` → `RascunhosTurmaPanel` → `listarAvaliacoesRascunho` → `GET /api/avaliacoes?turma_id=UUID` → consultas protegidas pela RLS. Sem nova query, dependência ou alteração no backend.
+
+- Tabela com título, tipo, início, fim, duração e situação. Datas no fuso do navegador. No celular, a rolagem horizontal fica dentro da tabela, também acessível por teclado.
+- Até 50 rascunhos, na ordem recebida da API (criação mais recente primeiro). Ainda sem paginação.
+- Consulta somente ao abrir a turma ou clicar em **Atualizar rascunhos**. Trocar de turma ou fechar o painel ignora respostas atrasadas.
+- Resposta inválida ou erro não aparece como lista vazia. Uma falha ao atualizar oculta o resultado anterior.
+- Apenas leitura: não publica, edita, exclui ou gera novos eventos de auditoria.
+
+Teste manual: executar `npm run dev:full`, entrar como professor com MFA, abrir **Turmas → Rascunhos** e conferir os registros criados no bloco anterior. Testar **Atualizar rascunhos**, outra turma sem avaliações e uma turma inativa. Repetir como admin e confirmar que aluno não acessa Turmas. Conferir datas/duração e, no celular, rolar a tabela para ler as últimas colunas.
+
+Teste automatizado: `npm run test:ui -- tests/rascunhos-turma.test.tsx`. Cobre consulta por perfil, turma inativa, campos/ordem, lista vazia, atualização, respostas atrasadas, sessão, falhas e validação do contrato. HTTP/Auth simulados, sem acesso ao Supabase remoto.
+
+Referências da listagem: [consultas em efeitos React](https://react.dev/reference/react/useEffect#fetching-data-with-effects), [tabelas HTML acessíveis](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/table).

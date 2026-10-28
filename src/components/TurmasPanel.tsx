@@ -4,6 +4,7 @@ import { criarTurma, listarTurmas } from '../services/turmas'
 import type { Turma } from '../services/turmas'
 import { validateTurmaName } from '../services/turmaValidation'
 import { AlunosTurmaPanel } from './AlunosTurmaPanel'
+import { RascunhosTurmaPanel } from './RascunhosTurmaPanel'
 import '../styles/turmas.css'
 
 export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor' }) {
@@ -16,6 +17,7 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
   const [success, setSuccess] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [turmaAberta, setTurmaAberta] = useState<string | null>(null)
+  const [rascunhosAbertos, setRascunhosAbertos] = useState<string | null>(null)
   const submitting = useRef(false)
   const isTeacher = profile === 'Professor'
 
@@ -112,8 +114,12 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
                 <button type="button" className="turmas-refresh" aria-expanded={turmaAberta === turma.id}
                   aria-controls={`alunos-${turma.id}`} aria-label={`Alunos de ${turma.nome}`}
                   onClick={() => setTurmaAberta((current) => current === turma.id ? null : turma.id)}>Alunos</button>
+                <button type="button" className="turmas-refresh" aria-expanded={rascunhosAbertos === turma.id}
+                  aria-controls={`rascunhos-${turma.id}`} aria-label={`Rascunhos de ${turma.nome}`}
+                  onClick={() => setRascunhosAbertos((current) => current === turma.id ? null : turma.id)}>Rascunhos</button>
               </div>
               {turmaAberta === turma.id && <AlunosTurmaPanel key={turma.id} turmaId={turma.id} turmaNome={turma.nome} />}
+              {rascunhosAbertos === turma.id && <RascunhosTurmaPanel key={`rascunhos-${turma.id}`} turmaId={turma.id} turmaNome={turma.nome} />}
             </li>
           ))}
         </ul>

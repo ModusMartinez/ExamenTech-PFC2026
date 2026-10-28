@@ -146,6 +146,19 @@
 .avaliacao-form fieldset:disabled { opacity: 0.65; }
 .avaliacao-form fieldset:disabled button { cursor: not-allowed; }
 
+.rascunhos-turma { flex-basis: 100%; min-width: 0; width: 100%; }
+.rascunhos-turma h4 { margin: 0; color: var(--dark-blue); }
+.rascunhos-turma .turmas-list-heading { flex-wrap: wrap; }
+.rascunhos-turma .turmas-note { margin: 0 0 12px; }
+.rascunhos-turma .alert { overflow-wrap: anywhere; }
+.rascunhos-tabela { overflow-x: auto; }
+.rascunhos-tabela:focus-visible { outline: 3px solid #69a4d3; outline-offset: 2px; }
+.rascunhos-tabela table { width: 100%; min-width: 700px; table-layout: fixed; border-collapse: collapse; font-size: 0.9rem; }
+.rascunhos-tabela th, .rascunhos-tabela td {
+  padding: 12px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid #dce5ee; overflow-wrap: anywhere;
+}
+.rascunhos-tabela th:first-child { width: 30%; }
+
 @media (max-width: 500px) {
   .turma-form { padding: 18px; }
   .turma-form-fields { flex-direction: column; align-items: stretch; }
