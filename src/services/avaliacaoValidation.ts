@@ -22,7 +22,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function lerDataComFuso(value: unknown): string | null {
+export function lerDataComFuso(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const match = value.match(/^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)$/)
   if (!match || value.startsWith('0000-') || !Number.isFinite(Date.parse(value))) return null

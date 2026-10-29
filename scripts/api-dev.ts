@@ -4,6 +4,7 @@ import turnstileHandler from '../api/validar-turnstile.ts'
 import turmasHandler from '../api/turmas.ts'
 import matriculasHandler from '../api/matriculas.ts'
 import avaliacoesHandler from '../api/avaliacoes.ts'
+import questoesHandler from '../api/questoes.ts'
 
 const MAX_BODY_SIZE = 16 * 1024
 const port = Number(process.env.API_PORT ?? 8787)
@@ -22,7 +23,7 @@ function toHeaders(source: IncomingHttpHeaders) {
   return headers
 }
 
-async function readBody(request: IncomingMessage) {
+async function readBody(request: IncomingMessage, maxBytes: number) {
   const chunks: Buffer[] = []
   let receivedBytes = 0
 
@@ -30,7 +31,7 @@ async function readBody(request: IncomingMessage) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     receivedBytes += buffer.length
 
-    if (receivedBytes > MAX_BODY_SIZE) {
+    if (receivedBytes > maxBytes) {
       throw new Error('REQUEST_TOO_LARGE')
     }
 
@@ -48,7 +49,8 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
     const handler = url.pathname === '/api/validar-turnstile' ? turnstileHandler
       : url.pathname === '/api/turmas' ? turmasHandler
       : url.pathname === '/api/matriculas' ? matriculasHandler
-      : url.pathname === '/api/avaliacoes' ? avaliacoesHandler : null
+      : url.pathname === '/api/avaliacoes' ? avaliacoesHandler
+      : url.pathname === '/api/questoes' ? questoesHandler : null
 
     if (!handler) {
       outgoingResponse.writeHead(404, { 'Content-Type': 'application/json' })
@@ -58,7 +60,9 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
 
     const method = incomingRequest.method ?? 'GET'
     const hasBody = !['GET', 'HEAD'].includes(method)
-    const body = hasBody ? await readBody(incomingRequest) : undefined
+    // Até 10 mil caracteres no enunciado, inclusive Unicode escapado no JSON.
+    const maxBodySize = url.pathname === '/api/questoes' ? 128 * 1024 : MAX_BODY_SIZE
+    const body = hasBody ? await readBody(incomingRequest, maxBodySize) : undefined
 
     const request = new Request(url, {
       method,

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { conferirAcessoAvaliacoes } from '../server/acessoAvaliacoes.ts'
 import { lerAvaliacaoRascunho, lerDadosAvaliacao, lerDadosEdicaoAvaliacao, UUID_PATTERN } from '../src/services/avaliacaoValidation.ts'
 import type { AvaliacaoRascunho, DadosAvaliacaoRascunho, DadosEdicaoAvaliacaoRascunho } from '../src/services/avaliacaoValidation.ts'
 
@@ -54,21 +55,9 @@ export function createAvaliacoesHandler(
           auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
           global: { headers: { Authorization: `Bearer ${token}` }, fetch: fetchImplementation },
         })
-        const { data: identity, error: identityError } = await supabase.auth.getUser(token)
-        if (identityError) {
-          const invalidSession = [400, 401, 403].includes(identityError.status ?? 0)
-          return jsonResponse(invalidSession ? 401 : 503, {
-            message: invalidSession ? 'Sessão inválida. Entre novamente.' : 'Não foi possível conferir sua sessão.',
-          })
-        }
-        if (!identity.user) return jsonResponse(401, { message: 'Sessão inválida. Entre novamente.' })
-        const { data: profileData, error: profileError } = await supabase.from('perfis')
-          .select('perfil,situacao').eq('id', identity.user.id).maybeSingle()
-        if (profileError) return jsonResponse(503, { message: 'Não foi possível conferir seu perfil.' })
-        const profile: unknown = profileData
-        if (!profile || typeof profile !== 'object' || !('situacao' in profile) || profile.situacao !== 'ATIVO' ||
-            !('perfil' in profile) || (profile.perfil !== 'PROFESSOR' && profile.perfil !== 'ADMIN') ||
-            (!listing && profile.perfil !== 'PROFESSOR')) {
+        const acesso = await conferirAcessoAvaliacoes(supabase, token)
+        if (acesso.status) return jsonResponse(acesso.status, { message: acesso.message })
+        if (!listing && acesso.perfil !== 'PROFESSOR') {
           return jsonResponse(403, { message: 'Seu perfil não permite esta operação. Confira também o MFA.' })
         }
 
@@ -93,7 +82,7 @@ export function createAvaliacoesHandler(
             return jsonResponse(503, { message: notConfirmed })
           }
           const avaliacao = lerAvaliacaoRascunho(data)
-          if (!avaliacao || avaliacao.professor_id !== identity.user.id ||
+          if (!avaliacao || avaliacao.professor_id !== acesso.usuarioId ||
               ('avaliacao_id' in dados ? avaliacao.id !== dados.avaliacao_id : avaliacao.turma_id !== dados.turma_id) ||
               avaliacao.titulo !== dados.titulo || avaliacao.tipo !== dados.tipo ||
               avaliacao.inicio_em !== dados.inicio_em || avaliacao.fim_em !== dados.fim_em ||

@@ -1,6 +1,6 @@
-# Avaliações em rascunho (019–020)
+# Avaliações em rascunho (019–022)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Sem questões, publicação, cancelamento ou tentativas. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, ainda sem formulário. Alternativas e gabarito estão somente no banco. Publicação, cancelamento e tentativas ficam para os próximos blocos. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -114,7 +114,194 @@ Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Inclui edição 
 
 Referências da edição: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [bloqueios de linha no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html).
 
-## API de criação, consulta e edição
+## Questões no banco (021)
+
+Com a `020` já aplicada, executar somente `database/021_questoes_rascunho.sql` no SQL Editor do Supabase de testes. A query preserva avaliações e eventos existentes; não cria questões automaticamente. Não reaplicar as queries anteriores.
+
+`public.questoes` pertence à avaliação, sem banco reutilizável de questões:
+
+| Campo | Regra |
+| --- | --- |
+| `id` | UUID gerado pelo banco |
+| `avaliacao_id` | Avaliação existente; impede excluir a avaliação enquanto houver questões |
+| `tipo` | `OBJETIVA` ou `DISSERTATIVA` |
+| `enunciado` | Obrigatório, de 3 a 10.000 caracteres; remove espaços nas pontas |
+| `pontuacao` | De 0,01 a 9.999,99, com até duas casas decimais |
+| `ordem` | Inteiro positivo, automático e único dentro da avaliação |
+| `criado_em` | Data e hora geradas pelo banco |
+
+Os limites de texto e pontuação são escolhas desta implementação. A pontuação usa `NUMERIC` sem escala fixa para recusar casas excedentes antes de qualquer arredondamento. A ordem representa a posição no rascunho; o sorteio para a tentativa do aluno será outro bloco.
+
+`public.criar_questao_rascunho` → função privada → `questoes` e `eventos_seguranca`, na mesma transação.
+
+- Recebe somente avaliação, tipo, enunciado e pontuação. Professor e organização são verificados pela avaliação e turma, sem colunas duplicadas na questão.
+- Criação exige professor autor ainda responsável pela turma, perfil/organização/turma ativos, sessão do próprio usuário e MFA `aal2`. Funciona para Prova e Atividade, somente em `RASCUNHO`.
+- Consulta herda a RLS da avaliação: professor autor ainda responsável ou ADMIN, ambos com sessão e MFA. Aluno não lê questões em rascunho, mesmo matriculado. Turma inativa permite consulta, mas impede criação.
+- Escrita direta, edição e exclusão ficam bloqueadas para os perfis da aplicação. ADMIN apenas consulta. A `022` acrescenta alternativas e gabarito; uma questão objetiva pode ficar sem alternativas enquanto rascunho.
+- A função bloqueia a linha da avaliação antes de conferir sua situação e calcular a próxima ordem. Criações na mesma avaliação são serializadas; a constraint também impede ordem repetida.
+- `QUESTAO_CRIADA` registra usuário, ID da questão (`recurso_id`) e horário, sem enunciado ou pontuação. Falha no evento desfaz a questão. O filtro/rótulo desse evento na tela de auditoria fica pendente.
+- Repetir uma chamada válida cria outra questão. Em falha de conexão, consultar os registros antes de reenviar.
+
+Erros: `42501` para perfil/sessão/MFA; `P0002` para avaliação inexistente ou fora do acesso; `55000` para turma inativa ou avaliação fora de rascunho; `23502` para campos obrigatórios e `23514` para regras de campos.
+
+### Teste manual das questões
+
+1. Aplicar a `021`, rodar `npm run dev:full` e entrar como professor com MFA.
+2. Copiar o ID de uma avaliação em rascunho da própria turma ativa, na tabela `avaliacoes` do Supabase.
+3. No console do navegador, no ambiente local, executar uma vez com esse ID. A chamada cria uma questão real no ambiente de testes, usando a sessão atual:
+
+```js
+const { supabase: supabaseQuestoes } = await import('/src/lib/supabase.ts');
+const avaliacaoQuestoesId = 'UUID_DA_AVALIACAO';
+const resultadoQuestao = await supabaseQuestoes.rpc('criar_questao_rascunho', {
+  p_avaliacao_id: avaliacaoQuestoesId,
+  p_tipo: 'DISSERTATIVA',
+  p_enunciado: 'Explique a finalidade de um teste de integração.',
+  p_pontuacao: 2.5,
+});
+console.log(resultadoQuestao);
+```
+
+4. Esperado: `error: null`, questão com ID e próxima `ordem`. Conferir `QUESTAO_CRIADA` em `eventos_seguranca`, com `recurso_id` igual ao ID da questão. Não há formulário de questões neste bloco. Para consultar pela sessão atual:
+
+```js
+const consultaQuestoes = await supabaseQuestoes
+  .from('questoes')
+  .select('id, avaliacao_id, tipo, enunciado, pontuacao, ordem, criado_em')
+  .eq('avaliacao_id', avaliacaoQuestoesId)
+  .order('ordem');
+console.log(consultaQuestoes);
+```
+
+5. Repetir a criação com `OBJETIVA`: próximo número de ordem e um novo evento. Pontuação `0`, `2.555` ou enunciado vazio devem falhar sem criar questão nem evento.
+6. Recarregar a página ao trocar de conta e executar novamente os trechos com o mesmo ID: ADMIN consulta, mas não cria; aluno e outro professor não criam e recebem lista vazia na consulta.
+
+O SQL Editor não fornece a sessão do professor; chamar a função por ele sem contexto autenticado deve falhar. Não remover MFA/RLS para realizar o teste.
+
+Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Cobre tipos, limites, ordem por avaliação, permissões, MFA/sessão, conta/organização/turma inativas, troca de responsável, bloqueio fora de rascunho, escrita direta, rollback da auditoria e reaplicação da query. Executa no PGlite com Auth simulado; não acessa Supabase remoto nem testa concorrência entre conexões reais.
+
+Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), [tipos numéricos do PostgreSQL](https://www.postgresql.org/docs/current/datatype-numeric.html).
+
+## Alternativas e gabarito no banco (022)
+
+Com a `021` aplicada, executar somente `database/022_alternativas_rascunho.sql` no SQL Editor do Supabase de testes. Preserva questões, avaliações e eventos; não cadastra alternativas automaticamente. Não reaplicar as queries anteriores.
+
+`public.alternativas`: ID, questão, texto, ordem, `correta` e data de criação. O gabarito é a alternativa marcada com `correta = true`; não há tabela adicional ou cópia da pontuação da questão.
+
+- Cadastro em conjunto: de 2 a 5 alternativas, com exatamente uma correta. Ordem definida pela posição na lista, começando em 1.
+- Textos distintos após remover espaços nas pontas, de 1 a 2.000 caracteres. Nulos, vazios e textos só de espaços em branco são recusados. Quantidade, limite de texto e resposta única são escolhas deste bloco; a ficha não detalha esses limites.
+- Somente questão `OBJETIVA` de avaliação `RASCUNHO`, ainda sem alternativas. Professor autor deve continuar responsável, com perfil/organização/turma ativos, sessão própria e MFA `aal2`.
+- Consulta por professor autor e ADMIN, seguindo a RLS da questão/avaliação e limitada a rascunhos. Aluno não consulta alternativas nem gabarito, mesmo matriculado. Turma inativa mantém a consulta, mas impede cadastro.
+- A função grava o conjunto e um evento `ALTERNATIVAS_CRIADAS` na mesma transação. `recurso_id` identifica a questão; não registra textos nem resposta correta no evento. Erro em qualquer alternativa ou na auditoria desfaz todo o conjunto.
+- Índices impedem ordem repetida e mais de uma correta na mesma questão. A função garante a quantidade mínima e a presença de uma correta. Escrita direta, edição e exclusão estão bloqueadas para os perfis da aplicação.
+- Avaliação e questão são bloqueadas durante a gravação. Repetir a chamada, inclusive com os mesmos dados, retorna “A questão já possui alternativas”, sem substituir registros ou gerar outro evento. Em falha de conexão, consultar antes de reenviar.
+
+`public.criar_alternativas_rascunho(p_questao_id, p_alternativas, p_ordem_correta)` → função privada → `alternativas` e `eventos_seguranca`. Retorna a lista gravada, ordenada por `ordem`. Não recebe usuário, IDs das alternativas ou datas.
+
+A edição do conjunto, o filtro/rótulo do evento na tela de auditoria e a validação para publicação ficam para outros blocos. Quando houver tentativa do aluno, o servidor deverá fornecer apenas os campos permitidos, sem `correta`; não liberar a tabela inteira nem ocultar o gabarito somente na interface.
+
+Erros: `42501` para perfil/sessão/MFA; `P0002` para questão inexistente ou fora do acesso; `55000` para turma inativa, avaliação fora de rascunho ou questão já preenchida; `23514` para tipo da questão, lista, textos ou posição correta inválidos.
+
+### Teste manual das alternativas
+
+1. Aplicar a `022`, rodar `npm run dev:full` e entrar como professor com MFA.
+2. Escolher uma questão objetiva da própria turma ativa, em rascunho e sem alternativas. Copiar o ID da tabela `questoes`. Se necessário, criar uma questão pelo procedimento da `021` acima.
+3. Executar no console do navegador local, substituindo o ID. Cria três alternativas reais no ambiente de testes; a segunda será a correta:
+
+```js
+const { supabase: supabaseAlternativas } = await import('/src/lib/supabase.ts');
+const questaoAlternativasId = 'UUID_DA_QUESTAO';
+const resultadoAlternativas = await supabaseAlternativas.rpc('criar_alternativas_rascunho', {
+  p_questao_id: questaoAlternativasId,
+  p_alternativas: [
+    'Verificar somente a aparência da tela.',
+    'Verificar a interação entre componentes do sistema.',
+    'Substituir todos os testes unitários.',
+  ],
+  p_ordem_correta: 2,
+});
+console.log(resultadoAlternativas);
+```
+
+4. Esperado: `error: null`, três registros com ordens 1, 2 e 3; apenas a ordem 2 com `correta: true`. Conferir um evento `ALTERNATIVAS_CRIADAS` com `recurso_id` igual ao ID da questão. Consulta pela sessão atual:
+
+```js
+const consultaAlternativas = await supabaseAlternativas
+  .from('alternativas')
+  .select('id, questao_id, texto, ordem, correta, criado_em')
+  .eq('questao_id', questaoAlternativasId)
+  .order('ordem');
+console.log(consultaAlternativas);
+```
+
+5. Repetir o cadastro nessa questão: erro, sem outro evento ou alteração. Para testar texto vazio, alternativas repetidas ou posição correta `0`, usar outra questão objetiva ainda sem alternativas. Nenhuma alternativa deve ser gravada nessas tentativas.
+6. Recarregar a página ao trocar de conta. Com o mesmo ID, ADMIN consulta mas não cadastra; aluno e outro professor recebem lista vazia na consulta e erro no cadastro. Não há tela de alternativas neste bloco.
+
+Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Cobre limites, gabarito, ordem, perfis, MFA/sessões, organização/turma, autoria, estados fora de rascunho, escrita direta, rollback e reaplicação. PGlite e Auth simulado, sem acesso ao Supabase remoto ou teste de concorrência entre conexões reais.
+
+Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [índices únicos parciais](https://www.postgresql.org/docs/current/indexes-partial.html), [bloqueios de linha](https://www.postgresql.org/docs/current/explicit-locking.html).
+
+## API de criação e consulta de questões
+
+Requer a `021` já aplicada; nenhuma query nova neste bloco. Rota `api/questoes.ts`, registrada no servidor local e disponível como função da Vercel. Alternativas, gabarito, edição e formulário de questões ficam para outros blocos.
+
+- `POST /api/questoes`: recebe somente `avaliacao_id`, `tipo`, `enunciado` e `pontuacao`. Chama `criar_questao_rascunho` e retorna `201` com `{ questao }`. ID, ordem e data de criação vêm do banco; o evento `QUESTAO_CRIADA` é gravado pela mesma função SQL.
+- `GET /api/questoes?avaliacao_id=UUID`: retorna `200` com `{ questoes, limite: 50 }`, nas primeiras 50 posições da avaliação. Sem paginação neste bloco. Avaliação acessível sem questões retorna lista vazia; inexistente, fora do acesso ou fora de rascunho retorna `404`.
+- Professor autor cria e consulta; ADMIN apenas consulta. Aluno não acessa, mesmo matriculado. A consulta da avaliação e das questões respeita a RLS. A criação confere novamente autoria, situação da turma/avaliação, organização, sessão e MFA na função SQL.
+- Usa chave pública e JWT do usuário. `server/acessoAvaliacoes.ts` compartilha a consulta de identidade por `getUser` e a verificação de perfil ativo entre as APIs de avaliações e questões. As permissões de gravação permanecem em cada rota e no banco.
+- `src/services/questaoValidation.ts` valida entrada e resposta: enunciado de 3 a 10.000 caracteres após remover espaços nas pontas; pontuação numérica de 0,01 a 9.999,99, com até duas casas decimais, sem arredondamento. Número em texto é recusado. Datas da resposta são normalizadas para UTC.
+- Resposta contém somente `id`, `avaliacao_id`, `tipo`, `enunciado`, `pontuacao`, `ordem` e `criado_em`. Não consulta nem devolve alternativas ou gabarito. Campos extras no POST e parâmetros desconhecidos/repetidos na URL são recusados.
+- Respostas usam `Cache-Control: no-store`. Falha ou resposta inválida não confirma gravação nem vira lista vazia. Não repete o POST automaticamente: consultar antes de reenviar, pois a criação pode ter sido concluída. Acima de 50 questões, conferir também a tabela no Supabase.
+- O servidor local aceita até 128 KiB no corpo desta rota, para comportar enunciados longos e Unicode escapado em JSON. As demais rotas mantêm o limite local de 16 KiB.
+
+Erros HTTP: `400` campos/consulta inválidos; `401` sessão ausente ou recusada; `403` perfil/MFA não permitido; `404` avaliação inacessível; `405` método não permitido; `409` turma inativa ou avaliação fora de rascunho na criação; `415` conteúdo diferente de JSON; `503` indisponibilidade/resposta inválida. O servidor local retorna `413` quando o corpo excede seu limite. Sessão encerrada ou organização sem acesso também podem resultar em `404` no GET, pela RLS.
+
+### Teste manual da API de questões
+
+1. Rodar `npm run dev:full` com o Supabase de testes e entrar como professor com MFA.
+2. Escolher uma avaliação em rascunho da própria turma ativa. Copiar o ID da tabela `avaliacoes`.
+3. No console do navegador local, executar uma vez com esse ID. O POST cria uma questão real no ambiente de testes:
+
+```js
+const { supabase: supabaseApiQuestoes } = await import('/src/lib/supabase.ts');
+const sessaoApiQuestoes = await supabaseApiQuestoes.auth.getSession();
+if (sessaoApiQuestoes.error || !sessaoApiQuestoes.data.session) {
+  throw new Error('Entre novamente e conclua o MFA.');
+}
+const headersQuestoes = {
+  Authorization: `Bearer ${sessaoApiQuestoes.data.session.access_token}`,
+  'Content-Type': 'application/json',
+};
+const avaliacaoApiQuestoesId = 'UUID_DA_AVALIACAO';
+const criacaoQuestao = await fetch('/api/questoes', {
+  method: 'POST', headers: headersQuestoes,
+  body: JSON.stringify({
+    avaliacao_id: avaliacaoApiQuestoesId,
+    tipo: 'DISSERTATIVA',
+    enunciado: 'Explique a finalidade de um teste de integração.',
+    pontuacao: 2.5,
+  }),
+});
+console.log(criacaoQuestao.status, await criacaoQuestao.json());
+```
+
+4. Esperado: `201` com a questão gravada. Conferir `QUESTAO_CRIADA` em `eventos_seguranca`. Consultar separadamente, sem repetir o POST:
+
+```js
+const consultaApiQuestoes = await fetch(`/api/questoes?avaliacao_id=${avaliacaoApiQuestoesId}`, {
+  headers: headersQuestoes,
+});
+console.log(consultaApiQuestoes.status, await consultaApiQuestoes.json());
+```
+
+5. Esperado: `200`, questões ordenadas e nenhum novo evento. Repetir a criação com tipo `OBJETIVA`: novo registro, sem alternativas automáticas. Pontuação `0`, `2.555` ou `"2.5"`, enunciado vazio e campo extra devem retornar `400`, sem gravação.
+6. Ao trocar de conta, recarregar a página e obter os cabeçalhos da nova sessão. ADMIN consulta e recebe `403` ao criar; aluno recebe `403` nas duas operações; outro professor recebe `404`. Não compartilhar tokens ou cabeçalhos.
+
+Testes: `node --test tests/questoes-api.test.ts tests/avaliacoes-sql.test.ts`. Executam SQL/RLS no PGlite com Auth/HTTP simulados, cobrindo criação/consulta, isolamento, auditoria, decimais, Unicode, limite/ordem e falhas de resposta/transporte. Não acessam o Supabase remoto. A API de avaliações também é verificada após compartilhar a conferência de acesso.
+
+Referências: [identidade no servidor](https://supabase.com/docs/reference/javascript/auth-getuser), [RPC](https://supabase.com/docs/reference/javascript/rpc), [consulta](https://supabase.com/docs/reference/javascript/select), [Vercel Functions](https://vercel.com/docs/functions/runtimes/node-js).
+
+## API de criação, consulta e edição de avaliações
 
 Requer a `019` para criação/consulta e a `020` para edição, sem nova query neste bloco. Rota registrada no servidor local e no diretório `api` da Vercel. Usa chave pública e `Authorization: Bearer <access_token>` do usuário, nunca chave administrativa. `getUser` valida a identidade; perfil e RLS/função conferem as permissões.
 

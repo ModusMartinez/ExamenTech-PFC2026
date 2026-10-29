@@ -759,6 +759,392 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
     assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, events)
     await db.exec('DROP TRIGGER falhar_edicao_api ON public.eventos_seguranca; DROP FUNCTION public.falhar_edicao_api();')
   })
+
+  await t.test('021: questões em rascunho, com consulta restrita e criação auditada', async (t) => {
+    const beforeMigration = (await db.query(listSql)).rows
+    const oldEvents = (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+    await migrate('021_questoes_rascunho.sql')
+    assert.deepEqual((await db.query(listSql)).rows, beforeMigration)
+    assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, oldEvents)
+    const prova = (await queryAs<{ avaliacao: { id: string } }>(professor, createSql, valid)).rows[0].avaliacao.id
+    const createQuestionSql = 'SELECT public.criar_questao_rascunho($1,$2,$3,$4) AS questao'
+    const questionParams = [prova, 'OBJETIVA', '  Qual é a finalidade de um teste de integração?  ', '2.5']
+    const questionsSql = 'SELECT * FROM public.questoes WHERE avaliacao_id=$1 ORDER BY ordem'
+    const snapshot = async () => ({
+      questoes: (await db.query('SELECT * FROM public.questoes ORDER BY id')).rows,
+      eventos: (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows,
+    })
+
+    await t.test('cria ambos os tipos, define ordem por avaliação e registra somente a identificação da questão', async () => {
+      const before = (await db.query(listSql)).rows
+      for (const [index, tipo] of ['OBJETIVA', 'DISSERTATIVA'].entries()) {
+        const { questao } = (await queryAs<{ questao: Record<string, unknown> }>(professor, createQuestionSql,
+          [prova, tipo, questionParams[2], questionParams[3]])).rows[0]
+        assert.equal(questao.avaliacao_id, prova)
+        assert.equal(questao.tipo, tipo)
+        assert.equal(questao.enunciado, String(questionParams[2]).trim())
+        assert.equal(questao.pontuacao, 2.5)
+        assert.equal(questao.ordem, index + 1)
+        assert.ok(questao.id)
+        assert.ok(questao.criado_em)
+        assert.equal('professor_id' in questao, false)
+        const event = (await db.query<Record<string, unknown>>("SELECT * FROM public.eventos_seguranca WHERE evento='QUESTAO_CRIADA' AND recurso_id=$1", [questao.id])).rows[0]
+        assert.equal(event.usuario_id, professor)
+        assert.equal(event.acao, 'criar_questao_rascunho')
+        assert.equal(event.provedor, 'EXAMENTECH')
+        assert.equal(event.sucesso, true)
+        assert.ok(event.criado_em)
+        assert.equal(JSON.stringify(event).includes('finalidade'), false)
+      }
+      // A avaliação usada no teste do PATCH é uma Atividade; sua ordem começa em 1.
+      const atividade = (await queryAs<{ questao: { ordem: number } }>(professor, createQuestionSql,
+        [avaliacaoId, 'DISSERTATIVA', 'Explique a integração entre API e banco.', '1'])).rows[0].questao
+      assert.equal(atividade.ordem, 1)
+      const repetida = (await queryAs<{ questao: { ordem: number } }>(professor, createQuestionSql, questionParams)).rows[0].questao
+      assert.equal(repetida.ordem, 3) // Não há idempotência de criação por requisição neste bloco.
+      for (const [enunciado, pontuacao] of [['ABC', '0.01'], ['📝'.repeat(10000), '9999.99']]) {
+        await queryAs(professor, createQuestionSql, [prova, 'OBJETIVA', enunciado, pontuacao])
+      }
+      assert.deepEqual((await db.query(listSql)).rows, before)
+    })
+
+    await t.test('RLS herda o acesso da avaliação; aluno matriculado e professor de outra turma não consultam', async () => {
+      const before = await snapshot()
+      const rows = (await db.query(questionsSql, [prova])).rows
+      for (const id of [professor, admin]) assert.deepEqual((await queryAs(id, questionsSql, [prova])).rows, rows)
+      for (const id of [aluno, colleague]) assert.deepEqual((await queryAs(id, questionsSql, [prova])).rows, [])
+      for (const id of [professor, admin]) assert.deepEqual((await queryAs(id, questionsSql, [prova], 'aal1')).rows, [])
+      await assert.rejects(db.transaction(async (tx) => {
+        await tx.exec('SET LOCAL ROLE anon')
+        return tx.query(questionsSql, [prova])
+      }), { code: '42501' })
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('nega criação por admin/aluno, outro autor, ausência de MFA e sessões inválidas, também na função privada', async () => {
+      const before = await snapshot()
+      for (const schema of ['public', 'examentech_private']) {
+        const sql = createQuestionSql.replace('public.', `${schema}.`)
+        for (const id of [admin, aluno]) await assert.rejects(queryAs(id, sql, questionParams), { code: '42501' })
+        await assert.rejects(queryAs(colleague, sql, questionParams), { code: 'P0002' })
+        for (const aal of ['aal1', '']) await assert.rejects(queryAs(professor, sql, questionParams, aal), { code: '42501' })
+        await assert.rejects(db.transaction(async (tx) => {
+          await tx.exec('SET LOCAL ROLE anon')
+          return tx.query(sql, questionParams)
+        }), { code: '42501' })
+      }
+      const sessionId = sessions.get(professor)!
+      sessions.delete(professor)
+      await assert.rejects(queryAs(professor, createQuestionSql, questionParams), { code: '42501' })
+      for (const session of [randomUUID(), sessions.get(colleague)!]) {
+        sessions.set(professor, session)
+        await assert.rejects(queryAs(professor, createQuestionSql, questionParams), { code: '42501' })
+        assert.deepEqual((await queryAs(professor, questionsSql, [prova])).rows, [])
+      }
+      sessions.set(professor, sessionId)
+      for (const id of [randomUUID(), null]) {
+        await assert.rejects(queryAs(professor, createQuestionSql, [id, ...questionParams.slice(1)]), { code: 'P0002' })
+      }
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('exige conta/organização/turma ativas e autor ainda responsável, preservando consulta de turma inativa', async () => {
+      const before = await snapshot()
+      for (const id of [professor, admin]) {
+        await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [id])
+        await assert.rejects(queryAs(id, createQuestionSql, questionParams), { code: '42501' })
+        assert.deepEqual((await queryAs(id, questionsSql, [prova])).rows, [])
+        await db.query("UPDATE public.perfis SET situacao='ATIVO' WHERE id=$1", [id])
+      }
+      await db.query("UPDATE public.organizacoes SET situacao='INATIVO' WHERE id=$1", [org])
+      await assert.rejects(queryAs(professor, createQuestionSql, questionParams), { code: '42501' })
+      assert.deepEqual((await queryAs(professor, questionsSql, [prova])).rows, [])
+      assert.ok((await queryAs(admin, questionsSql, [prova])).rows.length)
+      await db.query("UPDATE public.organizacoes SET situacao='ATIVO' WHERE id=$1", [org])
+      for (const organizacao of [null, otherOrg]) {
+        await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [organizacao, professor])
+        await assert.rejects(queryAs(professor, createQuestionSql, questionParams), { code: organizacao ? 'P0002' : '42501' })
+        assert.deepEqual((await queryAs(professor, questionsSql, [prova])).rows, [])
+      }
+      await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [org, professor])
+      await db.query("UPDATE public.turmas SET situacao='INATIVA' WHERE id=$1", [turmaId])
+      await assert.rejects(queryAs(professor, createQuestionSql, questionParams), { code: '55000' })
+      assert.ok((await queryAs(professor, questionsSql, [prova])).rows.length)
+      await db.query("UPDATE public.turmas SET situacao='ATIVA',professor_id=$1 WHERE id=$2", [colleague, turmaId])
+      for (const id of [professor, colleague]) {
+        await assert.rejects(queryAs(id, createQuestionSql, questionParams), { code: 'P0002' })
+        assert.deepEqual((await queryAs(id, questionsSql, [prova])).rows, [])
+      }
+      await db.query('UPDATE public.turmas SET professor_id=$1 WHERE id=$2', [professor, turmaId])
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('recusa campos inválidos, pontuação não finita e casas excedentes sem arredondamento silencioso', async () => {
+      const before = await snapshot()
+      const invalid: [number, unknown, string][] = [
+        [1, 'OUTRO', '23514'], [1, null, '23502'], [2, null, '23502'],
+        ...['', 'AB', '\t\t\t', 'A'.repeat(10001)].map((value): [number, unknown, string] => [2, value, '23514']),
+        [3, null, '23502'], [3, 'texto', '22P02'],
+        ...['0', '-1', '0.001', '2.555', '10000', 'NaN', 'Infinity', '-Infinity']
+          .map((value): [number, unknown, string] => [3, value, '23514']),
+      ]
+      for (const [index, value, code] of invalid) {
+        const params: unknown[] = [...questionParams]
+        params[index] = value
+        await assert.rejects(queryAs(professor, createQuestionSql, params), { code })
+      }
+      const directInsert = "INSERT INTO public.questoes(avaliacao_id,tipo,enunciado,pontuacao,ordem) VALUES ($1,'OBJETIVA','Questão válida',1,$2)"
+      await assert.rejects(db.query(directInsert, [randomUUID(), 1]), { code: '23503' })
+      await assert.rejects(db.query(directInsert, [prova, 0]), { code: '23514' })
+      await assert.rejects(db.query(directInsert, [prova, 1]), { code: '23505' })
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('bloqueia criação e leitura de questões fora de rascunho', async () => {
+      const before = await snapshot()
+      for (const situacao of ['PUBLICADA', 'CANCELADA']) {
+        // Estados futuros apenas no teste local; o rollback restaura a constraint da 019.
+        await assert.rejects(db.transaction(async (tx) => {
+          await tx.exec('ALTER TABLE public.avaliacoes DROP CONSTRAINT avaliacoes_situacao_check')
+          await tx.query('UPDATE public.avaliacoes SET situacao=$1 WHERE id=$2', [situacao, prova])
+          await tx.query("SELECT set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub: professor, aal: 'aal2', session_id: sessions.get(professor) })])
+          await tx.exec('SET LOCAL ROLE authenticated')
+          assert.deepEqual((await tx.query(questionsSql, [prova])).rows, [])
+          return tx.query(createQuestionSql, questionParams)
+        }), { code: '55000' })
+      }
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('falha de auditoria desfaz a questão; reaplicação preserva registros e bloqueio de escrita direta', async () => {
+      const before = await snapshot()
+      await db.exec(`
+        CREATE FUNCTION public.falhar_questao() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.evento = 'QUESTAO_CRIADA' THEN RAISE EXCEPTION 'Falha simulada'; END IF;
+          RETURN NEW;
+        END; $$;
+        CREATE TRIGGER falhar_questao BEFORE INSERT ON public.eventos_seguranca
+        FOR EACH ROW EXECUTE FUNCTION public.falhar_questao();
+      `)
+      await assert.rejects(queryAs(professor, createQuestionSql, questionParams), /Falha simulada/)
+      await db.exec('DROP TRIGGER falhar_questao ON public.eventos_seguranca; DROP FUNCTION public.falhar_questao();')
+      await migrate('021_questoes_rascunho.sql')
+      assert.deepEqual(await snapshot(), before)
+      for (const id of [professor, colleague, aluno, admin]) {
+        for (const sql of ["INSERT INTO public.questoes(enunciado) VALUES ('Sem função')", "UPDATE public.questoes SET pontuacao=10", 'DELETE FROM public.questoes']) {
+          await assert.rejects(queryAs(id, sql), { code: '42501' })
+        }
+      }
+      for (const field of ['p_id', 'p_professor_id', 'p_ordem', 'p_criado_em']) {
+        await assert.rejects(queryAs(professor, `SELECT public.criar_questao_rascunho($1,$2,$3,$4,${field} => $5)`,
+          [...questionParams, randomUUID()]), { code: '42883' })
+      }
+      await assert.rejects(db.query('DELETE FROM public.avaliacoes WHERE id=$1', [prova]), { code: '23001' })
+      const total = (await db.query(questionsSql, [prova])).rows.length
+      const { questao } = (await queryAs<{ questao: { ordem: number } }>(professor, createQuestionSql, questionParams)).rows[0]
+      assert.equal(questao.ordem, total + 1)
+      assert.equal((await queryAs(admin, questionsSql, [prova])).rows.length, total + 1)
+      assert.deepEqual((await queryAs(aluno, questionsSql, [prova])).rows, [])
+    })
+  })
+  await t.test('022: alternativas e gabarito restritos ao rascunho', async (t) => {
+    const oldQuestions = (await db.query('SELECT * FROM public.questoes ORDER BY id')).rows
+    const oldEvents = (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+    const oldEvaluations = (await db.query(listSql)).rows
+    await migrate('022_alternativas_rascunho.sql')
+    assert.deepEqual((await db.query('SELECT * FROM public.questoes ORDER BY id')).rows, oldQuestions)
+    assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, oldEvents)
+    assert.deepEqual((await db.query(listSql)).rows, oldEvaluations)
+    const provaId = (await queryAs<{ avaliacao: { id: string } }>(professor, createSql, valid)).rows[0].avaliacao.id
+    async function createQuestion(tipo = 'OBJETIVA', avaliacao = avaliacaoId) {
+      return (await queryAs<{ questao: { id: string } }>(professor,
+        'SELECT public.criar_questao_rascunho($1,$2,$3,1) AS questao',
+        [avaliacao, tipo, 'Questão de teste das alternativas'])).rows[0].questao.id
+    }
+    const questaoId = await createQuestion('OBJETIVA', provaId)
+    const atividadeQuestaoId = await createQuestion()
+    const emptyQuestionId = await createQuestion()
+    const dissertativaId = await createQuestion('DISSERTATIVA')
+    const alternativesSql = 'SELECT public.criar_alternativas_rascunho($1,$2,$3) AS alternativas'
+    const selectAlternatives = 'SELECT * FROM public.alternativas WHERE questao_id=$1 ORDER BY ordem'
+    const params = [emptyQuestionId, ['Texto da primeira opção', 'Texto da segunda opção'], 2]
+    const snapshot = async () => ({
+      alternativas: (await db.query('SELECT * FROM public.alternativas ORDER BY id')).rows,
+      eventos: (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows,
+    })
+
+    await t.test('cria conjunto completo em Prova e Atividade, com ordem, uma correta e um evento por questão', async () => {
+      const before = (await db.query('SELECT * FROM public.questoes ORDER BY id')).rows
+      for (const [questao, textos, correta] of [
+        [questaoId, ['  Primeira opção  ', 'Segunda opção'], 2],
+        [atividadeQuestaoId, ['A', 'B', 'C', 'D', '📝'.repeat(2000)], 5],
+      ] as const) {
+        const { alternativas } = (await queryAs<{ alternativas: Record<string, unknown>[] }>(professor,
+          alternativesSql, [questao, textos, correta])).rows[0]
+        assert.equal(alternativas.length, textos.length)
+        assert.equal(alternativas.filter((a) => a.correta).length, 1)
+        for (const [index, alternativa] of alternativas.entries()) {
+          assert.equal(alternativa.questao_id, questao)
+          assert.equal(alternativa.texto, textos[index].trim())
+          assert.equal(alternativa.ordem, index + 1)
+          assert.equal(alternativa.correta, index + 1 === correta)
+          assert.ok(alternativa.id)
+          assert.ok(alternativa.criado_em)
+        }
+        const events = (await db.query<Record<string, unknown>>(
+          "SELECT * FROM public.eventos_seguranca WHERE evento='ALTERNATIVAS_CRIADAS' AND recurso_id=$1", [questao])).rows
+        assert.equal(events.length, 1)
+        assert.equal(events[0].usuario_id, professor)
+        assert.equal(events[0].acao, 'criar_alternativas_rascunho')
+        assert.equal(events[0].provedor, 'EXAMENTECH')
+        assert.equal(events[0].sucesso, true)
+        assert.ok(events[0].criado_em)
+        assert.equal(JSON.stringify(events).includes('Primeira opção'), false)
+        assert.equal(JSON.stringify(events).includes('correta'), false)
+      }
+      assert.deepEqual((await db.query('SELECT * FROM public.questoes ORDER BY id')).rows, before)
+    })
+
+    await t.test('recusa quantidade, formato, textos e gabarito inválidos sem deixar alternativas parciais', async () => {
+      const before = await snapshot()
+      const invalid: [unknown, unknown][] = [
+        [null, 1], [[], 1], [['A'], 1], [['A', 'B', 'C', 'D', 'E', 'F'], 1],
+        [[['A', 'B'], ['C', 'D']], 1], ['[0:1]={A,B}', 1],
+        [['A', ' A '], 1], [['A', null], 1], [['A', ''], 1], [['A', '\t\t'], 1],
+        [['A', 'B'.repeat(2001)], 1],
+        ...[null, 0, -1, 3].map((correta): [unknown, unknown] => [['A', 'B'], correta]),
+      ]
+      for (const [textos, correta] of invalid) {
+        await assert.rejects(queryAs(professor, alternativesSql, [emptyQuestionId, textos, correta]), { code: '23514' })
+      }
+      await assert.rejects(queryAs(professor, alternativesSql, [dissertativaId, params[1], 1]), { code: '23514' })
+      for (const id of [null, randomUUID()]) {
+        await assert.rejects(queryAs(professor, alternativesSql, [id, params[1], 1]), { code: 'P0002' })
+      }
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('professor autor e ADMIN consultam; aluno matriculado, outro professor e anônimo não veem gabarito', async () => {
+      const before = await snapshot()
+      const rows = (await db.query(selectAlternatives, [questaoId])).rows
+      for (const id of [professor, admin]) assert.deepEqual((await queryAs(id, selectAlternatives, [questaoId])).rows, rows)
+      for (const id of [aluno, colleague]) assert.deepEqual((await queryAs(id, selectAlternatives, [questaoId])).rows, [])
+      for (const schema of ['public', 'examentech_private']) {
+        const sql = alternativesSql.replace('public.', `${schema}.`)
+        for (const id of [admin, aluno]) await assert.rejects(queryAs(id, sql, params), { code: '42501' })
+        await assert.rejects(queryAs(colleague, sql, params), { code: 'P0002' })
+        for (const aal of ['aal1', '']) await assert.rejects(queryAs(professor, sql, params, aal), { code: '42501' })
+        await assert.rejects(db.transaction(async (tx) => {
+          await tx.exec('SET LOCAL ROLE anon')
+          return tx.query(sql, params)
+        }), { code: '42501' })
+      }
+      for (const id of [professor, admin]) assert.deepEqual((await queryAs(id, selectAlternatives, [questaoId], 'aal1')).rows, [])
+      await assert.rejects(db.transaction(async (tx) => {
+        await tx.exec('SET LOCAL ROLE anon')
+        return tx.query(selectAlternatives, [questaoId])
+      }), { code: '42501' })
+      const sessionId = sessions.get(professor)!
+      sessions.delete(professor)
+      await assert.rejects(queryAs(professor, alternativesSql, params), { code: '42501' })
+      for (const invalidSession of [randomUUID(), sessions.get(colleague)!]) {
+        sessions.set(professor, invalidSession)
+        await assert.rejects(queryAs(professor, alternativesSql, params), { code: '42501' })
+        assert.deepEqual((await queryAs(professor, selectAlternatives, [questaoId])).rows, [])
+      }
+      sessions.set(professor, sessionId)
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('exige perfil/organização/turma ativos e autoria mantida, com consulta histórica de turma inativa', async () => {
+      const before = await snapshot()
+      for (const id of [professor, admin]) {
+        await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [id])
+        await assert.rejects(queryAs(id, alternativesSql, params), { code: '42501' })
+        assert.deepEqual((await queryAs(id, selectAlternatives, [questaoId])).rows, [])
+        await db.query("UPDATE public.perfis SET situacao='ATIVO' WHERE id=$1", [id])
+      }
+      await db.query("UPDATE public.organizacoes SET situacao='INATIVO' WHERE id=$1", [org])
+      await assert.rejects(queryAs(professor, alternativesSql, params), { code: '42501' })
+      assert.deepEqual((await queryAs(professor, selectAlternatives, [questaoId])).rows, [])
+      assert.ok((await queryAs(admin, selectAlternatives, [questaoId])).rows.length)
+      await db.query("UPDATE public.organizacoes SET situacao='ATIVO' WHERE id=$1", [org])
+      for (const organizacao of [null, otherOrg]) {
+        await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [organizacao, professor])
+        await assert.rejects(queryAs(professor, alternativesSql, params), { code: organizacao ? 'P0002' : '42501' })
+        assert.deepEqual((await queryAs(professor, selectAlternatives, [questaoId])).rows, [])
+      }
+      await db.query('UPDATE public.perfis SET organizacao_id=$1 WHERE id=$2', [org, professor])
+      await db.query("UPDATE public.turmas SET situacao='INATIVA' WHERE id=$1", [turmaId])
+      await assert.rejects(queryAs(professor, alternativesSql, params), { code: '55000' })
+      assert.ok((await queryAs(professor, selectAlternatives, [questaoId])).rows.length)
+      await db.query("UPDATE public.turmas SET situacao='ATIVA',professor_id=$1 WHERE id=$2", [colleague, turmaId])
+      for (const id of [professor, colleague]) {
+        await assert.rejects(queryAs(id, alternativesSql, params), { code: 'P0002' })
+        assert.deepEqual((await queryAs(id, selectAlternatives, [questaoId])).rows, [])
+      }
+      await db.query('UPDATE public.turmas SET professor_id=$1 WHERE id=$2', [professor, turmaId])
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('não grava nem expõe gabarito fora de rascunho', async () => {
+      const before = await snapshot()
+      for (const situacao of ['PUBLICADA', 'CANCELADA']) {
+        await assert.rejects(db.transaction(async (tx) => {
+          await tx.exec('ALTER TABLE public.avaliacoes DROP CONSTRAINT avaliacoes_situacao_check')
+          await tx.query('UPDATE public.avaliacoes SET situacao=$1 WHERE id IN ($2,$3)', [situacao, provaId, avaliacaoId])
+          await tx.query("SELECT set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub: professor, aal: 'aal2', session_id: sessions.get(professor) })])
+          await tx.exec('SET LOCAL ROLE authenticated')
+          assert.deepEqual((await tx.query(selectAlternatives, [questaoId])).rows, [])
+          return tx.query(alternativesSql, params)
+        }), { code: '55000' })
+      }
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('bloqueia escrita direta, duas corretas, ordem repetida e exclusão da questão referenciada', async () => {
+      const before = await snapshot()
+      for (const id of [professor, colleague, aluno, admin]) {
+        for (const sql of ["INSERT INTO public.alternativas(texto) VALUES ('Sem função')", 'UPDATE public.alternativas SET correta=true', 'DELETE FROM public.alternativas']) {
+          await assert.rejects(queryAs(id, sql), { code: '42501' })
+        }
+      }
+      const insert = "INSERT INTO public.alternativas(questao_id,texto,ordem,correta) VALUES ($1,'Outra opção',$2,$3)"
+      await assert.rejects(db.query(insert, [questaoId, 3, true]), { code: '23505' })
+      await assert.rejects(db.query(insert, [questaoId, 1, false]), { code: '23505' })
+      await assert.rejects(db.query(insert, [randomUUID(), 1, false]), { code: '23503' })
+      for (const ordem of [0, 6]) await assert.rejects(db.query(insert, [questaoId, ordem, false]), { code: '23514' })
+      await assert.rejects(db.query('DELETE FROM public.questoes WHERE id=$1', [questaoId]), { code: '23001' })
+      await assert.rejects(queryAs(professor, 'SELECT public.criar_alternativas_rascunho($1,$2,$3,p_professor_id => $4)',
+        [...params, colleague]), { code: '42883' })
+      assert.deepEqual(await snapshot(), before)
+    })
+
+    await t.test('auditoria é atômica; repetição e reaplicação não substituem alternativas nem gabarito', async () => {
+      const before = await snapshot()
+      await db.exec(`
+        CREATE FUNCTION public.falhar_alternativas() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.evento = 'ALTERNATIVAS_CRIADAS' THEN RAISE EXCEPTION 'Falha simulada'; END IF;
+          RETURN NEW;
+        END; $$;
+        CREATE TRIGGER falhar_alternativas BEFORE INSERT ON public.eventos_seguranca
+        FOR EACH ROW EXECUTE FUNCTION public.falhar_alternativas();
+      `)
+      await assert.rejects(queryAs(professor, alternativesSql, params), /Falha simulada/)
+      await db.exec('DROP TRIGGER falhar_alternativas ON public.eventos_seguranca; DROP FUNCTION public.falhar_alternativas();')
+      await migrate('022_alternativas_rascunho.sql')
+      for (const correta of [1, 2]) {
+        await assert.rejects(queryAs(professor, alternativesSql, [questaoId, params[1], correta]), { code: '55000' })
+      }
+      assert.deepEqual(await snapshot(), before)
+      const { alternativas } = (await queryAs<{ alternativas: { ordem: number; correta: boolean }[] }>(professor, alternativesSql, params)).rows[0]
+      assert.deepEqual(alternativas.map(({ ordem, correta }) => ({ ordem, correta })), [
+        { ordem: 1, correta: false }, { ordem: 2, correta: true },
+      ])
+    })
+  })
 })
 
 test('contrato de rascunho valida calendário, fuso, Unicode e limites sem coerção numérica', () => {
