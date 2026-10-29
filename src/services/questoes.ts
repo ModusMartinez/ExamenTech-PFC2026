@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { UUID_PATTERN } from './avaliacaoValidation'
 import { lerDadosQuestao, lerQuestaoRascunho } from './questaoValidation'
 import type { DadosQuestaoRascunho, QuestaoRascunho } from './questaoValidation'
 
@@ -36,4 +37,44 @@ export async function criarQuestaoRascunho(dados: DadosQuestaoRascunho): Promise
     throw new Error(notConfirmed)
   }
   return questao
+}
+
+export async function listarQuestoesRascunho(avaliacaoId: string): Promise<QuestaoRascunho[]> {
+  if (!UUID_PATTERN.test(avaliacaoId)) throw new Error('ID da avaliação inválido.')
+  const { data, error } = await supabase.auth.getSession()
+  if (error || !data.session) throw new Error('Sua sessão terminou. Entre novamente.')
+
+  let response: Response
+  try {
+    response = await fetch(`/api/questoes?${new URLSearchParams({ avaliacao_id: avaliacaoId.toLowerCase() })}`, {
+      method: 'GET', headers: { Authorization: `Bearer ${data.session.access_token}` }, cache: 'no-store',
+    })
+  } catch {
+    throw new Error('Não foi possível conectar ao serviço de questões. Confira sua conexão e tente novamente.')
+  }
+  const invalidResponse = 'Não foi possível conferir a lista de questões.'
+  let result: unknown
+  try {
+    result = await response.json()
+  } catch {
+    throw new Error(invalidResponse)
+  }
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error(invalidResponse)
+  if (!response.ok) {
+    throw new Error('message' in result && typeof result.message === 'string' ? result.message : invalidResponse)
+  }
+  if (response.status !== 200 || !('limite' in result) || result.limite !== 50 ||
+      !('questoes' in result) || !Array.isArray(result.questoes) || result.questoes.length > 50) {
+    throw new Error(invalidResponse)
+  }
+  const questoes: QuestaoRascunho[] = []
+  for (const item of result.questoes) {
+    const questao = lerQuestaoRascunho(item)
+    if (!questao || questao.avaliacao_id !== avaliacaoId.toLowerCase() ||
+        questoes.some((other) => other.id === questao.id) || questao.ordem <= (questoes.at(-1)?.ordem ?? 0)) {
+      throw new Error(invalidResponse)
+    }
+    questoes.push(questao)
+  }
+  return questoes
 }

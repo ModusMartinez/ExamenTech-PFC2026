@@ -1,6 +1,6 @@
 # Avaliações em rascunho (019–022)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API e formulário de cadastro. Alternativas e gabarito estão somente no banco. Publicação, cancelamento e tentativas ficam para os próximos blocos. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito estão somente no banco. Publicação, cancelamento e tentativas ficam para os próximos blocos. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -464,8 +464,8 @@ Teste automatizado: `npm run test:ui -- tests/nova-avaliacao.test.tsx tests/rasc
 - `questaoValidation.ts` compartilha as regras de enunciado e pontuação com o formulário, serviço e API. O limite de 10.000 caracteres conta pontos de código Unicode, como o banco; não usa o corte por unidades UTF-16 do `maxlength` do navegador.
 - Erro de campo recebe foco e mensagem associada. Durante o envio, campos e cancelamento ficam bloqueados; um segundo envio simultâneo é ignorado. Edição da avaliação e criação de questão não ficam abertas ao mesmo tempo.
 - Sucesso exige `201` e resposta válida correspondente aos dados enviados. Fecha o formulário e foca a confirmação com o número da questão e o título da avaliação. Erros mantêm os campos e focam a mensagem. Cancelar descarta os valores locais e devolve o foco ao botão da avaliação.
-- Fechar ou trocar de turma ignora respostas atrasadas na tela. Uma gravação já enviada pode concluir no servidor. Em falha de conexão/resposta, conferir pelo GET da API ou pela tabela `questoes` antes de reenviar; não há repetição automática.
-- Este formulário cria somente a questão. A listagem de questões na tela e o cadastro das alternativas/gabarito ficam para os próximos blocos. Questão objetiva permanece em rascunho sem alternativas até o cadastro delas.
+- Fechar ou trocar de turma ignora respostas atrasadas na tela. Uma gravação já enviada pode concluir no servidor. Em falha de conexão/resposta, conferir em **Questões** na avaliação antes de reenviar; não há repetição automática.
+- Este formulário cria somente a questão. O cadastro das alternativas/gabarito fica para os próximos blocos. Questão objetiva permanece em rascunho sem alternativas até o cadastro delas.
 
 Teste manual, com a `021` aplicada e `npm run dev:full`:
 
@@ -478,3 +478,26 @@ Teste manual, com a `021` aplicada e `npm run dev:full`:
 Teste automatizado: `npm run test:ui -- tests/nova-questao.test.tsx tests/rascunhos-turma.test.tsx`. Cobre os dois tipos, avaliação escolhida, perfis, validação, Unicode, decimais, foco, cancelamento, envio duplo, sessão, falhas e resposta atrasada/inválida. Auth/HTTP simulados, sem gravação no Supabase remoto.
 
 Referências: [textarea no React](https://react.dev/reference/react-dom/components/textarea), [select no React](https://react.dev/reference/react-dom/components/select), [limpeza de efeitos](https://react.dev/reference/react/useEffect#fetching-data-with-effects).
+
+## Listagem de questões por avaliação
+
+**Turmas → Rascunhos → Questões**, na linha da avaliação. Professor responsável e ADMIN podem consultar, inclusive em turma inativa, conforme as permissões da API e do banco.
+
+`RascunhosTurmaPanel` → `QuestoesAvaliacaoPanel` → `listarQuestoesRascunho` em `src/services/questoes.ts` → `GET /api/questoes?avaliacao_id=UUID`. Sem nova query, dependência ou alteração na API.
+
+- Lista ordenada com número, tipo, pontuação e enunciado completo. Preserva quebras de linha e apresenta o conteúdo como texto, sem interpretar HTML.
+- Consulta ao abrir e ao clicar em **Atualizar questões**. Uma avaliação aberta por vez; respostas atrasadas são ignoradas ao fechar ou trocar de avaliação/turma.
+- Estados de carregamento, erro e lista vazia. Falhas não exibem os registros da consulta anterior nem são tratadas como lista vazia.
+- As primeiras 50 questões são exibidas em ordem de cadastro, conforme o limite atual da API. Sem paginação, alternativas ou gabarito nesta tela.
+- Abrir criação/edição fecha a lista. Depois de salvar, reabrir **Questões** busca os dados atualizados.
+
+Teste manual com `npm run dev:full`:
+
+1. Como professor, abrir uma avaliação com questões e conferir ordem, tipo, pontuação e enunciados. Testar texto longo e quebras de linha no celular.
+2. Trocar para uma avaliação sem questões e conferir a mensagem de lista vazia; voltar e atualizar.
+3. Criar uma questão, reabrir **Questões** e confirmar o novo registro (dentro das primeiras 50 posições).
+4. Consultar como ADMIN e em turma inativa: a listagem continua disponível, sem ações de criação/edição.
+
+Teste automatizado: `npm run test:ui -- tests/questoes-avaliacao.test.tsx tests/rascunhos-turma.test.tsx tests/nova-questao.test.tsx`. Auth/HTTP simulados. Cobre navegação, perfis, atualização, estados, respostas atrasadas e validação do contrato da API.
+
+Referências: [listas no React](https://react.dev/learn/rendering-lists), [consultas e limpeza de efeitos](https://react.dev/reference/react/useEffect#fetching-data-with-effects).

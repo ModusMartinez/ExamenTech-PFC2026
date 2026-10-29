@@ -42,7 +42,7 @@ test.each(['Professor', 'Administrador'] as const)('%s abre e fecha rascunhos co
   const button = await abrir(profile)
   const table = await screen.findByRole('table', { name: `Avaliações em rascunho de ${turma.nome}` })
   expect(within(table).getAllByRole('columnheader').map((item) => item.textContent)).toEqual([
-    'Título', 'Tipo', 'Início', 'Fim', 'Duração', 'Situação', ...(profile === 'Professor' ? ['Ações'] : []),
+    'Título', 'Tipo', 'Início', 'Fim', 'Duração', 'Situação', 'Ações',
   ])
   expect(within(table).getAllByRole('rowheader').map((item) => item.textContent)).toEqual([atividade.titulo, avaliacao.titulo])
   expect(within(table).getByRole('cell', { name: 'Prova' })).toBeTruthy()

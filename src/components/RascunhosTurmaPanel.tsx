@@ -3,6 +3,7 @@ import { listarAvaliacoesRascunho } from '../services/avaliacoes'
 import type { AvaliacaoRascunho } from '../services/avaliacaoValidation'
 import { EditarAvaliacaoForm } from './EditarAvaliacaoForm'
 import { NovaQuestaoForm } from './NovaQuestaoForm'
+import { QuestoesAvaliacaoPanel } from './QuestoesAvaliacaoPanel'
 
 export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaId: string; turmaNome: string; podeEditar: boolean }) {
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoRascunho[]>([])
@@ -11,10 +12,12 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaI
   const [refresh, setRefresh] = useState(0)
   const [editando, setEditando] = useState<AvaliacaoRascunho | null>(null)
   const [novaQuestao, setNovaQuestao] = useState<AvaliacaoRascunho | null>(null)
+  const [questoesAbertas, setQuestoesAbertas] = useState<string | null>(null)
   const [success, setSuccess] = useState('')
   const actionButton = useRef<HTMLButtonElement | null>(null)
   const notice = useRef<HTMLParagraphElement>(null)
   const formularioAberto = Boolean(editando || novaQuestao)
+  const avaliacaoAberta = avaliacoes.find((avaliacao) => avaliacao.id === questoesAbertas)
 
   useEffect(() => {
     if (!editando && !novaQuestao) (success ? notice.current : actionButton.current)?.focus()
@@ -43,7 +46,7 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaI
       <div className="turmas-list-heading">
         <h4>Avaliações em rascunho</h4>
         <button type="button" className="turmas-refresh" disabled={loading || formularioAberto}
-          onClick={() => { setSuccess(''); setRefresh((current) => current + 1) }}>Atualizar rascunhos</button>
+          onClick={() => { setSuccess(''); setQuestoesAbertas(null); setRefresh((current) => current + 1) }}>Atualizar rascunhos</button>
       </div>
       <p className="turmas-note">Até 50 rascunhos mais recentes. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
       {success && <p ref={notice} tabIndex={-1} className="alert success" role="status">{success}</p>}
@@ -56,7 +59,7 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaI
             <thead><tr>
               <th scope="col">Título</th><th scope="col">Tipo</th><th scope="col">Início</th>
               <th scope="col">Fim</th><th scope="col">Duração</th><th scope="col">Situação</th>
-              {podeEditar && <th scope="col" className="rascunhos-coluna-acoes">Ações</th>}
+              <th scope="col" className="rascunhos-coluna-acoes">Ações</th>
             </tr></thead>
             <tbody>
               {avaliacoes.map((avaliacao) => (
@@ -71,26 +74,36 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaI
                   </time></td>
                   <td>{avaliacao.duracao_minutos} min</td>
                   <td>Rascunho</td>
-                  {podeEditar && <td><div className="rascunhos-acoes">
+                  <td><div className="rascunhos-acoes">
+                    <button type="button" className="turmas-refresh" disabled={formularioAberto}
+                      aria-expanded={questoesAbertas === avaliacao.id} aria-controls={`questoes-${avaliacao.id}`}
+                      aria-label={`Questões de ${avaliacao.titulo}`}
+                      onClick={() => setQuestoesAbertas((current) => current === avaliacao.id ? null : avaliacao.id)}>Questões</button>
+                    {podeEditar && <>
                     <button type="button" className="turmas-refresh" disabled={formularioAberto}
                     aria-label={`Editar ${avaliacao.titulo}`} onClick={(event) => {
                       actionButton.current = event.currentTarget
                       setSuccess('')
+                      setQuestoesAbertas(null)
                       setEditando(avaliacao)
                     }}>Editar</button>
                     <button type="button" className="turmas-refresh" disabled={formularioAberto}
                       aria-label={`Nova questão em ${avaliacao.titulo}`} onClick={(event) => {
                         actionButton.current = event.currentTarget
                         setSuccess('')
+                        setQuestoesAbertas(null)
                         setNovaQuestao(avaliacao)
                       }}>Nova questão</button>
-                  </div></td>}
+                    </>}
+                  </div></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      {!loading && !error && avaliacaoAberta && <QuestoesAvaliacaoPanel key={avaliacaoAberta.id}
+        avaliacaoId={avaliacaoAberta.id} avaliacaoTitulo={avaliacaoAberta.titulo} />}
       {podeEditar && editando && <EditarAvaliacaoForm key={editando.id} avaliacao={editando}
         onCancelar={() => setEditando(null)} onSalvo={(atualizada) => {
           setAvaliacoes((current) => current.map((item) => item.id === atualizada.id ? atualizada : item))
