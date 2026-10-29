@@ -1,6 +1,6 @@
 # Avaliações em rascunho (019–022)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, ainda sem formulário. Alternativas e gabarito estão somente no banco. Publicação, cancelamento e tentativas ficam para os próximos blocos. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API e formulário de cadastro. Alternativas e gabarito estão somente no banco. Publicação, cancelamento e tentativas ficam para os próximos blocos. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -162,7 +162,7 @@ const resultadoQuestao = await supabaseQuestoes.rpc('criar_questao_rascunho', {
 console.log(resultadoQuestao);
 ```
 
-4. Esperado: `error: null`, questão com ID e próxima `ordem`. Conferir `QUESTAO_CRIADA` em `eventos_seguranca`, com `recurso_id` igual ao ID da questão. Não há formulário de questões neste bloco. Para consultar pela sessão atual:
+4. Esperado: `error: null`, questão com ID e próxima `ordem`. Conferir `QUESTAO_CRIADA` em `eventos_seguranca`, com `recurso_id` igual ao ID da questão. O cadastro também está disponível em **Turmas → Rascunhos → Nova questão**. Para consultar pela sessão atual:
 
 ```js
 const consultaQuestoes = await supabaseQuestoes
@@ -243,7 +243,7 @@ Referências: [funções e permissões no Supabase](https://supabase.com/docs/gu
 
 ## API de criação e consulta de questões
 
-Requer a `021` já aplicada; nenhuma query nova neste bloco. Rota `api/questoes.ts`, registrada no servidor local e disponível como função da Vercel. Alternativas, gabarito, edição e formulário de questões ficam para outros blocos.
+Requer a `021` já aplicada; nenhuma query nova neste bloco. Rota `api/questoes.ts`, registrada no servidor local e disponível como função da Vercel. API de alternativas/gabarito e edição de questões ficam para outros blocos.
 
 - `POST /api/questoes`: recebe somente `avaliacao_id`, `tipo`, `enunciado` e `pontuacao`. Chama `criar_questao_rascunho` e retorna `201` com `{ questao }`. ID, ordem e data de criação vêm do banco; o evento `QUESTAO_CRIADA` é gravado pela mesma função SQL.
 - `GET /api/questoes?avaliacao_id=UUID`: retorna `200` com `{ questoes, limite: 50 }`, nas primeiras 50 posições da avaliação. Sem paginação neste bloco. Avaliação acessível sem questões retorna lista vazia; inexistente, fora do acesso ou fora de rascunho retorna `404`.
@@ -453,3 +453,28 @@ Teste manual, com a `020` aplicada e `npm run dev:full`:
 5. Conferir que admin e turma inativa não apresentam Editar. Testar teclado e celular, incluindo rolagem horizontal da tabela.
 
 Teste automatizado: `npm run test:ui -- tests/nova-avaliacao.test.tsx tests/rascunhos-turma.test.tsx`. Cobre criação após o reaproveitamento dos campos, preenchimento/edição, cancelamento, perfis, fuso, preservação de segundos, validação, envio duplicado e respostas atrasadas ou inválidas. Usa Auth/HTTP simulados, sem gravar no Supabase.
+
+## Formulário de questões
+
+**Turmas → Rascunhos → Nova questão**, na linha da avaliação. Disponível ao professor nas turmas ativas. ADMIN e turmas inativas não apresentam a ação. API e banco continuam verificando as permissões.
+
+`RascunhosTurmaPanel` → `NovaQuestaoForm` → `criarQuestaoRascunho` em `src/services/questoes.ts` → `POST /api/questoes` → função SQL da `021`. Sem nova query ou dependência.
+
+- A avaliação é a escolhida na tabela. Campos: tipo (Objetiva/Dissertativa), enunciado e pontuação. Vírgula e ponto são aceitos como separador decimal, sem separador de milhar.
+- `questaoValidation.ts` compartilha as regras de enunciado e pontuação com o formulário, serviço e API. O limite de 10.000 caracteres conta pontos de código Unicode, como o banco; não usa o corte por unidades UTF-16 do `maxlength` do navegador.
+- Erro de campo recebe foco e mensagem associada. Durante o envio, campos e cancelamento ficam bloqueados; um segundo envio simultâneo é ignorado. Edição da avaliação e criação de questão não ficam abertas ao mesmo tempo.
+- Sucesso exige `201` e resposta válida correspondente aos dados enviados. Fecha o formulário e foca a confirmação com o número da questão e o título da avaliação. Erros mantêm os campos e focam a mensagem. Cancelar descarta os valores locais e devolve o foco ao botão da avaliação.
+- Fechar ou trocar de turma ignora respostas atrasadas na tela. Uma gravação já enviada pode concluir no servidor. Em falha de conexão/resposta, conferir pelo GET da API ou pela tabela `questoes` antes de reenviar; não há repetição automática.
+- Este formulário cria somente a questão. A listagem de questões na tela e o cadastro das alternativas/gabarito ficam para os próximos blocos. Questão objetiva permanece em rascunho sem alternativas até o cadastro delas.
+
+Teste manual, com a `021` aplicada e `npm run dev:full`:
+
+1. Entrar como professor com MFA e abrir **Turmas → Rascunhos → Nova questão** em uma turma ativa.
+2. Cadastrar uma questão objetiva e uma dissertativa. Testar pontuação `2,5` e `0.29`.
+3. Conferir avaliação, enunciado, tipo, pontuação e ordem na tabela `questoes`, além de `QUESTAO_CRIADA` em `eventos_seguranca`.
+4. Testar enunciado vazio/curto e pontuação `0`, `2,555` ou `10000`: erro no campo, sem envio. Preencher e cancelar: nenhum registro criado.
+5. Conferir ausência da ação como ADMIN e em turma inativa. Testar teclado, celular e enunciado longo. Alternativas não são criadas por esse formulário.
+
+Teste automatizado: `npm run test:ui -- tests/nova-questao.test.tsx tests/rascunhos-turma.test.tsx`. Cobre os dois tipos, avaliação escolhida, perfis, validação, Unicode, decimais, foco, cancelamento, envio duplo, sessão, falhas e resposta atrasada/inválida. Auth/HTTP simulados, sem gravação no Supabase remoto.
+
+Referências: [textarea no React](https://react.dev/reference/react-dom/components/textarea), [select no React](https://react.dev/reference/react-dom/components/select), [limpeza de efeitos](https://react.dev/reference/react/useEffect#fetching-data-with-effects).

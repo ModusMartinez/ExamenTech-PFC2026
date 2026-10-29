@@ -17,19 +17,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+export function enunciadoQuestaoValido(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const tamanho = [...value.trim()].length
+  return tamanho >= 3 && tamanho <= 10000 && !value.includes('\u0000')
+}
+
+export function pontuacaoQuestaoValida(value: unknown): value is number {
+  // Não arredonda o valor recebido nem depende da precisão binária de value * 100.
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 9999.99 &&
+    Number(value.toFixed(2)) === value
+}
+
 export function lerDadosQuestao(value: unknown): DadosQuestaoRascunho | null {
   if (!isRecord(value) || typeof value.avaliacao_id !== 'string' || !UUID_PATTERN.test(value.avaliacao_id) ||
-      (value.tipo !== 'OBJETIVA' && value.tipo !== 'DISSERTATIVA') || typeof value.enunciado !== 'string' ||
-      typeof value.pontuacao !== 'number' || !Number.isFinite(value.pontuacao) ||
-      value.pontuacao <= 0 || value.pontuacao > 9999.99) return null
-  const enunciado = value.enunciado.trim()
-  const tamanho = [...enunciado].length
-  // Compara sem arredondar o valor recebido; evita o erro binário de pontuacao * 100.
-  if (tamanho < 3 || tamanho > 10000 || enunciado.includes('\u0000') ||
-      Number(value.pontuacao.toFixed(2)) !== value.pontuacao) return null
+      (value.tipo !== 'OBJETIVA' && value.tipo !== 'DISSERTATIVA') ||
+      !enunciadoQuestaoValido(value.enunciado) || !pontuacaoQuestaoValida(value.pontuacao)) return null
   return {
     avaliacao_id: value.avaliacao_id.toLowerCase(), tipo: value.tipo,
-    enunciado, pontuacao: value.pontuacao,
+    enunciado: value.enunciado.trim(), pontuacao: value.pontuacao,
   }
 }
 

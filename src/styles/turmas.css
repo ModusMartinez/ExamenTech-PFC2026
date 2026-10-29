@@ -146,6 +146,13 @@
 .avaliacao-form fieldset:disabled { opacity: 0.65; }
 .avaliacao-form fieldset:disabled button { cursor: not-allowed; }
 .avaliacao-form-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.avaliacao-form textarea {
+  width: 100%; min-width: 0; padding: 10px 12px; margin-bottom: 8px;
+  border: 1px solid #cbddec; border-radius: 7px; resize: vertical;
+  font: inherit; color: var(--text); line-height: 1.5;
+}
+.avaliacao-form textarea:focus-visible { outline: 3px solid #69a4d3; outline-offset: 2px; }
+.questao-avaliacao { margin: 0 0 8px; overflow-wrap: anywhere; font-weight: 600; color: var(--dark-blue); }
 
 .rascunhos-turma { flex-basis: 100%; min-width: 0; width: 100%; }
 .rascunhos-turma h4 { margin: 0; color: var(--dark-blue); }
@@ -161,6 +168,8 @@
 }
 .rascunhos-tabela th:first-child { width: 30%; }
 .rascunhos-tabela .turmas-refresh { padding: 8px 10px; white-space: nowrap; }
+.rascunhos-tabela .rascunhos-coluna-acoes { width: 130px; }
+.rascunhos-acoes { display: grid; gap: 8px; }
 
 @media (max-width: 500px) {
   .turma-form { padding: 18px; }
