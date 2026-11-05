@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase'
-import { lerAvaliacaoPublicada, lerAvaliacaoRascunho, lerDadosAvaliacao, lerDadosEdicaoAvaliacao, lerPublicacaoAvaliacao, UUID_PATTERN } from './avaliacaoValidation'
+import { lerAvaliacaoPublicada, lerAvaliacaoRascunho, lerDadosAvaliacao, lerDadosEdicaoAvaliacao, lerMinhasAvaliacoes, lerPublicacaoAvaliacao, UUID_PATTERN } from './avaliacaoValidation'
 import type { DadosAvaliacaoRascunho, DadosEdicaoAvaliacaoRascunho } from './avaliacaoValidation'
 
 export async function criarAvaliacaoRascunho(dados: DadosAvaliacaoRascunho) {
@@ -64,6 +64,27 @@ export function listarAvaliacoesRascunho(turmaId: string) {
 
 export function listarAvaliacoesPublicadas(turmaId: string) {
   return listarAvaliacoes(turmaId, 'PUBLICADA', lerAvaliacaoPublicada)
+}
+
+export async function listarMinhasAvaliacoes() {
+  const { data, error } = await supabase.auth.getSession()
+  if (error || !data.session) throw new Error('Sua sessão terminou. Entre novamente.')
+  let response: Response
+  try {
+    response = await fetch('/api/minhas-avaliacoes', {
+      method: 'GET', headers: { Authorization: `Bearer ${data.session.access_token}` }, cache: 'no-store',
+    })
+  } catch {
+    throw new Error('Não foi possível conectar ao serviço de avaliações. Confira sua conexão e tente novamente.')
+  }
+  const invalidResponse = 'Não foi possível conferir sua lista de avaliações.'
+  let result: unknown
+  try { result = await response.json() } catch { throw new Error(invalidResponse) }
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error(invalidResponse)
+  if (!response.ok) throw new Error('message' in result && typeof result.message === 'string' ? result.message : invalidResponse)
+  const avaliacoes = lerMinhasAvaliacoes('avaliacoes' in result ? result.avaliacoes : null)
+  if (response.status !== 200 || !avaliacoes) throw new Error(invalidResponse)
+  return avaliacoes
 }
 
 async function listarAvaliacoes<T extends { id: string; turma_id: string }>(

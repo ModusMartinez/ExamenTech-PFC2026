@@ -8,6 +8,7 @@ import { NovaAvaliacaoPanel } from './components/NovaAvaliacaoPanel'
 import { SolicitarMatriculaPanel } from './components/SolicitarMatriculaPanel'
 import { MatriculasPanel } from './components/MatriculasPanel'
 import { MinhasMatriculasPanel } from './components/MinhasMatriculasPanel'
+import { MinhasAvaliacoesPanel } from './components/MinhasAvaliacoesPanel'
 import { TurnstileWidget } from './components/TurnstileWidget'
 import { LegalModal } from './components/LegalModal'
 import { LegalFooter } from './components/LegalFooter'
@@ -832,7 +833,7 @@ type DashboardProps = {
 
 function Dashboard({ user, onLogout }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
-  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao'>('inicio')
+  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'minhas-avaliacoes'>('inicio')
   const nameParts = user.name.split(' ')
 
   const initials = nameParts
@@ -887,6 +888,9 @@ function Dashboard({ user, onLogout }: DashboardProps) {
                 <button type="button" aria-pressed={dashboardView === 'minhas-matriculas'} onClick={() => setDashboardView('minhas-matriculas')}>
                   Minhas matrículas
                 </button>
+                <button type="button" aria-pressed={dashboardView === 'minhas-avaliacoes'} onClick={() => setDashboardView('minhas-avaliacoes')}>
+                  Minhas avaliações
+                </button>
               </>
             )}
             {user.profile === 'Professor' && (
@@ -916,6 +920,8 @@ function Dashboard({ user, onLogout }: DashboardProps) {
           <SolicitarMatriculaPanel />
         ) : dashboardView === 'minhas-matriculas' && user.profile === 'Aluno' ? (
           <MinhasMatriculasPanel />
+        ) : dashboardView === 'minhas-avaliacoes' && user.profile === 'Aluno' ? (
+          <MinhasAvaliacoesPanel />
         ) : dashboardView === 'aprovacoes' &&
           (user.profile === 'Administrador' || user.profile === 'Professor') ? (
           <MatriculasPanel profile={user.profile} />

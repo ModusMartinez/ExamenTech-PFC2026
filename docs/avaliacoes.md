@@ -656,7 +656,7 @@ Referências: [consultas e limpeza de efeitos no React](https://react.dev/refere
 
 ## Consulta de avaliações pelo aluno (024)
 
-Aplicar `database/024_listar_minhas_avaliacoes.sql` depois da `023`. Este bloco contém banco e API; a lista no painel do aluno será feita no próximo bloco.
+Aplicar `database/024_listar_minhas_avaliacoes.sql` depois da `023`. A interface abaixo usa essa mesma query.
 
 `GET /api/minhas-avaliacoes` → Supabase Auth → `public.listar_minhas_avaliacoes` → função privada. A API usa a chave pública e a sessão do aluno. Sem parâmetros: o banco identifica o aluno pela sessão.
 
@@ -689,3 +689,26 @@ console.log(respostaAluno.status, await respostaAluno.json());
 Teste automatizado: `node --test tests/minhas-avaliacoes.test.ts`. Executa permissões e RLS no PostgreSQL local (PGlite), com Auth/HTTP simulados. Cobre isolamento entre alunos e organizações, matrículas/sessões, MFA, dados restritos, ordenação/limite e falhas. Não acessa o Supabase remoto.
 
 Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [verificação de usuário](https://supabase.com/docs/reference/javascript/auth-getuser), [chamada RPC](https://supabase.com/docs/reference/javascript/rpc).
+
+## Minhas avaliações no painel do aluno
+
+**Minhas avaliações** aparece somente para Aluno. Lista título, turma, tipo, início, fim e duração. Horários no fuso do navegador, indicado acima da tabela. Mantém a ordem e o limite de 50 publicações definidos pela API.
+
+`App` → `MinhasAvaliacoesPanel` → `listarMinhasAvaliacoes` em `src/services/avaliacoes.ts` → `GET /api/minhas-avaliacoes` → query `024`.
+
+- Reutiliza o contrato `AvaliacaoAluno`, a validação `lerMinhasAvaliacoes` e os estilos de tabela existentes. Sem dependências ou query adicionais.
+- **Atualizar** consulta novamente e fica desabilitado durante o carregamento. Carregamento, vazio e erro têm mensagens próprias; falha oculta a lista anterior. Resposta atrasada de uma tela fechada é ignorada.
+- Foco no título ao abrir; tabela com cabeçalhos e rolagem horizontal acessível por teclado no celular. Textos longos quebram linha, sem interpretar HTML.
+- Este bloco permite consultar as avaliações. Início da tentativa, respostas e resultados continuam pendentes. Os links legais permanecem no rodapé.
+
+Teste manual com a `024` aplicada e `npm run dev:full`:
+
+1. Entrar como aluno com MFA e matrícula ativa em uma turma com avaliação publicada. Abrir **Minhas avaliações** e conferir os campos.
+2. Publicar outra avaliação como professor; no aluno, clicar em **Atualizar** e conferir sua inclusão. Rascunhos não aparecem.
+3. Sem avaliações acessíveis, conferir a mensagem de lista vazia. Inativar uma matrícula de teste pelo professor/admin e atualizar a lista do aluno: avaliações dessa turma deixam de aparecer.
+4. Conferir celular, título longo, navegação por teclado, rolagem da tabela e links legais. Professor e ADMIN não apresentam o botão **Minhas avaliações**.
+5. Interromper a API local e clicar em **Atualizar**: exibe erro sem a lista antiga. Reiniciar a API e atualizar novamente.
+
+Testes: `npm run test:ui -- tests/minhas-avaliacoes-panel.test.tsx tests/app-cadastro.test.tsx tests/minhas-matriculas.test.tsx`. Usam o serviço real do frontend com sessão e HTTP simulados; cobrem consulta, atualização, perfis, foco, respostas inválidas/atrasadas e estados da tela. Conferência visual em desktop e celular com dados fictícios, sem acesso ao Supabase remoto.
+
+Referência: [consultas e limpeza de efeitos no React](https://react.dev/reference/react/useEffect#fetching-data-with-effects).

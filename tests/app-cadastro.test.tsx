@@ -32,6 +32,9 @@ vi.mock('../src/components/MatriculasPanel', () => ({
 vi.mock('../src/components/MinhasMatriculasPanel', () => ({
   MinhasMatriculasPanel: () => <p>Consulta das minhas matrículas</p>,
 }))
+vi.mock('../src/components/MinhasAvaliacoesPanel', () => ({
+  MinhasAvaliacoesPanel: () => <p>Consulta das minhas avaliações</p>,
+}))
 vi.mock('../src/components/MfaStep', () => ({
   MfaStep: ({ mode }: { mode: string }) => <p>Etapa MFA: {mode}</p>,
 }))
@@ -421,12 +424,18 @@ for (const profile of ['Professor', 'Aluno', 'Administrador']) {
       fireEvent.click(screen.getByRole('button', { name: 'Minhas matrículas' }))
       expect(screen.getByText('Consulta das minhas matrículas')).toBeTruthy()
       expect(screen.getByRole('link', { name: 'Termos de Uso (abre em nova aba)' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Minhas avaliações' }))
+      expect(screen.getByText('Consulta das minhas avaliações')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Minhas avaliações' }).getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByRole('link', { name: 'Política de Privacidade (abre em nova aba)' })).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: 'Início' }))
       expect(screen.queryByLabelText('Código da turma')).toBeNull()
       expect(screen.queryByText('Consulta das minhas matrículas')).toBeNull()
+      expect(screen.queryByText('Consulta das minhas avaliações')).toBeNull()
     } else {
       expect(screen.queryByRole('button', { name: 'Solicitar matrícula' })).toBeNull()
       expect(screen.queryByRole('button', { name: 'Minhas matrículas' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Minhas avaliações' })).toBeNull()
       expect(screen.queryByLabelText('Código da turma')).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: 'Matrículas' }))
       expect(screen.getByText(`Pendências para ${profile}`)).toBeTruthy()
