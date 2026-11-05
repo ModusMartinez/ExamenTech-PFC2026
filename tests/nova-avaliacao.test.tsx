@@ -48,7 +48,7 @@ test.each(['PROVA', 'ATIVIDADE'])('cria %s com datas no fuso local, somente camp
     method: 'POST', headers: { Authorization: 'Bearer sessao-simulada', 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...dados, tipo }),
   })
-  expect(document.activeElement).toBe(success)
+  await waitFor(() => expect(document.activeElement).toBe(success))
   expect((screen.getByLabelText('Título') as HTMLInputElement).value).toBe('')
   expect((screen.getByLabelText('Turma') as HTMLSelectElement).value).toBe('')
   expect(screen.queryByRole('button', { name: /Publicar|Editar/ })).toBeNull()

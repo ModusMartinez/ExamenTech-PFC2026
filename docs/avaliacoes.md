@@ -712,3 +712,41 @@ Teste manual com a `024` aplicada e `npm run dev:full`:
 Testes: `npm run test:ui -- tests/minhas-avaliacoes-panel.test.tsx tests/app-cadastro.test.tsx tests/minhas-matriculas.test.tsx`. Usam o serviço real do frontend com sessão e HTTP simulados; cobrem consulta, atualização, perfis, foco, respostas inválidas/atrasadas e estados da tela. Conferência visual em desktop e celular com dados fictícios, sem acesso ao Supabase remoto.
 
 Referência: [consultas e limpeza de efeitos no React](https://react.dev/reference/react/useEffect#fetching-data-with-effects).
+
+## Início da tentativa no banco (025)
+
+Aplicar `database/025_iniciar_tentativa.sql` depois da `024`. Cria `tentativas` e a função `public.iniciar_tentativa(p_avaliacao_id)`. Este bloco não tem nova API HTTP ou botão na interface.
+
+- Tabela: `id`, `avaliacao_id`, `aluno_id`, `situacao`, `iniciada_em` e `limite_em`. A situação inicial é `EM_ANDAMENTO`; finalização e cancelamento serão adicionados em etapas próprias.
+- Exige aluno e organização ativos, sessão própria existente, MFA `aal2`, turma da mesma organização e matrícula `ATIVA`.
+- Avaliação deve estar `PUBLICADA`, em turma ativa. Horário permitido: início inclusivo e fim exclusivo, conferidos pelo relógio do banco após possíveis esperas por bloqueios.
+- `limite_em` recebe o menor valor entre `iniciada_em + duração` e o fim da janela. O navegador não informa aluno, situação ou horários.
+- A constraint única `(avaliacao_id, aluno_id)` impede uma segunda tentativa. `INSERT ... ON CONFLICT DO NOTHING` resolve a disputa pela mesma combinação; repetição é recusada, sem retomar ou reiniciar a tentativa existente.
+- Bloqueios de leitura preservam perfil, organização, sessão, turma, matrícula e avaliação durante o início. A função não bloqueia exclusivamente a avaliação inteira para todos os alunos.
+- Registra `TENTATIVA_INICIADA`, com `usuario_id` do aluno e `recurso_id` da tentativa. Tentativa e evento são atômicos: falha na auditoria desfaz ambos.
+- RLS permite consultar os metadados da própria tentativa, do professor autor ainda responsável pela turma e do ADMIN, reutilizando as regras de sessão/MFA dos helpers existentes. Matrícula inativa preserva essa consulta histórica, mas impede novo início. Mudança de organização retira o acesso do aluno ao histórico da organização anterior.
+- Escrita direta e exclusão pela aplicação continuam bloqueadas. Não libera questões, alternativas ou gabarito.
+
+Sucesso retorna os seis campos da tentativa. Erros SQL: `42501` para perfil/sessão/MFA, `P0002` para avaliação inexistente ou sem vínculo autorizado, `55000` para turma/situação/horário indisponível ou tentativa já existente. A API HTTP será o próximo bloco.
+
+Teste manual no Supabase de testes:
+
+1. Aplicar a `025`. Criar e publicar uma avaliação específica para teste, com janela em andamento, e aprovar a matrícula do aluno. O teste consome a tentativa única dessa avaliação.
+2. Entrar como aluno com MFA em `npm run dev:full`. No console do navegador, substituir o UUID e executar:
+
+```js
+const { supabase: supabaseTentativa } = await import('/src/lib/supabase.ts');
+const resultadoTentativa = await supabaseTentativa.rpc('iniciar_tentativa', {
+  p_avaliacao_id: 'UUID_DA_AVALIACAO_DE_TESTE',
+});
+console.log(resultadoTentativa.data, resultadoTentativa.error);
+```
+
+3. Conferir os horários retornados, a linha em `tentativas` e o evento `TENTATIVA_INICIADA` em `eventos_seguranca`. Repetir a chamada: erro `55000`, sem segunda linha/evento ou mudança do prazo.
+4. Em outra avaliação de teste, conferir a recusa antes do início, sem matrícula ativa, como professor/admin ou sem MFA. Para conferir prazo reduzido, usar avaliação cuja janela já esteja em andamento e termine antes da duração completa a partir de agora.
+
+Teste automatizado: `node --test tests/tentativas-sql.test.ts`. Executa funções, constraints, RLS e rollback no PostgreSQL local (PGlite), com identidades fictícias. PGlite serializa transações; chamadas enfileiradas e unicidade são testadas, mas não conexões simultâneas reais do Supabase. Nenhuma consulta ou gravação remota é feita pelos testes.
+
+Pendentes neste fluxo: API e interface de início, ordenação aleatória das questões/alternativas, respostas, encerramento, controle de saída/desconexão e captura inicial. A criação do registro ainda não representa uma prova executável; ultrapassar `limite_em` não altera a situação automaticamente neste bloco.
+
+Referências: [unicidade no PostgreSQL](https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-UNIQUE-CONSTRAINTS), [bloqueios de linhas](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS), [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions).
