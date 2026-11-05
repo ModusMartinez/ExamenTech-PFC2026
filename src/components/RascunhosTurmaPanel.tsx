@@ -4,8 +4,11 @@ import type { AvaliacaoRascunho } from '../services/avaliacaoValidation'
 import { EditarAvaliacaoForm } from './EditarAvaliacaoForm'
 import { NovaQuestaoForm } from './NovaQuestaoForm'
 import { QuestoesAvaliacaoPanel } from './QuestoesAvaliacaoPanel'
+import { PublicarAvaliacaoForm } from './PublicarAvaliacaoForm'
 
-export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaId: string; turmaNome: string; podeEditar: boolean }) {
+export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, onPublicada }: {
+  turmaId: string; turmaNome: string; podeEditar: boolean; onPublicada: () => void
+}) {
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoRascunho[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -13,15 +16,16 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaI
   const [editando, setEditando] = useState<AvaliacaoRascunho | null>(null)
   const [novaQuestao, setNovaQuestao] = useState<AvaliacaoRascunho | null>(null)
   const [questoesAbertas, setQuestoesAbertas] = useState<string | null>(null)
+  const [publicando, setPublicando] = useState<AvaliacaoRascunho | null>(null)
   const [success, setSuccess] = useState('')
   const actionButton = useRef<HTMLButtonElement | null>(null)
   const notice = useRef<HTMLParagraphElement>(null)
-  const formularioAberto = Boolean(editando || novaQuestao)
+  const formularioAberto = Boolean(editando || novaQuestao || publicando)
   const avaliacaoAberta = avaliacoes.find((avaliacao) => avaliacao.id === questoesAbertas)
 
   useEffect(() => {
-    if (!editando && !novaQuestao) (success ? notice.current : actionButton.current)?.focus()
-  }, [editando, novaQuestao, success])
+    if (!editando && !novaQuestao && !publicando) (success ? notice.current : actionButton.current)?.focus()
+  }, [editando, novaQuestao, publicando, success])
 
   useEffect(() => {
     let active = true
@@ -94,6 +98,13 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaI
                         setQuestoesAbertas(null)
                         setNovaQuestao(avaliacao)
                       }}>Nova questão</button>
+                    <button type="button" className="turmas-refresh" disabled={formularioAberto}
+                      aria-label={`Publicar ${avaliacao.titulo}`} onClick={(event) => {
+                        actionButton.current = event.currentTarget
+                        setSuccess('')
+                        setQuestoesAbertas(null)
+                        setPublicando(avaliacao)
+                      }}>Publicar</button>
                     </>}
                   </div></td>
                 </tr>
@@ -114,6 +125,13 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaI
         onCancelar={() => setNovaQuestao(null)} onCriada={(questao) => {
           setSuccess(`Questão ${questao.ordem} criada em “${novaQuestao.titulo}”.`)
           setNovaQuestao(null)
+        }} />}
+      {podeEditar && publicando && <PublicarAvaliacaoForm key={publicando.id} avaliacao={publicando}
+        onCancelar={() => setPublicando(null)} onPublicada={() => {
+          setAvaliacoes((current) => current.filter((item) => item.id !== publicando.id))
+          setSuccess(`Avaliação “${publicando.titulo}” publicada.`)
+          setPublicando(null)
+          onPublicada()
         }} />}
     </section>
   )

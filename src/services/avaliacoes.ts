@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase'
-import { lerAvaliacaoRascunho, lerDadosAvaliacao, lerDadosEdicaoAvaliacao, UUID_PATTERN } from './avaliacaoValidation'
-import type { AvaliacaoRascunho, DadosAvaliacaoRascunho, DadosEdicaoAvaliacaoRascunho } from './avaliacaoValidation'
+import { lerAvaliacaoPublicada, lerAvaliacaoRascunho, lerDadosAvaliacao, lerDadosEdicaoAvaliacao, lerPublicacaoAvaliacao, UUID_PATTERN } from './avaliacaoValidation'
+import type { DadosAvaliacaoRascunho, DadosEdicaoAvaliacaoRascunho } from './avaliacaoValidation'
 
 export async function criarAvaliacaoRascunho(dados: DadosAvaliacaoRascunho) {
   const entrada = lerDadosAvaliacao(dados)
@@ -58,20 +58,32 @@ async function gravarAvaliacaoRascunho(entrada: DadosAvaliacaoRascunho | DadosEd
   return avaliacao
 }
 
-export async function listarAvaliacoesRascunho(turmaId: string): Promise<AvaliacaoRascunho[]> {
+export function listarAvaliacoesRascunho(turmaId: string) {
+  return listarAvaliacoes(turmaId, 'RASCUNHO', lerAvaliacaoRascunho)
+}
+
+export function listarAvaliacoesPublicadas(turmaId: string) {
+  return listarAvaliacoes(turmaId, 'PUBLICADA', lerAvaliacaoPublicada)
+}
+
+async function listarAvaliacoes<T extends { id: string; turma_id: string }>(
+  turmaId: string, situacao: 'RASCUNHO' | 'PUBLICADA', lerAvaliacao: (value: unknown) => T | null,
+): Promise<T[]> {
   if (!UUID_PATTERN.test(turmaId)) throw new Error('ID da turma inválido.')
   const { data, error } = await supabase.auth.getSession()
   if (error || !data.session) throw new Error('Sua sessão terminou. Entre novamente.')
 
   let response: Response
   try {
-    response = await fetch(`/api/avaliacoes?${new URLSearchParams({ turma_id: turmaId.toLowerCase() })}`, {
+    const query = new URLSearchParams({ turma_id: turmaId.toLowerCase() })
+    if (situacao === 'PUBLICADA') query.set('situacao', situacao)
+    response = await fetch(`/api/avaliacoes?${query}`, {
       method: 'GET', headers: { Authorization: `Bearer ${data.session.access_token}` }, cache: 'no-store',
     })
   } catch {
     throw new Error('Não foi possível conectar ao serviço de avaliações. Confira sua conexão e tente novamente.')
   }
-  const invalidResponse = 'Não foi possível conferir a lista de rascunhos.'
+  const invalidResponse = situacao === 'PUBLICADA' ? 'Não foi possível conferir a lista de publicadas.' : 'Não foi possível conferir a lista de rascunhos.'
   let result: unknown
   try {
     result = await response.json()
@@ -86,12 +98,33 @@ export async function listarAvaliacoesRascunho(turmaId: string): Promise<Avaliac
       !('avaliacoes' in result) || !Array.isArray(result.avaliacoes) || result.avaliacoes.length > 50) {
     throw new Error(invalidResponse)
   }
-  const avaliacoes: AvaliacaoRascunho[] = []
+  const avaliacoes: T[] = []
   for (const item of result.avaliacoes) {
-    const avaliacao = lerAvaliacaoRascunho(item)
+    const avaliacao = lerAvaliacao(item)
     if (!avaliacao || avaliacao.turma_id !== turmaId.toLowerCase() ||
         avaliacoes.some((other) => other.id === avaliacao.id)) throw new Error(invalidResponse)
     avaliacoes.push(avaliacao)
   }
   return avaliacoes
+}
+
+export async function publicarAvaliacao(avaliacaoId: string) {
+  if (!UUID_PATTERN.test(avaliacaoId)) throw new Error('ID da avaliação inválido.')
+  const { data, error } = await supabase.auth.getSession()
+  if (error || !data.session) throw new Error('Sua sessão terminou. Entre novamente.')
+  const failure = 'Não foi possível confirmar a publicação. Confira Publicadas e atualize os rascunhos antes de reenviar.'
+  let response: Response
+  try {
+    response = await fetch('/api/publicar-avaliacao', {
+      method: 'POST', headers: { Authorization: `Bearer ${data.session.access_token}`, 'Content-Type': 'application/json' },
+      cache: 'no-store', body: JSON.stringify({ avaliacao_id: avaliacaoId.toLowerCase() }),
+    })
+  } catch { throw new Error(failure) }
+  let result: unknown
+  try { result = await response.json() } catch { throw new Error(failure) }
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error(failure)
+  if (!response.ok) throw new Error('message' in result && typeof result.message === 'string' ? result.message : failure)
+  const publicacao = lerPublicacaoAvaliacao('avaliacao' in result ? result.avaliacao : null)
+  if (response.status !== 200 || !publicacao || publicacao.id !== avaliacaoId.toLowerCase()) throw new Error(failure)
+  return publicacao
 }

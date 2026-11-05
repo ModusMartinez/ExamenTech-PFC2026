@@ -1,6 +1,6 @@
 # Avaliações (019–023)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco e API; botão e listagem das publicadas ficam para o próximo bloco. Cancelamento e tentativas ainda pendentes. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Cancelamento e tentativas ainda pendentes. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -307,6 +307,7 @@ Requer a `019` para criação/consulta e a `020` para edição, sem nova query n
 
 - `POST /api/avaliacoes`: cria pela função `criar_avaliacao_rascunho`. Recebe somente `turma_id`, `titulo`, `tipo`, `inicio_em`, `fim_em`, `duracao_minutos`. Retorna `201` com `{ avaliacao }`, incluindo ID, autor, situação e data de criação definidos pelo banco.
 - `GET /api/avaliacoes?turma_id=UUID`: consulta os rascunhos visíveis da turma, por data de criação decrescente e ID decrescente. Retorna `200` com `{ avaliacoes, limite: 50 }`. Ainda sem paginação; não é uma lista completa quando há mais de 50 rascunhos.
+- O parâmetro opcional `situacao=PUBLICADA` consulta as publicadas, por data de publicação decrescente e ID decrescente, incluindo `publicada_em`. Aceita somente `RASCUNHO` ou `PUBLICADA`; sem parâmetro mantém a consulta anterior. Mesmas permissões, limite de 50 e validação da resposta.
 - `PATCH /api/avaliacoes`: edita pela função `editar_avaliacao_rascunho`. Recebe somente `avaliacao_id`, `titulo`, `tipo`, `inicio_em`, `fim_em`, `duracao_minutos`, todos obrigatórios. Retorna `200` com `{ avaliacao }`, inclusive ao salvar os mesmos valores. Não recebe `turma_id`; turma e autor permanecem os da avaliação.
 - Edição exige professor autor ainda responsável pela turma e as regras da `020`. ADMIN e aluno recebem `403`; avaliação inexistente ou de outro professor recebem a mesma resposta `404`. Turma inativa ou avaliação fora de rascunho retornam `409`. Não repete o PATCH automaticamente: em falha, consultar os valores atuais antes de reenviar.
 - Professor cria apenas nas próprias turmas. ADMIN consulta, mas não cria. Aluno é recusado mesmo matriculado. Consulta de turma inexistente ou fora do acesso retorna a mesma resposta `404`; turma acessível sem rascunhos retorna lista vazia. Turma inativa permite consulta, mas criação retorna `409`.
@@ -581,7 +582,7 @@ Referências: [textarea no React](https://react.dev/reference/react-dom/componen
 
 ## Publicação no banco e na API (023)
 
-Com a `022` já aplicada, executar somente `database/023_publicar_avaliacao.sql` no Supabase de testes. Preserva os rascunhos e eventos existentes. Sem nova dependência ou mudança de tela.
+Com a `022` já aplicada, executar somente `database/023_publicar_avaliacao.sql` no Supabase de testes. Preserva os rascunhos e eventos existentes. A interface de publicação usa essa mesma query, sem outra migração ou dependência.
 
 `POST /api/publicar-avaliacao` → Auth/perfil → `public.publicar_avaliacao` → função privada → atualização e auditoria na mesma transação. A rota separa a publicação da edição de campos e está registrada no servidor local.
 
@@ -593,7 +594,7 @@ Com a `022` já aplicada, executar somente `database/023_publicar_avaliacao.sql`
 - Define `PUBLICADA` e `publicada_em` e registra `AVALIACAO_PUBLICADA`. Falha na auditoria desfaz a publicação. Repetição retorna `409`, sem novo evento ou alteração de data.
 - Sucesso: `200` com `{ avaliacao: { id, situacao: 'PUBLICADA', publicada_em } }`. A API valida a confirmação e não devolve questões ou gabarito. Todas as respostas usam `Cache-Control: no-store`.
 - Erros: `400` para entrada ou preparação inválida; `401` para sessão inválida; `403` para perfil/MFA; `404` para avaliação fora do acesso; `409` para turma inativa ou situação diferente de rascunho; `415` para conteúdo não JSON; `503` para indisponibilidade ou confirmação inválida.
-- A avaliação publicada deixa a lista de rascunhos. Neste bloco, conferir a situação pelo banco ou pela consulta autenticada abaixo. A interface de publicadas ainda não existe; as políticas de questões/alternativas continuam restritas aos rascunhos e não liberam acesso ao aluno.
+- A avaliação publicada deixa a lista de rascunhos e pode ser consultada em **Turmas → Publicadas**. As políticas de questões/alternativas continuam restritas aos rascunhos e não liberam acesso ao aluno.
 
 ### Teste manual da publicação
 
@@ -627,3 +628,28 @@ console.log(consultaPublicacao);
 Testes: `node --test tests/publicar-avaliacao.test.ts`. Cobrem Prova/Atividade, campos, gabarito, janela, perfis, MFA/sessões, bloqueio de estrutura, rollback, resposta perdida e reaplicação. Usam PGlite com SQL e RLS reais, Auth/HTTP simulados. Não acessam Supabase remoto nem simulam concorrência entre conexões PostgreSQL independentes.
 
 Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [RPC](https://supabase.com/docs/reference/javascript/rpc), [bloqueios de linha no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html).
+
+## Publicação e consulta na interface
+
+**Turmas → Rascunhos → Publicar**. Disponível ao professor nas turmas ativas; confirmação com o título e aviso do bloqueio da estrutura. ADMIN e professor de turma inativa apenas consultam. A autorização definitiva permanece na API e no banco.
+
+- `PublicarAvaliacaoForm` → `publicarAvaliacao` em `src/services/avaliacoes.ts` → `POST /api/publicar-avaliacao`. Cancelar devolve o foco ao botão sem enviar. Confirmar bloqueia os controles durante o envio, sem repetir o POST.
+- Sucesso remove a linha do rascunho, foca a confirmação e atualiza a lista de publicadas caso esteja aberta. Erro mantém o rascunho e foca a mensagem. Fechar ou trocar de turma ignora respostas atrasadas; o servidor pode concluir uma publicação já enviada. Conferir **Publicadas** e atualizar **Rascunhos** antes de reenviar após falha de conexão.
+- **Turmas → Publicadas** abre `PublicadasTurmaPanel` → `listarAvaliacoesPublicadas` → `GET /api/avaliacoes?turma_id=UUID&situacao=PUBLICADA`. Exibe título, tipo, início, fim, duração e data da publicação, em horário local. Professor responsável e ADMIN podem consultar, inclusive em turma inativa.
+- Consulta ao abrir e ao clicar em **Atualizar publicadas**. Estados de carregamento, erro e vazio; erros não mostram a lista anterior. Tabela com rolagem horizontal e foco por teclado no celular. Até 50 publicações mais recentes, sem paginação neste bloco.
+- Listagem somente dos dados da avaliação: sem edição, questões, gabarito ou execução pelo aluno. A consulta não gera evento de auditoria.
+- `avaliacaoValidation.ts` compartilha os contratos da confirmação e da avaliação publicada entre API e navegador. As duas listagens reaproveitam autenticação, requisição e validação da coleção, mantendo o contrato de rascunhos. Sem nova dependência.
+
+Teste manual com a `023` aplicada e `npm run dev:full`:
+
+1. Como professor, abrir **Turmas → Rascunhos → Publicar** em uma avaliação completa. Cancelar: nenhuma publicação. Abrir novamente e confirmar.
+2. Conferir a mensagem, a saída da lista de rascunhos e a entrada em **Publicadas**. Fechar e reabrir a lista; conferir `PUBLICADA`, `publicada_em` e `AVALIACAO_PUBLICADA` no banco.
+3. Publicar um rascunho sem questões ou sem gabarito: mensagem de erro, sem remover a linha. Corrigir o rascunho antes de publicar novamente.
+4. Entrar como ADMIN: consultar **Publicadas**, sem botão Publicar nos rascunhos. Conferir também uma turma inativa.
+5. Testar título longo, teclado e celular, incluindo a rolagem da tabela. Com **Publicadas** já aberta, publicar outra avaliação e conferir a atualização automática.
+
+Testes de interface: `npm run test:ui -- tests/publicacao-avaliacao.test.tsx tests/rascunhos-turma.test.tsx`. Auth/HTTP simulados. Cobrem confirmação, cancelamento, foco, envio duplicado, perfis, consulta, erros, respostas atrasadas e contratos inválidos.
+
+Teste da consulta no banco/API: `node --test tests/publicar-avaliacao.test.ts`. Inclui filtro por situação, isolamento, turma inativa, lista vazia, limite/ordenação, ausência de gabarito e falhas do serviço.
+
+Referências: [consultas e limpeza de efeitos no React](https://react.dev/reference/react/useEffect#fetching-data-with-effects), [ordenação no Supabase](https://supabase.com/docs/reference/javascript/order).

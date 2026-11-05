@@ -57,7 +57,8 @@ test.each(['Professor', 'Administrador'] as const)('%s abre e fecha rascunhos co
     method: 'GET', headers: { Authorization: 'Bearer sessao-simulada' }, cache: 'no-store',
   })
   expect(button.getAttribute('aria-expanded')).toBe('true')
-  expect(screen.queryByRole('button', { name: /Publicar|Excluir/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: /Excluir/ })).toBeNull()
+  expect(screen.queryAllByRole('button', { name: /^Publicar / })).toHaveLength(profile === 'Professor' ? 2 : 0)
   expect(screen.queryAllByRole('button', { name: /^Editar / })).toHaveLength(profile === 'Professor' ? 2 : 0)
   fireEvent.click(button)
   expect(screen.queryByRole('table')).toBeNull()

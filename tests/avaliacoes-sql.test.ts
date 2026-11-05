@@ -543,7 +543,7 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
       assert.equal((await handler.fetch(request('POST', payload))).status, 400)
     }
     for (const query of ['', '?turma_id=', '?turma_id=123', `?turma_id=${turmaId}&turma_id=${turmaId}`,
-      `?turma_id=${turmaId}&professor_id=${colleague}`, `?turma_id=${turmaId}&situacao=PUBLICADA`]) {
+      `?turma_id=${turmaId}&professor_id=${colleague}`, `?turma_id=${turmaId}&situacao=CANCELADA`]) {
       assert.equal((await handler.fetch(request('GET', null, query))).status, 400)
     }
     const noToken = new Request(`http://localhost/api/avaliacoes?turma_id=${turmaId}`)

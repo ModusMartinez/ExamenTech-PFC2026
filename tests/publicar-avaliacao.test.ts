@@ -5,6 +5,7 @@ import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 import { prepararBancoAvaliacoes } from './helpers/bancoAvaliacoes.ts'
 import { createPublicarAvaliacaoHandler } from '../api/publicar-avaliacao.ts'
+import { createAvaliacoesHandler } from '../api/avaliacoes.ts'
 
 test('publicação: API integrada às regras e à auditoria no PostgreSQL local', async (t) => {
   const db = new PGlite()
@@ -52,6 +53,18 @@ test('publicação: API integrada às regras e à auditoria no PostgreSQL local'
           assert.equal(url.searchParams.get('id'), `eq.${id}`)
           return Response.json((await queryAs(id, 'SELECT perfil,situacao FROM public.perfis WHERE id=$1', [id], aal)).rows)
         }
+        if (url.pathname === '/rest/v1/turmas') {
+          return Response.json((await queryAs(id, 'SELECT id FROM public.turmas WHERE id=$1', [url.searchParams.get('id')?.slice(3)], aal)).rows)
+        }
+        if (url.pathname === '/rest/v1/avaliacoes') {
+          const publicadas = url.searchParams.get('situacao') === 'eq.PUBLICADA'
+          assert.equal(url.searchParams.get('select'), 'id,turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,criado_em' + (publicadas ? ',publicada_em' : ''))
+          assert.equal(url.searchParams.get('order'), `${publicadas ? 'publicada_em' : 'criado_em'}.desc,id.desc`)
+          assert.equal(url.searchParams.get('limit'), '50')
+          return Response.json((await queryAs(id, `SELECT * FROM public.avaliacoes WHERE turma_id=$1 AND situacao=$2
+            ORDER BY ${publicadas ? 'publicada_em' : 'criado_em'} DESC,id DESC LIMIT 50`,
+          [url.searchParams.get('turma_id')?.slice(3), url.searchParams.get('situacao')?.slice(3)], aal)).rows)
+        }
         assert.equal(url.pathname, '/rest/v1/rpc/publicar_avaliacao')
         assert.equal(req.method, 'POST')
         const params: Record<string, unknown> = await req.json()
@@ -62,7 +75,7 @@ test('publicação: API integrada às regras e à auditoria no PostgreSQL local'
         return Response.json({ code: error instanceof Error && 'code' in error ? error.code : 'XX000', message: 'Detalhe interno' }, { status: 400 })
       }
     })
-    return { transport, handler: createPublicarAvaliacaoHandler(env, transport) }
+    return { transport, handler: createPublicarAvaliacaoHandler(env, transport), listagem: createAvaliacoesHandler(env, transport) }
   }
 
   await t.test('migração preserva rascunhos; publica prova mista e atividade dissertativa uma única vez', async () => {
@@ -270,6 +283,76 @@ test('publicação: API integrada às regras e à auditoria no PostgreSQL local'
         ? Promise.resolve(Response.json(value, { status })) : transport(input, init))
       assert.equal((await handler.fetch(request(body))).status, expected)
     }
+  })
+
+  function consultar(situacao = 'PUBLICADA', turma = turmaId) {
+    return new Request(`http://localhost/api/avaliacoes?turma_id=${turma}&situacao=${situacao}`, { headers: { Authorization: 'Bearer test-session' } })
+  }
+
+  await t.test('professor e admin consultam publicadas por turma; mantém isolamento e filtro de rascunhos', async () => {
+    const logged = await events()
+    const expected = (await db.query("SELECT id FROM public.avaliacoes WHERE turma_id=$1 AND situacao='PUBLICADA' ORDER BY publicada_em DESC,id DESC LIMIT 50", [turmaId])).rows
+    assert.ok(expected.length > 1)
+    for (const user of [professor, admin]) {
+      const response = await apiFor(user).listagem.fetch(consultar())
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('cache-control'), 'no-store')
+      const result = await response.json()
+      assert.equal(result.limite, 50)
+      assert.deepEqual(result.avaliacoes.map((item: { id: string }) => ({ id: item.id })), expected)
+      for (const item of result.avaliacoes) {
+        assert.equal(item.situacao, 'PUBLICADA')
+        assert.ok(Number.isFinite(Date.parse(item.publicada_em)))
+        assert.equal('questoes' in item || 'correta' in item, false)
+      }
+      const drafts = await apiFor(user).listagem.fetch(consultar('RASCUNHO'))
+      assert.equal(drafts.status, 200)
+      assert.ok((await drafts.json()).avaliacoes.every((item: { situacao: string }) => item.situacao === 'RASCUNHO'))
+    }
+    assert.equal((await apiFor(aluno).listagem.fetch(consultar())).status, 403)
+    assert.equal((await apiFor(professor, 'aal1').listagem.fetch(consultar())).status, 403)
+    assert.equal((await apiFor(colega).listagem.fetch(consultar())).status, 404)
+    assert.equal((await apiFor(professor).listagem.fetch(consultar('PUBLICADA', randomUUID()))).status, 404)
+    await db.query("UPDATE public.turmas SET situacao='INATIVA' WHERE id=$1", [turmaId])
+    assert.equal((await apiFor(professor).listagem.fetch(consultar())).status, 200)
+    await db.query("UPDATE public.turmas SET situacao='ATIVA' WHERE id=$1", [turmaId])
+    assert.deepEqual(await events(), logged)
+  })
+
+  await t.test('consulta vazia, limite de 50 e ordenação por publicação com desempate por ID', async () => {
+    const turma = (await queryAs<{ id: string }>(professor, "INSERT INTO public.turmas(nome) VALUES ('Turma da listagem') RETURNING id")).rows[0].id
+    const { listagem } = apiFor(professor)
+    assert.deepEqual(await (await listagem.fetch(consultar('PUBLICADA', turma))).json(), { avaliacoes: [], limite: 50 })
+    // Massa local de listagem, com criação em ordem inversa à publicação.
+    await db.query(`INSERT INTO public.avaliacoes(turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,publicada_em,criado_em)
+      SELECT $1,$2,'Publicada '||n,'PROVA',now(),now()+interval '2 hours',60,'PUBLICADA',
+        now()+make_interval(mins => n / 2),now()-make_interval(mins => n) FROM generate_series(1,51) AS n`, [turma, professor])
+    const response = await listagem.fetch(consultar('PUBLICADA', turma))
+    assert.equal(response.status, 200)
+    const result = await response.json()
+    assert.equal(result.avaliacoes.length, 50)
+    const expected = (await db.query("SELECT id FROM public.avaliacoes WHERE turma_id=$1 ORDER BY publicada_em DESC,id DESC LIMIT 50", [turma])).rows
+    assert.deepEqual(result.avaliacoes.map((item: { id: string }) => ({ id: item.id })), expected)
+  })
+
+  await t.test('consulta recusa filtros e respostas inválidas sem tratar falha como lista vazia', async () => {
+    const { listagem, transport } = apiFor(professor)
+    for (const query of [`turma_id=${turmaId}&situacao=CANCELADA`, `turma_id=${turmaId}&situacao=`,
+      `turma_id=${turmaId}&situacao=PUBLICADA&situacao=RASCUNHO`, `turma_id=${turmaId}&turma_id=${turmaId}`,
+      `turma_id=${turmaId}&situacao=PUBLICADA&aluno_id=${aluno}`]) {
+      assert.equal((await listagem.fetch(new Request(`http://localhost/api/avaliacoes?${query}`, { headers: { Authorization: 'Bearer test-session' } }))).status, 400)
+    }
+    assert.equal(transport.mock.callCount(), 0)
+    const sample = (await (await listagem.fetch(consultar())).json()).avaliacoes[0]
+    for (const value of [null, [sample, sample], Array(51).fill(sample), [{ ...sample, turma_id: randomUUID() }],
+      [{ ...sample, situacao: 'RASCUNHO' }], [{ ...sample, publicada_em: null }], [{ ...sample, publicada_em: 'inválida' }]]) {
+      const handler = createAvaliacoesHandler(env, (input, init) => new Request(input, init).url.includes('/rest/v1/avaliacoes')
+        ? Promise.resolve(Response.json(value)) : transport(input, init))
+      assert.equal((await handler.fetch(consultar())).status, 503)
+    }
+    const unavailable = createAvaliacoesHandler(env, (input, init) => new Request(input, init).url.includes('/rest/v1/avaliacoes')
+      ? Promise.resolve(Response.json({ message: 'Falha interna' }, { status: 500 })) : transport(input, init))
+    assert.equal((await unavailable.fetch(consultar())).status, 503)
   })
 
   await t.test('reaplicação preserva publicações e eventos; funções seguem restritas', async () => {

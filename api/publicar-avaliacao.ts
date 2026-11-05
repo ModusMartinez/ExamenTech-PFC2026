@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { conferirAcessoAvaliacoes } from '../server/acessoAvaliacoes.ts'
-import { lerDataComFuso, UUID_PATTERN } from '../src/services/avaliacaoValidation.ts'
+import { lerPublicacaoAvaliacao, UUID_PATTERN } from '../src/services/avaliacaoValidation.ts'
 
 function jsonResponse(status: number, body: object, headers?: HeadersInit) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
@@ -52,14 +52,11 @@ export function createPublicarAvaliacaoHandler(
           if (error.code === '23514') return jsonResponse(400, { message: 'Confira a janela, a duração e as questões. Cada questão objetiva precisa de 2 a 5 alternativas distintas e uma correta.' })
           return jsonResponse(503, { message: notConfirmed })
         }
-        const result: unknown = data
-        if (!result || typeof result !== 'object' || Array.isArray(result) ||
-            !('id' in result) || result.id !== avaliacaoId || !('situacao' in result) || result.situacao !== 'PUBLICADA') {
+        const avaliacao = lerPublicacaoAvaliacao(data)
+        if (!avaliacao || avaliacao.id !== avaliacaoId) {
           return jsonResponse(503, { message: notConfirmed })
         }
-        const publicadaEm = lerDataComFuso('publicada_em' in result ? result.publicada_em : null)
-        if (!publicadaEm) return jsonResponse(503, { message: notConfirmed })
-        return jsonResponse(200, { avaliacao: { id: avaliacaoId, situacao: 'PUBLICADA', publicada_em: publicadaEm } })
+        return jsonResponse(200, { avaliacao })
       } catch {
         // A transação pode ter concluído antes da falha de conexão; não repetir o POST.
         return jsonResponse(503, { message: notConfirmed })

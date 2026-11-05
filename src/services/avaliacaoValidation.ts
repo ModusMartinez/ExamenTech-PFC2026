@@ -18,6 +18,9 @@ export type AvaliacaoRascunho = DadosAvaliacaoRascunho & {
   criado_em: string
 }
 
+export type PublicacaoAvaliacao = { id: string; situacao: 'PUBLICADA'; publicada_em: string }
+export type AvaliacaoPublicada = Omit<AvaliacaoRascunho, 'situacao'> & PublicacaoAvaliacao
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -61,15 +64,32 @@ export function lerDadosEdicaoAvaliacao(value: unknown): DadosEdicaoAvaliacaoRas
   return campos ? { avaliacao_id: value.avaliacao_id.toLowerCase(), ...campos } : null
 }
 
-export function lerAvaliacaoRascunho(value: unknown): AvaliacaoRascunho | null {
+function lerRegistroAvaliacao(value: unknown) {
   const dados = lerDadosAvaliacao(value)
   if (!dados || !isRecord(value) || typeof value.id !== 'string' || !UUID_PATTERN.test(value.id) ||
-      typeof value.professor_id !== 'string' || !UUID_PATTERN.test(value.professor_id) ||
-      value.situacao !== 'RASCUNHO') return null
+      typeof value.professor_id !== 'string' || !UUID_PATTERN.test(value.professor_id)) return null
   const criadoEm = lerDataComFuso(value.criado_em)
   if (!criadoEm) return null
   return {
     ...dados, id: value.id.toLowerCase(), professor_id: value.professor_id.toLowerCase(),
-    situacao: 'RASCUNHO', criado_em: criadoEm,
+    criado_em: criadoEm,
   }
+}
+
+export function lerAvaliacaoRascunho(value: unknown): AvaliacaoRascunho | null {
+  if (!isRecord(value) || value.situacao !== 'RASCUNHO') return null
+  const registro = lerRegistroAvaliacao(value)
+  return registro ? { ...registro, situacao: 'RASCUNHO' } : null
+}
+
+export function lerPublicacaoAvaliacao(value: unknown): PublicacaoAvaliacao | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || !UUID_PATTERN.test(value.id) || value.situacao !== 'PUBLICADA') return null
+  const publicadaEm = lerDataComFuso(value.publicada_em)
+  return publicadaEm ? { id: value.id.toLowerCase(), situacao: 'PUBLICADA', publicada_em: publicadaEm } : null
+}
+
+export function lerAvaliacaoPublicada(value: unknown): AvaliacaoPublicada | null {
+  const registro = lerRegistroAvaliacao(value)
+  const publicacao = lerPublicacaoAvaliacao(value)
+  return registro && publicacao ? { ...registro, ...publicacao } : null
 }

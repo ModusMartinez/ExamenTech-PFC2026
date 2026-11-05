@@ -5,6 +5,7 @@ import type { Turma } from '../services/turmas'
 import { validateTurmaName } from '../services/turmaValidation'
 import { AlunosTurmaPanel } from './AlunosTurmaPanel'
 import { RascunhosTurmaPanel } from './RascunhosTurmaPanel'
+import { PublicadasTurmaPanel } from './PublicadasTurmaPanel'
 import '../styles/turmas.css'
 
 export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor' }) {
@@ -18,6 +19,8 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
   const [refresh, setRefresh] = useState(0)
   const [turmaAberta, setTurmaAberta] = useState<string | null>(null)
   const [rascunhosAbertos, setRascunhosAbertos] = useState<string | null>(null)
+  const [publicadasAbertas, setPublicadasAbertas] = useState<string | null>(null)
+  const [atualizacaoPublicadas, setAtualizacaoPublicadas] = useState(0)
   const submitting = useRef(false)
   const isTeacher = profile === 'Professor'
 
@@ -117,10 +120,16 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
                 <button type="button" className="turmas-refresh" aria-expanded={rascunhosAbertos === turma.id}
                   aria-controls={`rascunhos-${turma.id}`} aria-label={`Rascunhos de ${turma.nome}`}
                   onClick={() => setRascunhosAbertos((current) => current === turma.id ? null : turma.id)}>Rascunhos</button>
+                <button type="button" className="turmas-refresh" aria-expanded={publicadasAbertas === turma.id}
+                  aria-controls={`publicadas-${turma.id}`} aria-label={`Publicadas de ${turma.nome}`}
+                  onClick={() => setPublicadasAbertas((current) => current === turma.id ? null : turma.id)}>Publicadas</button>
               </div>
               {turmaAberta === turma.id && <AlunosTurmaPanel key={turma.id} turmaId={turma.id} turmaNome={turma.nome} />}
               {rascunhosAbertos === turma.id && <RascunhosTurmaPanel key={`rascunhos-${turma.id}`} turmaId={turma.id} turmaNome={turma.nome}
-                podeEditar={isTeacher && turma.situacao === 'ATIVA'} />}
+                podeEditar={isTeacher && turma.situacao === 'ATIVA'}
+                onPublicada={() => setAtualizacaoPublicadas((current) => current + 1)} />}
+              {publicadasAbertas === turma.id && <PublicadasTurmaPanel key={`publicadas-${turma.id}`} turmaId={turma.id}
+                turmaNome={turma.nome} atualizacao={atualizacaoPublicadas} />}
             </li>
           ))}
         </ul>

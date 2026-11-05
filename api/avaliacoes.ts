@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { conferirAcessoAvaliacoes } from '../server/acessoAvaliacoes.ts'
-import { lerAvaliacaoRascunho, lerDadosAvaliacao, lerDadosEdicaoAvaliacao, UUID_PATTERN } from '../src/services/avaliacaoValidation.ts'
-import type { AvaliacaoRascunho, DadosAvaliacaoRascunho, DadosEdicaoAvaliacaoRascunho } from '../src/services/avaliacaoValidation.ts'
+import { lerAvaliacaoPublicada, lerAvaliacaoRascunho, lerDadosAvaliacao, lerDadosEdicaoAvaliacao, UUID_PATTERN } from '../src/services/avaliacaoValidation.ts'
+import type { AvaliacaoPublicada, AvaliacaoRascunho, DadosAvaliacaoRascunho, DadosEdicaoAvaliacaoRascunho } from '../src/services/avaliacaoValidation.ts'
 
 const EDITABLE_FIELDS = ['titulo', 'tipo', 'inicio_em', 'fim_em', 'duracao_minutos']
 const AVALIACAO_FIELDS = 'id,turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,criado_em'
@@ -25,9 +25,12 @@ export function createAvaliacoesHandler(
       const editing = request.method === 'PATCH'
       const query = new URL(request.url).searchParams
       const turmaId = query.get('turma_id')?.toLowerCase()
+      const situacao = query.get('situacao') ?? 'RASCUNHO'
       if (!listing ? query.size > 0 :
-        query.size !== 1 || !turmaId || !UUID_PATTERN.test(turmaId)) {
-        return jsonResponse(400, { message: listing ? 'Informe somente o ID válido da turma.' : 'Não envie parâmetros na URL de gravação.' })
+        !turmaId || !UUID_PATTERN.test(turmaId) || query.getAll('turma_id').length !== 1 ||
+        query.getAll('situacao').length > 1 || !['RASCUNHO', 'PUBLICADA'].includes(situacao) ||
+        [...query.keys()].some((key) => key !== 'turma_id' && key !== 'situacao')) {
+        return jsonResponse(400, { message: listing ? 'Informe o ID válido da turma e a situação RASCUNHO ou PUBLICADA.' : 'Não envie parâmetros na URL de gravação.' })
       }
       let dados: DadosAvaliacaoRascunho | DadosEdicaoAvaliacaoRascunho | null = null
       if (!listing) {
@@ -97,17 +100,18 @@ export function createAvaliacoesHandler(
         if (turma.error) return jsonResponse(503, { message: 'Não foi possível conferir a turma.' })
         if (!turma.data) return jsonResponse(404, { message: 'Turma não encontrada ou acesso não autorizado.' })
         if (turma.data.id !== turmaId) return jsonResponse(503, { message: 'Não foi possível conferir a turma.' })
-        const { data, error } = await supabase.from('avaliacoes').select(AVALIACAO_FIELDS)
-          .eq('turma_id', turmaId).eq('situacao', 'RASCUNHO')
-          .order('criado_em', { ascending: false }).order('id', { ascending: false }).limit(50)
+        const publicadas = situacao === 'PUBLICADA'
+        const { data, error } = await supabase.from('avaliacoes').select(AVALIACAO_FIELDS + (publicadas ? ',publicada_em' : ''))
+          .eq('turma_id', turmaId).eq('situacao', situacao)
+          .order(publicadas ? 'publicada_em' : 'criado_em', { ascending: false }).order('id', { ascending: false }).limit(50)
         if (error || !Array.isArray(data) || data.length > 50) {
-          return jsonResponse(503, { message: 'Não foi possível consultar os rascunhos.' })
+          return jsonResponse(503, { message: 'Não foi possível consultar as avaliações.' })
         }
-        const avaliacoes: AvaliacaoRascunho[] = []
+        const avaliacoes: (AvaliacaoRascunho | AvaliacaoPublicada)[] = []
         for (const item of data) {
-          const avaliacao = lerAvaliacaoRascunho(item)
+          const avaliacao = publicadas ? lerAvaliacaoPublicada(item) : lerAvaliacaoRascunho(item)
           if (!avaliacao || avaliacao.turma_id !== turmaId || avaliacoes.some((other) => other.id === avaliacao.id)) {
-            return jsonResponse(503, { message: 'Resposta inválida na consulta de rascunhos.' })
+            return jsonResponse(503, { message: 'Resposta inválida na consulta de avaliações.' })
           }
           avaliacoes.push(avaliacao)
         }
