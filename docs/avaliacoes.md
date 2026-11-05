@@ -1,15 +1,15 @@
-# Avaliações em rascunho (019–022)
+# Avaliações (019–023)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação, cancelamento e tentativas ficam para os próximos blocos. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco e API; botão e listagem das publicadas ficam para o próximo bloco. Cancelamento e tentativas ainda pendentes. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
 `public.avaliacoes`: ID, turma, professor autor, título, tipo, início, fim, duração em minutos, situação e data de criação. A avaliação pertence à turma inteira; não há seleção individual de alunos.
 
-- Tipos: `PROVA` e `ATIVIDADE`. Situação permitida neste bloco: somente `RASCUNHO`.
+- Tipos: `PROVA` e `ATIVIDADE`. Criação em `RASCUNHO`; a função da `023` altera para `PUBLICADA` e preenche `publicada_em`.
 - Título obrigatório, de 3 a 150 caracteres, sem espaços nas pontas. A função remove esses espaços; texto só de espaços em branco é recusado.
 - Datas obrigatórias, finitas e com fim posterior ao início, em `TIMESTAMPTZ`. Enviar fuso explícito, por exemplo `2026-11-09T19:00:00-03:00`.
-- Duração obrigatória, em minutos inteiros positivos. A janela não precisa estar no futuro para salvar um rascunho. Validação para publicação e cálculo do tempo da tentativa ficam para os próximos blocos.
+- Duração obrigatória, em minutos inteiros positivos. A janela não precisa estar no futuro para salvar um rascunho. A publicação exige janela ainda não encerrada e duração que caiba no intervalo. Cálculo do tempo da tentativa fica para outro bloco.
 - Autor, ID, situação e data de criação vêm do banco. Organização é obtida pela turma, sem coluna duplicada na avaliação.
 - Títulos iguais são permitidos: duas chamadas válidas criam dois rascunhos distintos. Ainda não há idempotência de criação por requisição.
 
@@ -32,7 +32,7 @@ SELECT public.criar_avaliacao_rascunho(
 - Criação: somente professor responsável, com perfil e organização ativos, sessão existente pertencente ao usuário e MFA `aal2`. Turma precisa estar ativa e na organização atual do professor.
 - Consulta: professor autor que continua responsável pela turma, ou ADMIN. Reutiliza RLS de turmas e `pode_consultar_turma`, incluindo sessão/MFA e situação da conta. Aluno não lê rascunhos, mesmo matriculado.
 - Turma inativa continua consultável, mas não recebe novos rascunhos nem permite edição. Professor perde a consulta se a organização ficar inativa ou se deixar de ser responsável; ADMIN mantém a consulta institucional.
-- Escrita direta, exclusão e publicação estão bloqueadas para os perfis da aplicação, inclusive ADMIN. Criação e edição usam funções controladas. As funções públicas usam `SECURITY INVOKER`; as privadas usam `SECURITY DEFINER`, `search_path` vazio e permissões explícitas.
+- Escrita direta e exclusão estão bloqueadas para os perfis da aplicação, inclusive ADMIN. Criação, edição e publicação usam funções controladas. As funções públicas usam `SECURITY INVOKER`; as privadas usam `SECURITY DEFINER`, `search_path` vazio e permissões explícitas.
 - `ON DELETE RESTRICT` impede apagar turma/autor referenciados. Não modifica matrículas, contas ou avaliações já existentes ao aplicar a query.
 - `AVALIACAO_CRIADA` registra autor, ID da avaliação e horário, sem título, código ou dados dos alunos. Falha na auditoria desfaz o rascunho. O filtro/rótulo desse evento na tela de auditoria ainda está pendente.
 - Locks mantêm perfil, organização, sessão e turma estáveis durante a criação. Não há alteração nos helpers ou nas permissões dos módulos anteriores.
@@ -198,7 +198,7 @@ Com a `021` aplicada, executar somente `database/022_alternativas_rascunho.sql` 
 
 `public.criar_alternativas_rascunho(p_questao_id, p_alternativas, p_ordem_correta)` → função privada → `alternativas` e `eventos_seguranca`. Retorna a lista gravada, ordenada por `ordem`. Não recebe usuário, IDs das alternativas ou datas.
 
-A edição do conjunto, o filtro/rótulo do evento na tela de auditoria e a validação para publicação ficam para outros blocos. Quando houver tentativa do aluno, o servidor deverá fornecer apenas os campos permitidos, sem `correta`; não liberar a tabela inteira nem ocultar o gabarito somente na interface.
+A edição do conjunto e o filtro/rótulo do evento na tela de auditoria ficam para outros blocos. A validação para publicação está na `023`. Quando houver tentativa do aluno, o servidor deverá fornecer apenas os campos permitidos, sem `correta`; não liberar a tabela inteira nem ocultar o gabarito somente na interface.
 
 Erros: `42501` para perfil/sessão/MFA; `P0002` para questão inexistente ou fora do acesso; `55000` para turma inativa, avaliação fora de rascunho ou questão já preenchida; `23514` para tipo da questão, lista, textos ou posição correta inválidos.
 
@@ -578,3 +578,52 @@ Teste manual, com a `022` aplicada e `npm run dev:full`:
 Teste automatizado: `npm run test:ui -- tests/alternativas-form.test.tsx tests/questoes-avaliacao.test.tsx tests/rascunhos-turma.test.tsx`. Cobre cadastro, consulta, gabarito, limites, cancelamento, perfis, foco, erros, envio duplicado e respostas atrasadas/inválidas. Auth/HTTP simulados, sem gravação no Supabase remoto.
 
 Referências: [textarea no React](https://react.dev/reference/react-dom/components/textarea), [select no React](https://react.dev/reference/react-dom/components/select), [atualização de arrays no estado](https://react.dev/learn/updating-arrays-in-state).
+
+## Publicação no banco e na API (023)
+
+Com a `022` já aplicada, executar somente `database/023_publicar_avaliacao.sql` no Supabase de testes. Preserva os rascunhos e eventos existentes. Sem nova dependência ou mudança de tela.
+
+`POST /api/publicar-avaliacao` → Auth/perfil → `public.publicar_avaliacao` → função privada → atualização e auditoria na mesma transação. A rota separa a publicação da edição de campos e está registrada no servidor local.
+
+- Recebe somente `{ "avaliacao_id": "UUID" }`, com `Content-Type: application/json` e `Authorization: Bearer <access_token>`. Reutiliza a chave pública e a sessão do usuário, sem chave administrativa.
+- Somente professor autor ainda responsável pela turma, com perfil, organização e turma ativos, sessão própria e MFA `aal2`. ADMIN consulta, mas não publica. Avaliação inexistente e avaliação alheia retornam a mesma resposta.
+- Exige `RASCUNHO`, ao menos uma questão e, para cada objetiva, de 2 a 5 alternativas distintas e sequenciais, com exatamente uma correta. Dissertativas não podem ter alternativas. Campos e pontuações positivas continuam protegidos pelas constraints existentes.
+- A janela deve terminar depois do horário atual do banco, e a duração deve caber no intervalo entre início e fim. Pode publicar antes do início ou com a janela em andamento. São decisões desta implementação; o tempo efetivo da tentativa será limitado pelo encerramento da janela no bloco de execução.
+- Usa o mesmo bloqueio da avaliação que a edição e a criação de questões/alternativas. Depois de publicar, essas funções recusam alterações. Escrita direta permanece sem permissão.
+- Define `PUBLICADA` e `publicada_em` e registra `AVALIACAO_PUBLICADA`. Falha na auditoria desfaz a publicação. Repetição retorna `409`, sem novo evento ou alteração de data.
+- Sucesso: `200` com `{ avaliacao: { id, situacao: 'PUBLICADA', publicada_em } }`. A API valida a confirmação e não devolve questões ou gabarito. Todas as respostas usam `Cache-Control: no-store`.
+- Erros: `400` para entrada ou preparação inválida; `401` para sessão inválida; `403` para perfil/MFA; `404` para avaliação fora do acesso; `409` para turma inativa ou situação diferente de rascunho; `415` para conteúdo não JSON; `503` para indisponibilidade ou confirmação inválida.
+- A avaliação publicada deixa a lista de rascunhos. Neste bloco, conferir a situação pelo banco ou pela consulta autenticada abaixo. A interface de publicadas ainda não existe; as políticas de questões/alternativas continuam restritas aos rascunhos e não liberam acesso ao aluno.
+
+### Teste manual da publicação
+
+1. Aplicar a `023`, executar `npm run dev:full` e entrar como professor com MFA.
+2. Criar uma avaliação de teste da própria turma ativa, com fim no futuro, duração que caiba na janela, questões e gabarito completo. Copiar o ID de `avaliacoes`.
+3. No console do navegador local, substituir o ID e executar. Essa chamada publica a avaliação e bloqueia sua edição:
+
+```js
+const { supabase: supabasePublicacao } = await import('/src/lib/supabase.ts');
+const { data: sessaoPublicacao } = await supabasePublicacao.auth.getSession();
+const avaliacaoPublicacaoId = 'COLE_O_ID_DA_AVALIACAO';
+const respostaPublicacao = await fetch('/api/publicar-avaliacao', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${sessaoPublicacao.session.access_token}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ avaliacao_id: avaliacaoPublicacaoId }),
+});
+console.log(respostaPublicacao.status, await respostaPublicacao.json());
+const consultaPublicacao = await supabasePublicacao.from('avaliacoes')
+  .select('id,situacao,publicada_em').eq('id', avaliacaoPublicacaoId).single();
+console.log(consultaPublicacao);
+```
+
+4. Esperado: `200`, situação `PUBLICADA`, data preenchida e um evento `AVALIACAO_PUBLICADA` em `eventos_seguranca`, com `recurso_id` igual ao ID da avaliação. Atualizar **Rascunhos**: ela sai dessa lista.
+5. Repetir o envio: `409`, sem novo evento. Tentar editar a avaliação pela API anterior ou cadastrar uma questão nela: `409`. A estrutura permanece igual.
+6. Em outros rascunhos, testar ausência de questões, objetiva sem alternativas, janela encerrada e duração maior que a janela: `400`, permanecendo em `RASCUNHO` e sem evento de publicação.
+7. Ao trocar de conta, recarregar e obter a nova sessão. ADMIN/aluno recebem `403`; outro professor recebe `404`. Sem MFA, publicação recusada. Em falha de conexão, consultar a situação antes de reenviar: não há repetição automática.
+
+Testes: `node --test tests/publicar-avaliacao.test.ts`. Cobrem Prova/Atividade, campos, gabarito, janela, perfis, MFA/sessões, bloqueio de estrutura, rollback, resposta perdida e reaplicação. Usam PGlite com SQL e RLS reais, Auth/HTTP simulados. Não acessam Supabase remoto nem simulam concorrência entre conexões PostgreSQL independentes.
+
+Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [RPC](https://supabase.com/docs/reference/javascript/rpc), [bloqueios de linha no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html).

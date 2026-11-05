@@ -6,6 +6,7 @@ import matriculasHandler from '../api/matriculas.ts'
 import avaliacoesHandler from '../api/avaliacoes.ts'
 import questoesHandler from '../api/questoes.ts'
 import alternativasHandler from '../api/alternativas.ts'
+import publicarAvaliacaoHandler from '../api/publicar-avaliacao.ts'
 
 const MAX_BODY_SIZE = 16 * 1024
 const port = Number(process.env.API_PORT ?? 8787)
@@ -52,7 +53,8 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
       : url.pathname === '/api/matriculas' ? matriculasHandler
       : url.pathname === '/api/avaliacoes' ? avaliacoesHandler
       : url.pathname === '/api/questoes' ? questoesHandler
-      : url.pathname === '/api/alternativas' ? alternativasHandler : null
+      : url.pathname === '/api/alternativas' ? alternativasHandler
+      : url.pathname === '/api/publicar-avaliacao' ? publicarAvaliacaoHandler : null
 
     if (!handler) {
       outgoingResponse.writeHead(404, { 'Content-Type': 'application/json' })
