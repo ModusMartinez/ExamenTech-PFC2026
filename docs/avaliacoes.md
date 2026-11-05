@@ -653,3 +653,39 @@ Testes de interface: `npm run test:ui -- tests/publicacao-avaliacao.test.tsx tes
 Teste da consulta no banco/API: `node --test tests/publicar-avaliacao.test.ts`. Inclui filtro por situação, isolamento, turma inativa, lista vazia, limite/ordenação, ausência de gabarito e falhas do serviço.
 
 Referências: [consultas e limpeza de efeitos no React](https://react.dev/reference/react/useEffect#fetching-data-with-effects), [ordenação no Supabase](https://supabase.com/docs/reference/javascript/order).
+
+## Consulta de avaliações pelo aluno (024)
+
+Aplicar `database/024_listar_minhas_avaliacoes.sql` depois da `023`. Este bloco contém banco e API; a lista no painel do aluno será feita no próximo bloco.
+
+`GET /api/minhas-avaliacoes` → Supabase Auth → `public.listar_minhas_avaliacoes` → função privada. A API usa a chave pública e a sessão do aluno. Sem parâmetros: o banco identifica o aluno pela sessão.
+
+- Exige aluno e organização ativos, sessão própria existente e MFA `aal2`.
+- Retorna somente avaliações `PUBLICADA` de turmas ativas da mesma organização, com matrícula `ATIVA` do aluno. Sem matrícula válida, retorna lista vazia.
+- Até 50 registros, por publicação mais recente e ID decrescente no desempate. Inclui avaliações futuras, em andamento e encerradas; aparecer na lista não autoriza iniciar uma tentativa.
+- Resposta `{ avaliacoes: [...] }`: ID, turma, nome da turma, título, tipo, início, fim, duração, situação e data da publicação. Não retorna questões, alternativas, gabarito ou dados de outros alunos.
+- Mantém as políticas existentes das tabelas. A função confere os vínculos antes de retornar os campos permitidos; consulta direta de avaliações, questões e alternativas continua bloqueada para o aluno.
+- Erros: `400` para parâmetros, `401` para sessão inválida, `403` para perfil/MFA, `405` para método diferente de GET e `503` para falha de serviço ou resposta inválida. Respostas sem cache. A consulta não altera dados nem cria evento de auditoria.
+
+Teste manual com `npm run dev:full`:
+
+1. Aplicar a `024` no Supabase de testes. Como professor, publicar uma avaliação em turma ativa com aluno matriculado.
+2. Entrar como esse aluno, concluir o MFA e executar no console do navegador local:
+
+```js
+const { supabase: supabaseAluno } = await import('/src/lib/supabase.ts');
+const { data: sessaoAluno } = await supabaseAluno.auth.getSession();
+const respostaAluno = await fetch('/api/minhas-avaliacoes', {
+  headers: { Authorization: `Bearer ${sessaoAluno.session.access_token}` },
+  cache: 'no-store',
+});
+console.log(respostaAluno.status, await respostaAluno.json());
+```
+
+3. Esperado: `200` com a avaliação, sem questões/gabarito. Rascunhos e avaliações de turmas sem matrícula ativa não aparecem.
+4. Como professor/admin, inativar a matrícula de teste pela tela. Entrar novamente como aluno e repetir a consulta: a avaliação dessa turma não aparece.
+5. A mesma chamada como professor ou ADMIN retorna `403`; sem autenticação, `401`.
+
+Teste automatizado: `node --test tests/minhas-avaliacoes.test.ts`. Executa permissões e RLS no PostgreSQL local (PGlite), com Auth/HTTP simulados. Cobre isolamento entre alunos e organizações, matrículas/sessões, MFA, dados restritos, ordenação/limite e falhas. Não acessa o Supabase remoto.
+
+Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [verificação de usuário](https://supabase.com/docs/reference/javascript/auth-getuser), [chamada RPC](https://supabase.com/docs/reference/javascript/rpc).

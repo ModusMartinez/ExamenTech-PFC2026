@@ -20,6 +20,7 @@ export type AvaliacaoRascunho = DadosAvaliacaoRascunho & {
 
 export type PublicacaoAvaliacao = { id: string; situacao: 'PUBLICADA'; publicada_em: string }
 export type AvaliacaoPublicada = Omit<AvaliacaoRascunho, 'situacao'> & PublicacaoAvaliacao
+export type AvaliacaoAluno = DadosAvaliacaoRascunho & PublicacaoAvaliacao & { turma_nome: string }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -92,4 +93,19 @@ export function lerAvaliacaoPublicada(value: unknown): AvaliacaoPublicada | null
   const registro = lerRegistroAvaliacao(value)
   const publicacao = lerPublicacaoAvaliacao(value)
   return registro && publicacao ? { ...registro, ...publicacao } : null
+}
+
+export function lerMinhasAvaliacoes(value: unknown): AvaliacaoAluno[] | null {
+  if (!Array.isArray(value) || value.length > 50) return null
+  const avaliacoes: AvaliacaoAluno[] = []
+  const ids = new Set<string>()
+  for (const item of value) {
+    const dados = lerDadosAvaliacao(item)
+    const publicacao = lerPublicacaoAvaliacao(item)
+    if (!dados || !publicacao || !isRecord(item) || typeof item.turma_nome !== 'string' ||
+        item.turma_nome.trim().length === 0 || [...item.turma_nome].length > 100 || ids.has(publicacao.id)) return null
+    ids.add(publicacao.id)
+    avaliacoes.push({ ...dados, ...publicacao, turma_nome: item.turma_nome })
+  }
+  return avaliacoes
 }
