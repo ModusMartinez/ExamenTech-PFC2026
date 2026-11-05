@@ -1,6 +1,6 @@
 # Avaliações em rascunho (019–022)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito estão somente no banco. Publicação, cancelamento e tentativas ficam para os próximos blocos. Não representa os RF12–RF16 completos.
+RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação, cancelamento e tentativas ficam para os próximos blocos. Não representa os RF12–RF16 completos.
 
 ## Dados e regras
 
@@ -235,7 +235,7 @@ console.log(consultaAlternativas);
 ```
 
 5. Repetir o cadastro nessa questão: erro, sem outro evento ou alteração. Para testar texto vazio, alternativas repetidas ou posição correta `0`, usar outra questão objetiva ainda sem alternativas. Nenhuma alternativa deve ser gravada nessas tentativas.
-6. Recarregar a página ao trocar de conta. Com o mesmo ID, ADMIN consulta mas não cadastra; aluno e outro professor recebem lista vazia na consulta e erro no cadastro. Não há tela de alternativas neste bloco.
+6. Recarregar a página ao trocar de conta. Com o mesmo ID, ADMIN consulta mas não cadastra; aluno e outro professor recebem lista vazia na consulta SQL e erro no cadastro. Na interface, abrir **Turmas → Rascunhos → Questões → Alternativas**.
 
 Teste automatizado: `node --test tests/avaliacoes-sql.test.ts`. Cobre limites, gabarito, ordem, perfis, MFA/sessões, organização/turma, autoria, estados fora de rascunho, escrita direta, rollback e reaplicação. PGlite e Auth simulado, sem acesso ao Supabase remoto ou teste de concorrência entre conexões reais.
 
@@ -243,7 +243,7 @@ Referências: [funções e permissões no Supabase](https://supabase.com/docs/gu
 
 ## API de criação e consulta de questões
 
-Requer a `021` já aplicada; nenhuma query nova neste bloco. Rota `api/questoes.ts`, registrada no servidor local e disponível como função da Vercel. API de alternativas/gabarito e edição de questões ficam para outros blocos.
+Requer a `021` já aplicada; nenhuma query nova neste bloco. Rota `api/questoes.ts`, registrada no servidor local e disponível como função da Vercel. Alternativas/gabarito usam a rota própria descrita abaixo; edição de questões fica para outro bloco.
 
 - `POST /api/questoes`: recebe somente `avaliacao_id`, `tipo`, `enunciado` e `pontuacao`. Chama `criar_questao_rascunho` e retorna `201` com `{ questao }`. ID, ordem e data de criação vêm do banco; o evento `QUESTAO_CRIADA` é gravado pela mesma função SQL.
 - `GET /api/questoes?avaliacao_id=UUID`: retorna `200` com `{ questoes, limite: 50 }`, nas primeiras 50 posições da avaliação. Sem paginação neste bloco. Avaliação acessível sem questões retorna lista vazia; inexistente, fora do acesso ou fora de rascunho retorna `404`.
@@ -465,7 +465,7 @@ Teste automatizado: `npm run test:ui -- tests/nova-avaliacao.test.tsx tests/rasc
 - Erro de campo recebe foco e mensagem associada. Durante o envio, campos e cancelamento ficam bloqueados; um segundo envio simultâneo é ignorado. Edição da avaliação e criação de questão não ficam abertas ao mesmo tempo.
 - Sucesso exige `201` e resposta válida correspondente aos dados enviados. Fecha o formulário e foca a confirmação com o número da questão e o título da avaliação. Erros mantêm os campos e focam a mensagem. Cancelar descarta os valores locais e devolve o foco ao botão da avaliação.
 - Fechar ou trocar de turma ignora respostas atrasadas na tela. Uma gravação já enviada pode concluir no servidor. Em falha de conexão/resposta, conferir em **Questões** na avaliação antes de reenviar; não há repetição automática.
-- Este formulário cria somente a questão. O cadastro das alternativas/gabarito fica para os próximos blocos. Questão objetiva permanece em rascunho sem alternativas até o cadastro delas.
+- Este formulário cria somente a questão. Para cadastrar alternativas e gabarito, abrir **Questões → Alternativas**. A questão objetiva permanece em rascunho sem alternativas até o cadastro delas.
 
 Teste manual, com a `021` aplicada e `npm run dev:full`:
 
@@ -488,7 +488,7 @@ Referências: [textarea no React](https://react.dev/reference/react-dom/componen
 - Lista ordenada com número, tipo, pontuação e enunciado completo. Preserva quebras de linha e apresenta o conteúdo como texto, sem interpretar HTML.
 - Consulta ao abrir e ao clicar em **Atualizar questões**. Uma avaliação aberta por vez; respostas atrasadas são ignoradas ao fechar ou trocar de avaliação/turma.
 - Estados de carregamento, erro e lista vazia. Falhas não exibem os registros da consulta anterior nem são tratadas como lista vazia.
-- As primeiras 50 questões são exibidas em ordem de cadastro, conforme o limite atual da API. Sem paginação, alternativas ou gabarito nesta tela.
+- As primeiras 50 questões são exibidas em ordem de cadastro, conforme o limite atual da API. Sem paginação. Questões objetivas apresentam o botão **Alternativas** para cadastro ou consulta do gabarito.
 - Abrir criação/edição fecha a lista. Depois de salvar, reabrir **Questões** busca os dados atualizados.
 
 Teste manual com `npm run dev:full`:
@@ -501,3 +501,80 @@ Teste manual com `npm run dev:full`:
 Teste automatizado: `npm run test:ui -- tests/questoes-avaliacao.test.tsx tests/rascunhos-turma.test.tsx tests/nova-questao.test.tsx`. Auth/HTTP simulados. Cobre navegação, perfis, atualização, estados, respostas atrasadas e validação do contrato da API.
 
 Referências: [listas no React](https://react.dev/learn/rendering-lists), [consultas e limpeza de efeitos](https://react.dev/reference/react/useEffect#fetching-data-with-effects).
+
+## API de alternativas e gabarito
+
+Requer a `022` já aplicada. Nenhuma query nova. `api/alternativas.ts` está registrada em `scripts/api-dev.ts`, seguindo o formato das funções da Vercel.
+
+- `POST /api/alternativas`: recebe somente `questao_id`, `alternativas` (lista de textos) e `ordem_correta` (posição de 1 a 5). Retorna `201` com `{ alternativas }`.
+- `GET /api/alternativas?questao_id=UUID`: retorna `200` com `{ alternativas }`, ordenadas de 1 a 5. Questão objetiva acessível sem alternativas retorna lista vazia. Questão inexistente, alheia ou fora de rascunho retorna `404`; dissertativa acessível retorna `400`.
+- Cada alternativa contém `id`, `questao_id`, `texto`, `ordem`, `correta` e `criado_em`. Exatamente uma tem `correta: true`. Campo restrito ao professor responsável e ADMIN; aluno não acessa esta rota.
+- Autenticação: `Authorization: Bearer <access_token>`. Reutiliza `conferirAcessoAvaliacoes`, chave pública e JWT do usuário. RLS e função SQL mantêm as regras de autoria, organização, sessão e MFA.
+- Cadastro: professor autor, turma ativa, avaliação em rascunho e questão objetiva ainda sem alternativas. De 2 a 5 textos distintos, com 1 a 2.000 caracteres Unicode após remover espaços nas extremidades. `ordem_correta` deve ser inteiro e apontar para um item da lista. Não aceita campos extras, texto vazio ou caractere nulo.
+- Fluxo de gravação: validação → Auth/perfil → `criar_alternativas_rascunho` da `022` → alternativas e `ALTERNATIVAS_CRIADAS` na mesma transação. Repetição retorna `409`, sem sobrescrever. Nenhum reenvio automático de cadastro.
+- Respostas sem cache. JSON/entrada inválida: `400`; sessão inválida: `401`; perfil/MFA sem permissão: `403`; recurso fora do acesso: `404`; conflito de estado: `409`; tipo de conteúdo incorreto: `415`; serviço ou resposta inválida: `503`.
+- A resposta do banco é validada antes de confirmar: questão correta, IDs únicos, ordem sequencial, textos válidos e exatamente uma correta. No POST, o conjunto também deve corresponder ao enviado. Uma falha após a gravação exige consulta antes de reenviar.
+
+### Teste manual da API
+
+1. Executar `npm run dev:full` e entrar como professor com MFA.
+2. Copiar da tabela `questoes` o ID de uma questão objetiva da própria turma ativa, em rascunho e ainda sem alternativas.
+3. No console do navegador local, substituir o ID e executar. O POST cria registros no Supabase configurado:
+
+```js
+const { supabase: supabaseApiAlt } = await import('/src/lib/supabase.ts');
+const { data: authApiAlt } = await supabaseApiAlt.auth.getSession();
+const questaoApiAlt = 'COLE_O_ID_DA_QUESTAO';
+const headersApiAlt = {
+  Authorization: `Bearer ${authApiAlt.session.access_token}`,
+  'Content-Type': 'application/json',
+};
+const cadastroApiAlt = await fetch('/api/alternativas', {
+  method: 'POST',
+  headers: headersApiAlt,
+  body: JSON.stringify({
+    questao_id: questaoApiAlt,
+    alternativas: ['Testar uma função isolada', 'Testar a comunicação entre componentes', 'Alterar dados em produção'],
+    ordem_correta: 2,
+  }),
+});
+console.log(cadastroApiAlt.status, await cadastroApiAlt.json());
+const consultaApiAlt = await fetch(`/api/alternativas?questao_id=${questaoApiAlt}`, {
+  headers: headersApiAlt, cache: 'no-store',
+});
+console.log(consultaApiAlt.status, await consultaApiAlt.json());
+```
+
+4. Esperado: POST `201`, GET `200`, três alternativas ordenadas e somente a segunda correta. Conferir `ALTERNATIVAS_CRIADAS` em `eventos_seguranca`, com `recurso_id` igual ao ID da questão.
+5. Repetir o POST: `409`, sem duplicar alternativas ou evento. Em outra questão, testar texto vazio/repetido ou posição correta `0`: `400`, sem gravação.
+6. Ao trocar de conta, recarregar a página e obter a nova sessão. ADMIN consulta e recebe `403` no cadastro; aluno recebe `403`; outro professor recebe `404`, sem gabarito.
+
+Teste automatizado: `node --test tests/alternativas-api.test.ts tests/questoes-api.test.ts`. A preparação do banco em `tests/helpers/bancoAvaliacoes.ts` é compartilhada pelos dois testes. Auth/HTTP são simulados; funções SQL, RLS, constraints e transações executam no PGlite. Inclui rollback quando a auditoria falha. Não acessa Supabase remoto nem testa concorrência entre conexões reais.
+
+Referências: [RPC no Supabase](https://supabase.com/docs/reference/javascript/rpc), [validação de usuário](https://supabase.com/docs/reference/javascript/auth-getuser), [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security).
+
+## Formulário e consulta de alternativas
+
+**Turmas → Rascunhos → Questões → Alternativas**, disponível nas questões objetivas. Professor autor pode cadastrar em turma ativa; ADMIN e professor de turma inativa apenas consultam. API e banco conferem as permissões a cada operação.
+
+`QuestoesAvaliacaoPanel` → `AlternativasQuestaoPanel` → `AlternativasForm` → `src/services/alternativas.ts` → `/api/alternativas` → regras da `022`. Sem nova query ou dependência.
+
+- Ao abrir, consulta as alternativas. Se não houver nenhuma e o professor puder cadastrar, apresenta o formulário com dois campos.
+- De 2 a 5 alternativas distintas, até 2.000 caracteres Unicode por texto. Adiciona ao final ou remove a última, mantendo pelo menos duas. Remover a alternativa marcada como correta exige selecionar outra.
+- O campo **Alternativa correta** define uma única resposta. `alternativaValidation.ts` compartilha a validação com o formulário, serviço e API.
+- Erro de campo recebe foco; falha da API mantém os valores e foca a mensagem. Durante o envio, campos e botões do formulário ficam bloqueados, sem repetição automática do POST.
+- Ao salvar, apresenta a lista em ordem A–E e marca a resposta correta. Alternativas existentes são somente consultadas neste bloco. Textos completos, com quebras de linha e sem interpretar HTML.
+- **Cancelar** descarta o preenchimento e devolve o foco ao botão da questão. Fechar ou trocar de questão/turma ignora respostas atrasadas na tela; uma gravação já enviada pode concluir no servidor. Em falha de conexão ou confirmação, fechar e reabrir **Alternativas** antes de reenviar.
+- Carregamento e falha de consulta não apresentam formulário nem lista antiga. **Atualizar alternativas** refaz a consulta e fica desabilitado durante o preenchimento.
+
+Teste manual, com a `022` aplicada e `npm run dev:full`:
+
+1. Entrar como professor com MFA e abrir uma questão objetiva sem alternativas da própria turma ativa.
+2. Preencher duas alternativas distintas, selecionar a correta e salvar. Conferir a lista, fechar e reabrir, verificando que não aparece outro formulário.
+3. Em outra questão, cadastrar cinco alternativas. Antes de salvar, testar campo vazio, texto repetido, mais de 2.000 caracteres e ausência de gabarito: erro sem gravação. Testar remoção da última alternativa e cancelamento.
+4. Conferir `ALTERNATIVAS_CRIADAS` em `eventos_seguranca`, com `recurso_id` igual ao ID da questão. Nenhuma query adicional é necessária para a interface.
+5. Como ADMIN e em turma inativa, conferir consulta sem cadastro. Questões dissertativas não apresentam **Alternativas**. Testar teclado, celular e texto longo.
+
+Teste automatizado: `npm run test:ui -- tests/alternativas-form.test.tsx tests/questoes-avaliacao.test.tsx tests/rascunhos-turma.test.tsx`. Cobre cadastro, consulta, gabarito, limites, cancelamento, perfis, foco, erros, envio duplicado e respostas atrasadas/inválidas. Auth/HTTP simulados, sem gravação no Supabase remoto.
+
+Referências: [textarea no React](https://react.dev/reference/react-dom/components/textarea), [select no React](https://react.dev/reference/react-dom/components/select), [atualização de arrays no estado](https://react.dev/learn/updating-arrays-in-state).

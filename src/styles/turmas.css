@@ -178,6 +178,12 @@
 .questoes-lista > li { display: block; padding: 16px 0; }
 .questoes-lista h6 { margin-bottom: 8px; }
 .questao-enunciado { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.alternativas-toggle { margin-top: 12px; }
+.alternativas-questao { margin-top: 20px; }
+.alternativas-questao h6:focus-visible { outline: 3px solid #69a4d3; outline-offset: 2px; }
+.alternativas-lista { margin: 0; padding-left: 24px; list-style: upper-alpha; }
+.alternativas-lista > li { display: list-item; padding: 12px 0; }
+.alternativa-gabarito { display: inline-block; margin-top: 8px; color: var(--dark-blue); font-size: 0.85rem; }
 
 @media (max-width: 500px) {
   .turma-form { padding: 18px; }

@@ -5,6 +5,7 @@ import turmasHandler from '../api/turmas.ts'
 import matriculasHandler from '../api/matriculas.ts'
 import avaliacoesHandler from '../api/avaliacoes.ts'
 import questoesHandler from '../api/questoes.ts'
+import alternativasHandler from '../api/alternativas.ts'
 
 const MAX_BODY_SIZE = 16 * 1024
 const port = Number(process.env.API_PORT ?? 8787)
@@ -50,7 +51,8 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
       : url.pathname === '/api/turmas' ? turmasHandler
       : url.pathname === '/api/matriculas' ? matriculasHandler
       : url.pathname === '/api/avaliacoes' ? avaliacoesHandler
-      : url.pathname === '/api/questoes' ? questoesHandler : null
+      : url.pathname === '/api/questoes' ? questoesHandler
+      : url.pathname === '/api/alternativas' ? alternativasHandler : null
 
     if (!handler) {
       outgoingResponse.writeHead(404, { 'Content-Type': 'application/json' })
@@ -60,8 +62,8 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
 
     const method = incomingRequest.method ?? 'GET'
     const hasBody = !['GET', 'HEAD'].includes(method)
-    // Até 10 mil caracteres no enunciado, inclusive Unicode escapado no JSON.
-    const maxBodySize = url.pathname === '/api/questoes' ? 128 * 1024 : MAX_BODY_SIZE
+    // Até 10 mil caracteres no enunciado ou no conjunto de alternativas, inclusive Unicode escapado.
+    const maxBodySize = ['/api/questoes', '/api/alternativas'].includes(url.pathname) ? 128 * 1024 : MAX_BODY_SIZE
     const body = hasBody ? await readBody(incomingRequest, maxBodySize) : undefined
 
     const request = new Request(url, {

@@ -103,7 +103,7 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar }: { turmaI
         </div>
       )}
       {!loading && !error && avaliacaoAberta && <QuestoesAvaliacaoPanel key={avaliacaoAberta.id}
-        avaliacaoId={avaliacaoAberta.id} avaliacaoTitulo={avaliacaoAberta.titulo} />}
+        avaliacaoId={avaliacaoAberta.id} avaliacaoTitulo={avaliacaoAberta.titulo} podeEditar={podeEditar} />}
       {podeEditar && editando && <EditarAvaliacaoForm key={editando.id} avaliacao={editando}
         onCancelar={() => setEditando(null)} onSalvo={(atualizada) => {
           setAvaliacoes((current) => current.map((item) => item.id === atualizada.id ? atualizada : item))
