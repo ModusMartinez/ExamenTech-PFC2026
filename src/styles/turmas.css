@@ -177,6 +177,17 @@
 .minhas-avaliacoes h1:focus-visible { outline: 3px solid #69a4d3; outline-offset: 2px; }
 .minhas-avaliacoes .turmas-note { margin: 0 0 16px; }
 .minhas-avaliacoes .alert { overflow-wrap: anywhere; }
+.minhas-avaliacoes table { min-width: 960px; }
+.minhas-avaliacoes th:first-child { width: 25%; }
+
+.tentativa-aluno h1 { margin: 0 0 12px; overflow-wrap: anywhere; }
+.tentativa-aluno h3 { margin: 0 0 8px; font-size: 1.05rem; color: var(--dark-blue); }
+.tentativa-aluno .turmas-note { margin: 0 0 12px; overflow-wrap: anywhere; }
+.tentativa-aluno .questoes-lista > li { border-bottom: 1px solid #dce5ee; }
+.tentativa-aluno .alternativas-lista { margin-top: 8px; }
+.tentativa-aluno .alert, .tentativa-prazo { overflow-wrap: anywhere; line-height: 1.5; }
+.tentativa-prazo { margin: 24px 0; font-weight: 600; color: var(--dark-blue); }
+.tentativa-aluno [tabindex="-1"]:focus-visible { outline: 3px solid #69a4d3; outline-offset: 2px; }
 
 .questoes-avaliacao { margin-top: 24px; }
 .questoes-avaliacao h5, .questoes-avaliacao h6 { margin: 0; color: var(--dark-blue); font-size: 1rem; }

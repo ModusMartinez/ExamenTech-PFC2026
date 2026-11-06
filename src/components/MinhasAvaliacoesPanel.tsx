@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { listarMinhasAvaliacoes } from '../services/avaliacoes'
 import type { AvaliacaoAluno } from '../services/avaliacaoValidation'
+import { TentativaAlunoPanel } from './TentativaAlunoPanel'
 import '../styles/turmas.css'
 
 export function MinhasAvaliacoesPanel() {
@@ -8,8 +9,9 @@ export function MinhasAvaliacoesPanel() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
+  const [selecionada, setSelecionada] = useState<AvaliacaoAluno | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
-  useEffect(() => { heading.current?.focus() }, [])
+  useEffect(() => { if (!selecionada) heading.current?.focus() }, [selecionada])
 
   useEffect(() => {
     let active = true
@@ -29,6 +31,8 @@ export function MinhasAvaliacoesPanel() {
     return () => { active = false }
   }, [refresh])
 
+  if (selecionada) return <TentativaAlunoPanel key={selecionada.id} avaliacao={selecionada} onCancelar={() => setSelecionada(null)} />
+
   return (
     <section className="turmas-panel minhas-avaliacoes" aria-labelledby="minhas-avaliacoes-title">
       <header className="turmas-list-heading">
@@ -44,11 +48,14 @@ export function MinhasAvaliacoesPanel() {
         <div className="rascunhos-tabela" role="region" aria-label="Tabela de minhas avaliações" tabIndex={0}>
           <table aria-label="Minhas avaliações">
             <thead><tr>
-              <th scope="col">Título</th><th scope="col">Turma</th><th scope="col">Tipo</th>
+              <th scope="col">Título</th><th scope="col" className="rascunhos-coluna-acoes">Ações</th>
+              <th scope="col">Turma</th><th scope="col">Tipo</th>
               <th scope="col">Início</th><th scope="col">Fim</th><th scope="col">Duração</th>
             </tr></thead>
             <tbody>{avaliacoes.map((avaliacao) => <tr key={avaliacao.id}>
               <th scope="row">{avaliacao.titulo}</th>
+              <td><button type="button" className="turmas-refresh" aria-label={`Iniciar ${avaliacao.titulo}`}
+                onClick={() => setSelecionada(avaliacao)}>Iniciar</button></td>
               <td>{avaliacao.turma_nome}</td>
               <td>{avaliacao.tipo === 'PROVA' ? 'Prova' : 'Atividade'}</td>
               {[avaliacao.inicio_em, avaliacao.fim_em].map((data) => <td key={data}><time dateTime={data}>

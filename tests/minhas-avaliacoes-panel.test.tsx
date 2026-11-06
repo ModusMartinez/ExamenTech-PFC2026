@@ -24,7 +24,7 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-test('consulta real do frontend apresenta os campos, foco e horários locais sem ações de execução', async () => {
+test('consulta real do frontend apresenta os campos, foco, horários locais e botão de início', async () => {
   render(<MinhasAvaliacoesPanel />)
   expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Minhas avaliações' }))
   const tabela = await screen.findByRole('table', { name: 'Minhas avaliações' })
@@ -40,7 +40,8 @@ test('consulta real do frontend apresenta os campos, foco e horários locais sem
   expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/minhas-avaliacoes', {
     method: 'GET', headers: { Authorization: 'Bearer sessao-simulada' }, cache: 'no-store',
   })
-  expect(screen.queryByRole('button', { name: /Iniciar|Responder|Editar|Publicar/ })).toBeNull()
+  expect(screen.getAllByRole('button', { name: /^Iniciar / })).toHaveLength(2)
+  expect(screen.queryByRole('button', { name: /Responder|Editar|Publicar/ })).toBeNull()
   expect(screen.queryByText('sessao-simulada')).toBeNull()
 })
 

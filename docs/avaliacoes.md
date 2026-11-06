@@ -1,6 +1,6 @@
 # Avaliações (019–027)
 
-RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta do conteúdo no banco/API, com ordem sorteada persistida e sem gabarito; tela de execução, respostas e cancelamento ainda pendentes. Não representa os RF12–RF19 completos.
+RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta no banco/API, confirmação no painel do aluno e exibição do conteúdo na ordem sorteada persistida, sem gabarito. Respostas, finalização e cancelamento ainda pendentes. Não representa os RF12–RF19 completos.
 
 ## Dados e regras
 
@@ -748,7 +748,7 @@ console.log(resultadoTentativa.data, resultadoTentativa.error);
 
 Teste automatizado: `node --test tests/tentativas-sql.test.ts`. Executa funções, constraints, RLS e rollback no PostgreSQL local (PGlite), com identidades fictícias. PGlite serializa transações; chamadas enfileiradas e unicidade são testadas, mas não conexões simultâneas reais do Supabase. Nenhuma consulta ou gravação remota é feita pelos testes.
 
-Pendentes neste fluxo: interface de início e de conteúdo da tentativa, respostas, encerramento, controle de saída/desconexão e captura inicial. A criação do registro ainda não representa uma prova executável; ultrapassar `limite_em` não altera a situação automaticamente neste bloco.
+Pendentes neste fluxo: respostas, encerramento, controle de saída/desconexão e captura inicial. A criação do registro ainda não representa uma prova executável; ultrapassar `limite_em` não altera a situação automaticamente neste bloco.
 
 Referências: [unicidade no PostgreSQL](https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-UNIQUE-CONSTRAINTS), [bloqueios de linhas](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS), [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions).
 
@@ -854,7 +854,7 @@ console.log(resultadoConteudo.data, resultadoConteudo.error);
 
 Testes: `node --test tests/conteudo-tentativa.test.ts tests/ordem-tentativa.test.ts tests/tentativas-sql.test.ts tests/iniciar-tentativa.test.ts`. PostgreSQL local via PGlite, sem acesso remoto. Cobrem retorno permitido, ordem persistida, isolamento, MFA/sessão, vínculos, horários, preservação dos registros e acesso direto bloqueado.
 
-**Situação dos RF17–RF19:** ainda parciais. Início e consulta têm banco e API; o sorteio fica salvo no banco. Faltam interface de realização e salvamento das respostas objetivas/dissertativas. A execução também precisará vincular a tentativa à sessão inicial e encerrar o acesso por saída/desconexão, conforme a ficha; esta consulta valida a sessão atual, mas não detecta esses eventos. Finalização e cancelamento serão tratados nos blocos próprios.
+**Situação dos RF17–RF19:** ainda parciais. Início e consulta têm banco e API; o sorteio fica salvo no banco. A interface já permite iniciar e visualizar as questões. Faltam os campos e o salvamento das respostas objetivas/dissertativas. A execução também precisará vincular a tentativa à sessão inicial e encerrar o acesso por saída/desconexão, conforme a ficha; esta consulta valida a sessão atual, mas não detecta esses eventos. Finalização e cancelamento serão tratados nos blocos próprios.
 
 Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [agregação com ordem no PostgreSQL](https://www.postgresql.org/docs/current/functions-aggregate.html), [construção explícita de JSON](https://www.postgresql.org/docs/current/functions-json.html).
 
@@ -889,3 +889,68 @@ console.log(respostaConteudo.status, await respostaConteudo.json());
 Testes: `node --test tests/conteudo-tentativa-api.test.ts tests/conteudo-tentativa.test.ts tests/iniciar-tentativa.test.ts`. Integração com SQL real no PGlite e Auth/HTTP simulados. Cobrem permissões, prazo, ordem salva, ausência de gabarito mesmo em retorno com campos extras, conteúdo inválido e falhas de serviço. Sem acesso ao Supabase remoto.
 
 Referências: [verificação da identidade no Supabase](https://supabase.com/docs/reference/javascript/auth-getuser), [chamada RPC](https://supabase.com/docs/reference/javascript/rpc).
+
+## Chamadas de tentativas no frontend
+
+`src/services/tentativas.ts` prepara a integração da tela com as duas APIs existentes. Sem nova query, dependência ou mudança visual neste bloco.
+
+- `iniciarTentativa(avaliacaoId)` obtém a sessão atual e envia somente `avaliacao_id` para `POST /api/iniciar-tentativa`. Confere status `201`, avaliação e aluno da confirmação. Falha de rede ou confirmação inválida informa que a tentativa pode ter sido criada, sem repetir o POST.
+- `consultarConteudoTentativa(tentativaId)` chama `GET /api/conteudo-tentativa`, sem cache. Confere status `200`, ID solicitado e conteúdo com os validadores existentes. Preserva a ordem e devolve apenas campos permitidos, sem gabarito.
+- IDs inválidos e sessão ausente/com erro impedem a chamada à API. Cada chamada obtém a sessão atual para usar o token renovado. Identidade, MFA, permissões e prazo continuam validados no servidor.
+- Erros HTTP preservam a mensagem da API. Falha de consulta não usa conteúdo anterior nem inicia outra tentativa. As funções são separadas para a tela manter a confirmação do início mesmo se a consulta seguinte falhar.
+
+Teste automatizado: `npm run test:ui -- tests/tentativas-service.test.tsx`. Usa os serviços reais do frontend e simula apenas sessão e HTTP. Cobre sucesso, identidade da confirmação, validação do conteúdo, token renovado, falhas de rede e ausência de repetição automática. Não acessa o Supabase remoto.
+
+Teste manual com as queries até `027` aplicadas e `npm run dev:full`:
+
+1. Entrar como aluno com MFA e matrícula ativa. Usar uma avaliação nova de teste, publicada e com janela em andamento. O início consome a tentativa única.
+2. No console do navegador, executar uma vez, substituindo o ID:
+
+```js
+const tentativasFrontend = await import('/src/services/tentativas.ts');
+const tentativaFrontend = await tentativasFrontend.iniciarTentativa('UUID_DA_AVALIACAO_DE_TESTE');
+console.log(tentativaFrontend);
+const conteudoFrontend = await tentativasFrontend.consultarConteudoTentativa(tentativaFrontend.id);
+console.log(conteudoFrontend);
+```
+
+3. Conferir o ID e prazo, os textos na ordem salva e a ausência de `correta`. Se já houver tentativa ativa com ordem salva, testar somente `consultarConteudoTentativa('UUID_DA_TENTATIVA')`.
+4. Repetir somente a consulta: mesmo conteúdo e prazo, sem novo evento. Uma falha de consulta não dispara outra chamada de início. Não repetir o início se a mensagem informar que a tentativa pode ter sido criada.
+
+O painel do aluno usa essas chamadas conforme a seção abaixo. RF17–RF19 continuam parciais, conforme as pendências registradas acima.
+
+Referência: [obtenção da sessão no navegador](https://supabase.com/docs/reference/javascript/auth-getsession).
+
+
+## Início e exibição das questões no painel do aluno
+
+`MinhasAvaliacoesPanel` → botão **Iniciar** → confirmação em `TentativaAlunoPanel` → `iniciarTentativa` → `consultarConteudoTentativa`.
+
+- A confirmação informa tentativa única, duração e encerramento. **Cancelar** recebe o foco inicial e volta à lista sem criar tentativa. Somente **Confirmar início** envia o POST.
+- Durante o início, os botões ficam desabilitados. Envios repetidos não duplicam o POST. Se o início falhar, a tela mostra o erro, sem nova chamada automática; uma falha de rede pode ocorrer depois da gravação.
+- Após a confirmação do servidor, a tela consulta o conteúdo pelo ID retornado. Confere avaliação, início e prazo com a confirmação. Exibe questões objetivas/dissertativas, pontuação, enunciados e alternativas na ordem salva, sem gabarito.
+- Falha de consulta permite **Tentar carregar questões**: repete somente o GET, com o mesmo ID e prazo. O conteúdo anterior não fica visível durante uma nova consulta. Respostas atrasadas de uma tela fechada são ignoradas.
+- O prazo exibido vem do servidor. Ao chegar ao prazo, o navegador oculta as questões e mostra **Prazo da tentativa encerrado**. Esse aviso depende do relógio local e não finaliza o registro no banco; a API continua responsável pela validação do prazo.
+- Este bloco permite apenas visualizar. A tela informa que respostas e envio ainda estão indisponíveis. Não há retomada após recarregar a página ou sair do painel. O bloqueio por sessão inicial e o encerramento por saída/desconexão ainda precisam ser implementados.
+- Estilos, confirmação em formulário e links legais seguem o painel existente. A tabela mantém rolagem horizontal; questões e alternativas ajustam os textos à largura da tela. Sem dependência ou query nova.
+
+Teste manual, com as queries até `027` aplicadas:
+
+1. Executar `npm run dev:full`. Entrar como aluno com MFA e matrícula ativa em uma turma com avaliação nova de teste, publicada e dentro da janela. O teste de início consome a tentativa única.
+2. Abrir **Minhas avaliações → Iniciar**. Cancelar e conferir que nenhuma tentativa foi criada.
+3. Abrir novamente e confirmar. Conferir questões, alternativas e prazo. Em `tentativas` e `eventos_seguranca`, deve existir somente um início para esse aluno/avaliação.
+4. Conferir a ordem com `tentativa_questoes` e `tentativa_alternativas`. A resposta da consulta na aba Network não deve conter `correta` ou gabarito.
+5. Para testar falha de consulta, bloquear somente `/api/conteudo-tentativa` no navegador antes de iniciar outra avaliação de teste. Após o erro, desbloquear e clicar em **Tentar carregar questões**. Não deve ocorrer outro POST de início.
+6. Conferir no celular, com título e enunciado longos, foco pelo teclado e links legais no rodapé. Em uma avaliação com janela curta, conferir o aviso de prazo encerrado.
+
+Testes automatizados:
+
+```bash
+npm run test:ui -- tests/minhas-avaliacoes-panel.test.tsx tests/tentativa-aluno.test.tsx tests/tentativas-service.test.tsx tests/app-cadastro.test.tsx
+npm run lint
+npm run build
+```
+
+Os testes usam serviços reais do frontend com sessão e HTTP simulados, sem acessar o Supabase remoto. Cobrem cancelamento, clique duplo, ordem salva, texto seguro, falhas de início/consulta, prazo e resposta atrasada. Prévia local conferida em desktop e celular com dados fictícios; validação integrada com o Supabase fica para o teste manual.
+
+Próximo bloco: banco e regras para salvar respostas da tentativa. RF17–RF19 ainda não estão concluídos.
