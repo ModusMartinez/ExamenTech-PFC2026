@@ -1,6 +1,6 @@
 # Avaliações (019–027)
 
-RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início no banco/API, ordem sorteada persistida e consulta do conteúdo no banco, sem gabarito; tela de execução, respostas e cancelamento ainda pendentes. Não representa os RF12–RF19 completos.
+RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta do conteúdo no banco/API, com ordem sorteada persistida e sem gabarito; tela de execução, respostas e cancelamento ainda pendentes. Não representa os RF12–RF19 completos.
 
 ## Dados e regras
 
@@ -748,7 +748,7 @@ console.log(resultadoTentativa.data, resultadoTentativa.error);
 
 Teste automatizado: `node --test tests/tentativas-sql.test.ts`. Executa funções, constraints, RLS e rollback no PostgreSQL local (PGlite), com identidades fictícias. PGlite serializa transações; chamadas enfileiradas e unicidade são testadas, mas não conexões simultâneas reais do Supabase. Nenhuma consulta ou gravação remota é feita pelos testes.
 
-Pendentes neste fluxo: interface de início, API e tela do conteúdo da tentativa, respostas, encerramento, controle de saída/desconexão e captura inicial. A criação do registro ainda não representa uma prova executável; ultrapassar `limite_em` não altera a situação automaticamente neste bloco.
+Pendentes neste fluxo: interface de início e de conteúdo da tentativa, respostas, encerramento, controle de saída/desconexão e captura inicial. A criação do registro ainda não representa uma prova executável; ultrapassar `limite_em` não altera a situação automaticamente neste bloco.
 
 Referências: [unicidade no PostgreSQL](https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-UNIQUE-CONSTRAINTS), [bloqueios de linhas](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS), [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions).
 
@@ -854,6 +854,38 @@ console.log(resultadoConteudo.data, resultadoConteudo.error);
 
 Testes: `node --test tests/conteudo-tentativa.test.ts tests/ordem-tentativa.test.ts tests/tentativas-sql.test.ts tests/iniciar-tentativa.test.ts`. PostgreSQL local via PGlite, sem acesso remoto. Cobrem retorno permitido, ordem persistida, isolamento, MFA/sessão, vínculos, horários, preservação dos registros e acesso direto bloqueado.
 
-**Situação dos RF17–RF19:** ainda parciais. A base de início, sorteio e consulta está pronta no banco. Faltam API de conteúdo, interface de realização e salvamento das respostas objetivas/dissertativas. A execução também precisará vincular a tentativa à sessão inicial e encerrar o acesso por saída/desconexão, conforme a ficha; esta consulta valida a sessão atual, mas não detecta esses eventos. Finalização e cancelamento serão tratados nos blocos próprios.
+**Situação dos RF17–RF19:** ainda parciais. Início e consulta têm banco e API; o sorteio fica salvo no banco. Faltam interface de realização e salvamento das respostas objetivas/dissertativas. A execução também precisará vincular a tentativa à sessão inicial e encerrar o acesso por saída/desconexão, conforme a ficha; esta consulta valida a sessão atual, mas não detecta esses eventos. Finalização e cancelamento serão tratados nos blocos próprios.
 
 Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [agregação com ordem no PostgreSQL](https://www.postgresql.org/docs/current/functions-aggregate.html), [construção explícita de JSON](https://www.postgresql.org/docs/current/functions-json.html).
+
+## API de consulta do conteúdo da tentativa
+
+`GET /api/conteudo-tentativa?tentativa_id=UUID` → verificação no Supabase Auth → `public.consultar_conteudo_tentativa` da `027` → validação e seleção dos campos da resposta. Rota registrada em `scripts/api-dev.ts`, seguindo o padrão de `/api/iniciar-tentativa`. Sem nova query ou dependência.
+
+- Recebe somente `tentativa_id` na URL e `Authorization: Bearer <access_token>`. Recusa ID inválido, parâmetros extras ou repetidos e métodos diferentes de GET.
+- Usa a chave pública e a sessão do usuário. A função no banco confere aluno dono, perfil, organização, matrícula, MFA, situação e prazo.
+- Sucesso: `200` com `{ conteudo }`, no formato descrito na seção `027`. `lerConteudoTentativa`, em `tentativaValidation.ts`, valida IDs, datas, textos, pontuações, tipos e posições consecutivas. Objetivas exigem de 2 a 5 alternativas; dissertativas, lista vazia. IDs repetidos e respostas de outra tentativa são recusados.
+- Monta objetos novos com os campos permitidos em todos os níveis. `correta`, gabarito e outros campos extras da RPC não são enviados ao navegador. Reaproveita as validações de texto, pontuação, UUID e data existentes.
+- Preserva a ordem recebida, sem novo sorteio ou limite de 50 questões. Resposta inválida retorna erro, sem conteúdo parcial. A consulta não inicia, reabre ou altera a tentativa.
+- Erros: `400` parâmetro inválido; `401` sessão inválida; `403` perfil/MFA/sessão sem permissão; `404` tentativa inexistente ou sem acesso; `409` tentativa indisponível para realização; `405` método incorreto; `503` falha de serviço ou resposta inválida.
+- Todas as respostas usam `Cache-Control: no-store`. Detalhes internos de erros não são expostos. Não há repetição automática da RPC.
+
+Teste manual com a `027` aplicada e `npm run dev:full`:
+
+1. Entrar como aluno com MFA e matrícula ativa. Usar uma tentativa com ordem salva e ainda dentro do prazo. No console do navegador, substituir o ID:
+
+```js
+const { supabase: supabaseApiConteudo } = await import('/src/lib/supabase.ts');
+const { data: sessaoConteudo } = await supabaseApiConteudo.auth.getSession();
+const respostaConteudo = await fetch('/api/conteudo-tentativa?tentativa_id=UUID_DA_TENTATIVA', {
+  headers: { Authorization: `Bearer ${sessaoConteudo.session.access_token}` },
+});
+console.log(respostaConteudo.status, await respostaConteudo.json());
+```
+
+2. Esperado: `200`, questões e alternativas na ordem salva, sem `correta`. Repetir: mesmos dados, sem mudar o prazo ou criar eventos. Conferir `Cache-Control: no-store` na aba Network.
+3. Como professor/admin, esperar `403`; com outro aluno, `404`; com prazo vencido, `409`. UUID inválido ou parâmetro extra deve retornar `400`.
+
+Testes: `node --test tests/conteudo-tentativa-api.test.ts tests/conteudo-tentativa.test.ts tests/iniciar-tentativa.test.ts`. Integração com SQL real no PGlite e Auth/HTTP simulados. Cobrem permissões, prazo, ordem salva, ausência de gabarito mesmo em retorno com campos extras, conteúdo inválido e falhas de serviço. Sem acesso ao Supabase remoto.
+
+Referências: [verificação da identidade no Supabase](https://supabase.com/docs/reference/javascript/auth-getuser), [chamada RPC](https://supabase.com/docs/reference/javascript/rpc).

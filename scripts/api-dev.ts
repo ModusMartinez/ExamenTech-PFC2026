@@ -9,6 +9,7 @@ import alternativasHandler from '../api/alternativas.ts'
 import publicarAvaliacaoHandler from '../api/publicar-avaliacao.ts'
 import minhasAvaliacoesHandler from '../api/minhas-avaliacoes.ts'
 import iniciarTentativaHandler from '../api/iniciar-tentativa.ts'
+import conteudoTentativaHandler from '../api/conteudo-tentativa.ts'
 
 const MAX_BODY_SIZE = 16 * 1024
 const port = Number(process.env.API_PORT ?? 8787)
@@ -56,6 +57,7 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
       : url.pathname === '/api/avaliacoes' ? avaliacoesHandler
       : url.pathname === '/api/minhas-avaliacoes' ? minhasAvaliacoesHandler
       : url.pathname === '/api/iniciar-tentativa' ? iniciarTentativaHandler
+      : url.pathname === '/api/conteudo-tentativa' ? conteudoTentativaHandler
       : url.pathname === '/api/questoes' ? questoesHandler
       : url.pathname === '/api/alternativas' ? alternativasHandler
       : url.pathname === '/api/publicar-avaliacao' ? publicarAvaliacaoHandler : null
