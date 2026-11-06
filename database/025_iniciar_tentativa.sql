@@ -48,7 +48,9 @@ ALTER TABLE public.eventos_seguranca ADD CONSTRAINT eventos_seguranca_evento_val
     'CADASTRO_REALIZADO', 'LOGIN_SUCESSO', 'LOGIN_NEGADO', 'TURMA_CRIADA',
     'MATRICULA_SOLICITADA', 'MATRICULA_APROVADA', 'MATRICULA_INATIVADA',
     'AVALIACAO_CRIADA', 'AVALIACAO_EDITADA', 'QUESTAO_CRIADA', 'ALTERNATIVAS_CRIADAS',
-    'AVALIACAO_PUBLICADA', 'TENTATIVA_INICIADA'
+    'AVALIACAO_PUBLICADA', 'TENTATIVA_INICIADA',
+    -- Eventos já encontrados no banco de testes; preservar o histórico não habilita retomada.
+    'RESPOSTA_SALVA', 'TENTATIVA_FINALIZADA', 'TENTATIVA_RETOMADA'
 ));
 
 CREATE OR REPLACE FUNCTION examentech_private.iniciar_tentativa(p_avaliacao_id UUID)

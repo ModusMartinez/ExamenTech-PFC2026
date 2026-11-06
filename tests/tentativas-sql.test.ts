@@ -9,6 +9,32 @@ type Tentativa = {
   id: string; avaliacao_id: string; aluno_id: string; situacao: string; iniciada_em: string; limite_em: string
 }
 
+test('025 preserva eventos de execução já existentes e continua recusando eventos desconhecidos', async (t) => {
+  const db = new PGlite()
+  t.after(() => db.close())
+  await prepararBancoAvaliacoes(db)
+  for (const file of ['023_publicar_avaliacao.sql', '024_listar_minhas_avaliacoes.sql']) {
+    await db.exec(await readFile(new URL(`../database/${file}`, import.meta.url), 'utf8'))
+  }
+  // Reproduz os três tipos de evento encontrados no Supabase antes de aplicar a 025.
+  await db.exec('ALTER TABLE public.eventos_seguranca DROP CONSTRAINT eventos_seguranca_evento_valido')
+  for (const evento of ['RESPOSTA_SALVA', 'TENTATIVA_FINALIZADA', 'TENTATIVA_RETOMADA']) {
+    await db.query(`INSERT INTO public.eventos_seguranca (solicitacao_id,evento,provedor,acao,sucesso)
+      VALUES (gen_random_uuid(),$1,'EXAMENTECH','registro_anterior',true)`, [evento])
+  }
+  const anteriores = (await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows
+  const migration = await readFile(new URL('../database/025_iniciar_tentativa.sql', import.meta.url), 'utf8')
+  for (let aplicacao = 0; aplicacao < 2; aplicacao++) {
+    await db.exec(migration)
+    assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, anteriores)
+  }
+  const constraint = await db.query<{ convalidated: boolean }>(`SELECT convalidated FROM pg_constraint
+    WHERE conrelid='public.eventos_seguranca'::regclass AND conname='eventos_seguranca_evento_valido'`)
+  assert.equal(constraint.rows[0].convalidated, true)
+  await assert.rejects(db.query(`INSERT INTO public.eventos_seguranca (solicitacao_id,evento,sucesso)
+    VALUES (gen_random_uuid(),'EVENTO_DESCONHECIDO',true)`), { code: '23514', constraint: 'eventos_seguranca_evento_valido' })
+})
+
 test('tentativas: início único, prazo, permissões e auditoria no PostgreSQL local', async (t) => {
   const db = new PGlite()
   t.after(() => db.close())

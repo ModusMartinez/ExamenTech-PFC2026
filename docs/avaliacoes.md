@@ -1,6 +1,6 @@
-# Avaliações (019–023)
+# Avaliações (019–027)
 
-RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Cancelamento e tentativas ainda pendentes. Não representa os RF12–RF16 completos.
+RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início no banco/API, ordem sorteada persistida e consulta do conteúdo no banco, sem gabarito; tela de execução, respostas e cancelamento ainda pendentes. Não representa os RF12–RF19 completos.
 
 ## Dados e regras
 
@@ -9,7 +9,7 @@ RF12–RF16 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de 
 - Tipos: `PROVA` e `ATIVIDADE`. Criação em `RASCUNHO`; a função da `023` altera para `PUBLICADA` e preenche `publicada_em`.
 - Título obrigatório, de 3 a 150 caracteres, sem espaços nas pontas. A função remove esses espaços; texto só de espaços em branco é recusado.
 - Datas obrigatórias, finitas e com fim posterior ao início, em `TIMESTAMPTZ`. Enviar fuso explícito, por exemplo `2026-11-09T19:00:00-03:00`.
-- Duração obrigatória, em minutos inteiros positivos. A janela não precisa estar no futuro para salvar um rascunho. A publicação exige janela ainda não encerrada e duração que caiba no intervalo. Cálculo do tempo da tentativa fica para outro bloco.
+- Duração obrigatória, em minutos inteiros positivos. A janela não precisa estar no futuro para salvar um rascunho. A publicação exige janela ainda não encerrada e duração que caiba no intervalo. A query `025` calcula o prazo da tentativa.
 - Autor, ID, situação e data de criação vêm do banco. Organização é obtida pela turma, sem coluna duplicada na avaliação.
 - Títulos iguais são permitidos: duas chamadas válidas criam dois rascunhos distintos. Ainda não há idempotência de criação por requisição.
 
@@ -130,7 +130,7 @@ Com a `020` já aplicada, executar somente `database/021_questoes_rascunho.sql` 
 | `ordem` | Inteiro positivo, automático e único dentro da avaliação |
 | `criado_em` | Data e hora geradas pelo banco |
 
-Os limites de texto e pontuação são escolhas desta implementação. A pontuação usa `NUMERIC` sem escala fixa para recusar casas excedentes antes de qualquer arredondamento. A ordem representa a posição no rascunho; o sorteio para a tentativa do aluno será outro bloco.
+Os limites de texto e pontuação são escolhas desta implementação. A pontuação usa `NUMERIC` sem escala fixa para recusar casas excedentes antes de qualquer arredondamento. A ordem representa a posição no rascunho; a query `026` salva separadamente o sorteio de cada tentativa.
 
 `public.criar_questao_rascunho` → função privada → `questoes` e `eventos_seguranca`, na mesma transação.
 
@@ -589,7 +589,7 @@ Com a `022` já aplicada, executar somente `database/023_publicar_avaliacao.sql`
 - Recebe somente `{ "avaliacao_id": "UUID" }`, com `Content-Type: application/json` e `Authorization: Bearer <access_token>`. Reutiliza a chave pública e a sessão do usuário, sem chave administrativa.
 - Somente professor autor ainda responsável pela turma, com perfil, organização e turma ativos, sessão própria e MFA `aal2`. ADMIN consulta, mas não publica. Avaliação inexistente e avaliação alheia retornam a mesma resposta.
 - Exige `RASCUNHO`, ao menos uma questão e, para cada objetiva, de 2 a 5 alternativas distintas e sequenciais, com exatamente uma correta. Dissertativas não podem ter alternativas. Campos e pontuações positivas continuam protegidos pelas constraints existentes.
-- A janela deve terminar depois do horário atual do banco, e a duração deve caber no intervalo entre início e fim. Pode publicar antes do início ou com a janela em andamento. São decisões desta implementação; o tempo efetivo da tentativa será limitado pelo encerramento da janela no bloco de execução.
+- A janela deve terminar depois do horário atual do banco, e a duração deve caber no intervalo entre início e fim. Pode publicar antes do início ou com a janela em andamento. São decisões desta implementação; a query `025` limita o prazo da tentativa ao encerramento da janela.
 - Usa o mesmo bloqueio da avaliação que a edição e a criação de questões/alternativas. Depois de publicar, essas funções recusam alterações. Escrita direta permanece sem permissão.
 - Define `PUBLICADA` e `publicada_em` e registra `AVALIACAO_PUBLICADA`. Falha na auditoria desfaz a publicação. Repetição retorna `409`, sem novo evento ou alteração de data.
 - Sucesso: `200` com `{ avaliacao: { id, situacao: 'PUBLICADA', publicada_em } }`. A API valida a confirmação e não devolve questões ou gabarito. Todas as respostas usam `Cache-Control: no-store`.
@@ -699,7 +699,7 @@ Referências: [funções e permissões no Supabase](https://supabase.com/docs/gu
 - Reutiliza o contrato `AvaliacaoAluno`, a validação `lerMinhasAvaliacoes` e os estilos de tabela existentes. Sem dependências ou query adicionais.
 - **Atualizar** consulta novamente e fica desabilitado durante o carregamento. Carregamento, vazio e erro têm mensagens próprias; falha oculta a lista anterior. Resposta atrasada de uma tela fechada é ignorada.
 - Foco no título ao abrir; tabela com cabeçalhos e rolagem horizontal acessível por teclado no celular. Textos longos quebram linha, sem interpretar HTML.
-- Este bloco permite consultar as avaliações. Início da tentativa, respostas e resultados continuam pendentes. Os links legais permanecem no rodapé.
+- Este bloco permite consultar as avaliações. O botão de início, respostas e resultados continuam pendentes. Os links legais permanecem no rodapé.
 
 Teste manual com a `024` aplicada e `npm run dev:full`:
 
@@ -715,7 +715,7 @@ Referência: [consultas e limpeza de efeitos no React](https://react.dev/referen
 
 ## Início da tentativa no banco (025)
 
-Aplicar `database/025_iniciar_tentativa.sql` depois da `024`. Cria `tentativas` e a função `public.iniciar_tentativa(p_avaliacao_id)`. Este bloco não tem nova API HTTP ou botão na interface.
+Aplicar `database/025_iniciar_tentativa.sql` depois da `024`. Cria `tentativas` e a função `public.iniciar_tentativa(p_avaliacao_id)`, usada pela API descrita abaixo. O botão na interface ainda está pendente.
 
 - Tabela: `id`, `avaliacao_id`, `aluno_id`, `situacao`, `iniciada_em` e `limite_em`. A situação inicial é `EM_ANDAMENTO`; finalização e cancelamento serão adicionados em etapas próprias.
 - Exige aluno e organização ativos, sessão própria existente, MFA `aal2`, turma da mesma organização e matrícula `ATIVA`.
@@ -724,10 +724,11 @@ Aplicar `database/025_iniciar_tentativa.sql` depois da `024`. Cria `tentativas` 
 - A constraint única `(avaliacao_id, aluno_id)` impede uma segunda tentativa. `INSERT ... ON CONFLICT DO NOTHING` resolve a disputa pela mesma combinação; repetição é recusada, sem retomar ou reiniciar a tentativa existente.
 - Bloqueios de leitura preservam perfil, organização, sessão, turma, matrícula e avaliação durante o início. A função não bloqueia exclusivamente a avaliação inteira para todos os alunos.
 - Registra `TENTATIVA_INICIADA`, com `usuario_id` do aluno e `recurso_id` da tentativa. Tentativa e evento são atômicos: falha na auditoria desfaz ambos.
+- A lista de eventos também aceita `RESPOSTA_SALVA`, `TENTATIVA_FINALIZADA` e `TENTATIVA_RETOMADA`, encontrados no histórico do Supabase. Isso preserva os registros ao aplicar a `025`; não implementa esses fluxos nem permite retomar tentativas. Se a versão anterior falhou com `eventos_seguranca_evento_valido`, copiar e executar a `025` atualizada inteira antes da `026`.
 - RLS permite consultar os metadados da própria tentativa, do professor autor ainda responsável pela turma e do ADMIN, reutilizando as regras de sessão/MFA dos helpers existentes. Matrícula inativa preserva essa consulta histórica, mas impede novo início. Mudança de organização retira o acesso do aluno ao histórico da organização anterior.
 - Escrita direta e exclusão pela aplicação continuam bloqueadas. Não libera questões, alternativas ou gabarito.
 
-Sucesso retorna os seis campos da tentativa. Erros SQL: `42501` para perfil/sessão/MFA, `P0002` para avaliação inexistente ou sem vínculo autorizado, `55000` para turma/situação/horário indisponível ou tentativa já existente. A API HTTP será o próximo bloco.
+Sucesso retorna os seis campos da tentativa. Erros SQL: `42501` para perfil/sessão/MFA, `P0002` para avaliação inexistente ou sem vínculo autorizado, `55000` para turma/situação/horário indisponível ou tentativa já existente.
 
 Teste manual no Supabase de testes:
 
@@ -747,6 +748,112 @@ console.log(resultadoTentativa.data, resultadoTentativa.error);
 
 Teste automatizado: `node --test tests/tentativas-sql.test.ts`. Executa funções, constraints, RLS e rollback no PostgreSQL local (PGlite), com identidades fictícias. PGlite serializa transações; chamadas enfileiradas e unicidade são testadas, mas não conexões simultâneas reais do Supabase. Nenhuma consulta ou gravação remota é feita pelos testes.
 
-Pendentes neste fluxo: API e interface de início, ordenação aleatória das questões/alternativas, respostas, encerramento, controle de saída/desconexão e captura inicial. A criação do registro ainda não representa uma prova executável; ultrapassar `limite_em` não altera a situação automaticamente neste bloco.
+Pendentes neste fluxo: interface de início, API e tela do conteúdo da tentativa, respostas, encerramento, controle de saída/desconexão e captura inicial. A criação do registro ainda não representa uma prova executável; ultrapassar `limite_em` não altera a situação automaticamente neste bloco.
 
 Referências: [unicidade no PostgreSQL](https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-UNIQUE-CONSTRAINTS), [bloqueios de linhas](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS), [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions).
+
+## API de início da tentativa
+
+`POST /api/iniciar-tentativa` → verificação no Supabase Auth → `public.iniciar_tentativa` → regras e auditoria da query `025`. Mantém o padrão de rotas separadas de `/api/publicar-avaliacao`, registrado também em `scripts/api-dev.ts`. Sem nova query ou dependência.
+
+- Recebe somente `{ "avaliacao_id": "UUID" }`, com `Content-Type: application/json` e `Authorization: Bearer <access_token>`. Recusa parâmetros na URL e campos extras, inclusive aluno, situação e horários.
+- Confirma a identidade com `auth.getUser` e chama a função com a chave pública e o token do usuário. As permissões de aluno, MFA e vínculo continuam no banco, inclusive para chamadas diretas à função.
+- Sucesso: `201` com `{ tentativa: { id, avaliacao_id, aluno_id, situacao, iniciada_em, limite_em } }`. A API confere o aluno autenticado, a avaliação solicitada, os IDs, a situação e os horários antes de confirmar. `tentativaValidation.ts` concentra o contrato e reaproveita a validação de UUID e datas do projeto. Campos extras não são devolvidos.
+- Erros: `400` entrada inválida; `401` sessão inválida; `403` perfil/MFA/sessão sem permissão; `404` avaliação inexistente ou sem acesso; `409` avaliação indisponível para início ou tentativa existente; `415` conteúdo diferente de JSON; `405` método diferente de POST; `503` falha de serviço ou confirmação inválida.
+- Respostas usam `Cache-Control: no-store`. Erros internos do Supabase não são enviados ao navegador. Falha ao confirmar o início pode ocorrer depois da gravação; a API não repete a RPC automaticamente nem apaga ou reinicia a tentativa.
+
+Teste manual com a `025` aplicada e `npm run dev:full`:
+
+1. Publicar uma avaliação de teste com janela em andamento. Entrar como aluno com MFA e matrícula ativa. A avaliação não pode ter tentativa anterior desse aluno.
+2. No console do navegador, substituir o UUID e executar uma vez. A chamada consome a tentativa única:
+
+```js
+const { supabase: supabaseInicio } = await import('/src/lib/supabase.ts');
+const { data: sessaoInicio } = await supabaseInicio.auth.getSession();
+const respostaInicio = await fetch('/api/iniciar-tentativa', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${sessaoInicio.session.access_token}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ avaliacao_id: 'UUID_DA_AVALIACAO_DE_TESTE' }),
+});
+console.log(respostaInicio.status, await respostaInicio.json());
+```
+
+3. Conferir `201`, os dados retornados, a linha em `tentativas` e `TENTATIVA_INICIADA` em `eventos_seguranca`. Repetir a chamada: `409`, sem novo registro ou alteração de prazo.
+4. Como professor/admin, esperar `403`. Sem matrícula ativa, `404`. Em outra avaliação futura ou encerrada, `409`. Campos extras no corpo devem retornar `400`.
+
+Testes: `node --test tests/iniciar-tentativa.test.ts tests/tentativas-sql.test.ts`. Auth/HTTP simulados e SQL executado no PGlite. Incluem a perda de resposta depois de gravar, sem repetição automática, sem acesso ao Supabase remoto.
+
+Referências: [verificação da identidade](https://supabase.com/docs/reference/javascript/auth-getuser), [chamada RPC](https://supabase.com/docs/reference/javascript/rpc).
+
+## Ordem sorteada da tentativa (026)
+
+Aplicar `database/026_ordem_tentativa.sql` depois da `025`. Atende a parte de sorteio dos RF17–RF19: a chamada existente de início passa a salvar a ordem de todas as questões e das alternativas de cada questão objetiva.
+
+- `tentativa_questoes`: tentativa, questão e posição sorteada.
+- `tentativa_alternativas`: tentativa, questão, alternativa e posição sorteada dentro da questão. Dissertativas não recebem alternativas.
+- O trigger `tentativas_sortear_ordem` chama `examentech_private.sortear_ordem_tentativa` após criar a tentativa. Sorteio, tentativa e auditoria pertencem à mesma transação; qualquer falha desfaz a operação.
+- Guarda IDs e posições, sem copiar textos ou `correta`. A estrutura publicada já fica bloqueada para edição pela aplicação; a ordem original do professor permanece intacta.
+- O sorteio acontece uma vez. Repetir o início continua recusado, sem mudar a ordem. Sorteios de alunos diferentes podem coincidir por acaso.
+- Tentativas anteriores à `026` continuam sem ordem salva. Não são preenchidas, reabertas ou reiniciadas. Para validar este bloco, criar uma avaliação nova de teste.
+- RLS ativada e acesso direto bloqueado para `anon` e `authenticated`, inclusive professor/admin pela aplicação. A API de início continua retornando apenas os seis metadados. A query `027` consulta o conteúdo sem liberar acesso direto a essas tabelas.
+
+Teste manual no Supabase de testes:
+
+1. Aplicar a `026` e publicar uma avaliação nova, com janela em andamento, questões objetivas com alternativas e uma dissertativa.
+2. Como aluno com MFA e matrícula ativa, executar a chamada de `/api/iniciar-tentativa` da seção anterior. Esperado: `201`. Copiar o ID da tentativa.
+3. No SQL Editor do Supabase, executar:
+
+```sql
+SELECT tq.tentativa_id, tq.ordem AS ordem_questao, tq.questao_id,
+       ta.ordem AS ordem_alternativa, ta.alternativa_id
+FROM public.tentativa_questoes tq
+LEFT JOIN public.tentativa_alternativas ta
+  ON ta.tentativa_id = tq.tentativa_id AND ta.questao_id = tq.questao_id
+WHERE tq.tentativa_id = 'UUID_DA_TENTATIVA'
+ORDER BY tq.ordem, ta.ordem;
+```
+
+4. Conferir todas as questões, posições consecutivas a partir de `1` e alternativas vinculadas à questão correspondente. Na dissertativa, os campos da alternativa ficam nulos. A consulta repete a questão em cada alternativa.
+5. Repetir o início: `409`. Consultar novamente: mesma ordem e um único evento `TENTATIVA_INICIADA`. Outro aluno matriculado recebe sua própria tentativa, sem alterar a primeira.
+
+Testes: `node --test tests/ordem-tentativa.test.ts tests/iniciar-tentativa.test.ts tests/tentativas-sql.test.ts`. Cobrem persistência, vínculos, permissões, repetição, preservação de registros antigos e rollback. PostgreSQL local via PGlite, Auth/HTTP simulados, sem acesso ao Supabase remoto. Sem nova dependência ou alteração visual.
+
+Referências: [funções de janela](https://www.postgresql.org/docs/current/functions-window.html), [random e setseed](https://www.postgresql.org/docs/current/functions-math.html#FUNCTIONS-MATH-RANDOM-TABLE), [transações e triggers](https://www.postgresql.org/docs/current/trigger-definition.html).
+
+## Consulta do conteúdo da tentativa (027)
+
+Aplicar `database/027_consultar_conteudo_tentativa.sql` depois da `026`. Cria `public.consultar_conteudo_tentativa(p_tentativa_id)`, que chama a função privada com as regras de acesso. Sem nova tabela, rota da aplicação ou alteração visual.
+
+- Exige aluno dono da tentativa, perfil e organização ativos, sessão própria existente e MFA `aal2`.
+- Revalida matrícula `ATIVA`, organização da turma, turma ativa, avaliação `PUBLICADA` e tentativa `EM_ANDAMENTO`. Professor/admin não usam essa função de execução; a consulta histórica de metadados da `025` permanece separada.
+- Confere o relógio do banco após obter os bloqueios de leitura: início inclusivo e fim exclusivo, respeitando tanto `limite_em` quanto a janela da avaliação. Prazo vencido bloqueia o conteúdo, mas ainda não muda a situação da tentativa.
+- Retorna `tentativa_id`, `avaliacao_id`, `titulo`, `tipo`, `iniciada_em`, `limite_em` e `questoes`.
+- Cada questão contém somente `id`, `tipo`, `enunciado`, `pontuacao`, `ordem` e `alternativas`. Cada alternativa contém somente `id`, `texto` e `ordem`. Dissertativas retornam `alternativas: []`.
+- As listas usam as posições da `026`. Não retornam `correta`, ordem original do professor ou colunas internas. Nenhum novo sorteio, registro ou evento é gerado pela consulta.
+- Tentativas antigas sem ordem salva são recusadas, sem preenchimento ou reinício automático.
+- Erros SQL: `42501` para perfil/sessão/MFA sem permissão; `P0002` para tentativa inexistente, alheia ou sem vínculo ativo na organização; `55000` para situação, horário ou conteúdo indisponível.
+
+Teste manual com `npm run dev:full`:
+
+1. Aplicar a `027`. Entrar como aluno com MFA e matrícula ativa. Usar uma tentativa iniciada depois da `026`, ainda dentro do prazo, com questões objetivas e dissertativas. Se as tentativas de teste venceram, criar e publicar uma avaliação nova.
+2. No console do navegador, substituir o ID e executar:
+
+```js
+const { supabase: supabaseConteudo } = await import('/src/lib/supabase.ts');
+const resultadoConteudo = await supabaseConteudo.rpc('consultar_conteudo_tentativa', {
+  p_tentativa_id: 'UUID_DA_TENTATIVA',
+});
+console.log(resultadoConteudo.data, resultadoConteudo.error);
+```
+
+3. Conferir os textos, pontuações e posições com a consulta do SQL Editor da seção `026`. Verificar a ausência de `correta` e a lista vazia de alternativas na dissertativa. Repetir: mesma ordem, horários e quantidade de eventos.
+4. Outro aluno recebe `P0002`; professor/admin recebem `42501`. Inativar a matrícula pelo fluxo existente impede a consulta. Depois de vencer o prazo, esperar `55000`. A validação deve ser feita com a sessão do aluno no navegador, não como administrador do banco no SQL Editor.
+
+Testes: `node --test tests/conteudo-tentativa.test.ts tests/ordem-tentativa.test.ts tests/tentativas-sql.test.ts tests/iniciar-tentativa.test.ts`. PostgreSQL local via PGlite, sem acesso remoto. Cobrem retorno permitido, ordem persistida, isolamento, MFA/sessão, vínculos, horários, preservação dos registros e acesso direto bloqueado.
+
+**Situação dos RF17–RF19:** ainda parciais. A base de início, sorteio e consulta está pronta no banco. Faltam API de conteúdo, interface de realização e salvamento das respostas objetivas/dissertativas. A execução também precisará vincular a tentativa à sessão inicial e encerrar o acesso por saída/desconexão, conforme a ficha; esta consulta valida a sessão atual, mas não detecta esses eventos. Finalização e cancelamento serão tratados nos blocos próprios.
+
+Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [agregação com ordem no PostgreSQL](https://www.postgresql.org/docs/current/functions-aggregate.html), [construção explícita de JSON](https://www.postgresql.org/docs/current/functions-json.html).
