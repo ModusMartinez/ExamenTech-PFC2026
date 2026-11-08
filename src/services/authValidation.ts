@@ -12,6 +12,18 @@ export function validateLoginFields(email: string, password: string): string | n
   return null
 }
 
+export function validateRecoveryEmail(email: string): string | null {
+  if (!EMAIL_PATTERN.test(email.trim())) return 'Digite um e-mail válido.'
+  return null
+}
+
+export function validateNewPassword(password: string, confirmation: string): string | null {
+  if (!password || !confirmation) return 'Preencha a nova senha e a confirmação.'
+  if (password.length < 8) return 'A senha precisa ter pelo menos 8 caracteres.'
+  if (password !== confirmation) return 'As senhas não são iguais.'
+  return null
+}
+
 export function validateRegistrationFields(
   name: string,
   email: string,

@@ -64,6 +64,7 @@ export function MinhasMatriculasPanel() {
       )}
       <p className="turmas-note">
         Pendente: aguardando aprovação. Ativa: matrícula aprovada. Inativa: vínculo inativo, com histórico preservado.
+        A disponibilidade das avaliações depende da publicação e das permissões da sua turma.
       </p>
     </section>
   )

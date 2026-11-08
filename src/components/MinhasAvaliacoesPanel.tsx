@@ -2,9 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import { listarMinhasAvaliacoes } from '../services/avaliacoes'
 import type { AvaliacaoAluno } from '../services/avaliacaoValidation'
 import { TentativaAlunoPanel } from './TentativaAlunoPanel'
+import { TentativaMonitoradaPanel } from './TentativaMonitoradaPanel'
+import { ProvaCameraDemo } from './ProvaCameraDemo'
+import { examManagementEnabled } from '../services/examFeatures'
 import '../styles/turmas.css'
+import '../styles/provas.css'
 
-export function MinhasAvaliacoesPanel() {
+export function MinhasAvaliacoesPanel({ onActiveChange, onLeave, layout = 'table', executionEnabled = true }: {
+  onActiveChange?: (active: boolean) => void
+  onLeave?: (message: string) => void
+  layout?: 'table' | 'cards'
+  executionEnabled?: boolean
+} = {}) {
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoAluno[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -31,7 +40,38 @@ export function MinhasAvaliacoesPanel() {
     return () => { active = false }
   }, [refresh])
 
+  if (selecionada && onActiveChange && onLeave) return <TentativaMonitoradaPanel
+    key={selecionada.id} avaliacao={selecionada} onCancelar={() => setSelecionada(null)}
+    onActiveChange={onActiveChange} onLeave={onLeave} />
   if (selecionada) return <TentativaAlunoPanel key={selecionada.id} avaliacao={selecionada} onCancelar={() => setSelecionada(null)} />
+
+  if (layout === 'cards') return (
+    <section className="provas-panel" aria-labelledby="minhas-provas-title">
+      <header>
+        <p className="overline">AVALIAÇÕES</p>
+        <h1 id="minhas-provas-title" ref={heading} tabIndex={-1}>Minhas provas</h1>
+        <p className="subtitle">Há uma tentativa por avaliação. Após sair ou perder a câmera, não há retorno automático.{examManagementEnabled() && ' Procure o professor responsável ou o ADM para analisar uma reativação.'}</p>
+      </header>
+      <ProvaCameraDemo />
+      <button type="button" className="btn-outline" disabled={loading}
+        onClick={() => setRefresh(current => current + 1)}>Atualizar provas</button>
+      {!executionEnabled && <p className="provas-note">O início das avaliações ainda não está disponível neste ambiente. Você pode usar a simulação para testar a câmera.</p>}
+      {loading && <p role="status">Carregando provas...</p>}
+      {error && <p className="alert error" role="alert">{error}</p>}
+      {!loading && !error && avaliacoes.length === 0 && <p role="status">Não há avaliações publicadas para suas turmas ativas.</p>}
+      {!loading && !error && avaliacoes.map(avaliacao => <article className="provas-card" key={avaliacao.id}>
+        <h2>{avaliacao.titulo}</h2>
+        <p>{avaliacao.turma_nome} · {avaliacao.tipo === 'PROVA' ? 'Prova' : 'Atividade'}</p>
+        <p>Início: <time dateTime={avaliacao.inicio_em}>{new Date(avaliacao.inicio_em).toLocaleString('pt-BR')}</time> · Duração: {avaliacao.duracao_minutos} min</p>
+        <p>Fim: <time dateTime={avaliacao.fim_em}>{new Date(avaliacao.fim_em).toLocaleString('pt-BR')}</time></p>
+        <button type="button" className="btn-outline" disabled={!executionEnabled}
+          aria-label={`Preparar ${avaliacao.tipo === 'PROVA' ? 'prova' : 'atividade'} ${avaliacao.titulo}`}
+          onClick={() => setSelecionada(avaliacao)}>
+          {avaliacao.tipo === 'PROVA' ? 'Preparar prova' : 'Preparar atividade'}
+        </button>
+      </article>)}
+    </section>
+  )
 
   return (
     <section className="turmas-panel minhas-avaliacoes" aria-labelledby="minhas-avaliacoes-title">
@@ -40,6 +80,7 @@ export function MinhasAvaliacoesPanel() {
         <button type="button" className="turmas-refresh" disabled={loading}
           onClick={() => setRefresh((current) => current + 1)}>Atualizar</button>
       </header>
+      <p className="turmas-note" role="note">Integração local: inicie somente uma avaliação de teste. O início consome a tentativa única.</p>
       <p className="turmas-note">Até 50 publicações mais recentes. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
       {loading && <p role="status">Carregando avaliações...</p>}
       {error && <p className="alert error" role="alert">{error}</p>}

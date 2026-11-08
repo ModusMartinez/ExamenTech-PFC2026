@@ -112,6 +112,9 @@ test('009/010: professor por convite, documentos e auditoria em PostgreSQL local
   await db.exec('COMMIT')
   await migrate('010_documentos_lgpd.sql')
   await migrate('010_documentos_lgpd.sql')
+  // Testa as versões atuais isoladamente. A implantação completa aplica 011–028 antes de 029.
+  await migrate('029_versoes_documentos.sql')
+  await migrate('029_versoes_documentos.sql')
 
   await scenario('reaplicar 010 mantém aceite anterior, horário e conta sem aceite retroativo', async () => {
     assert.deepEqual((await db.query('SELECT * FROM public.aceites_termos WHERE usuario_id = $1', [previousUserId])).rows, previousAcceptance)

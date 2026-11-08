@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { UUID_PATTERN } from '../src/services/avaliacaoValidation.ts'
 import { lerTentativaIniciada } from '../src/services/tentativaValidation.ts'
+import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
+import { PHOTO_NOTICE_VERSION } from '../scripts/lib/photoStorage.ts'
 
 function jsonResponse(status: number, body: object, headers?: HeadersInit) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
@@ -22,9 +24,12 @@ export function createIniciarTentativaHandler(
       let avaliacaoId: string
       try {
         const body: unknown = await request.json()
-        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 ||
-            !('avaliacao_id' in body) || typeof body.avaliacao_id !== 'string' || !UUID_PATTERN.test(body.avaliacao_id)) {
-          return jsonResponse(400, { message: 'Informe somente o ID válido da avaliação.' })
+        const withPhotos = env.EXAM_PHOTOS_ENABLED === 'true'
+        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== (withPhotos ? 3 : 2) ||
+            !('avaliacao_id' in body) || typeof body.avaliacao_id !== 'string' || !UUID_PATTERN.test(body.avaliacao_id) ||
+            !('aviso_versao' in body) || body.aviso_versao !== EXAM_NOTICE_VERSION ||
+            (withPhotos && (!('fotos_aviso_versao' in body) || body.fotos_aviso_versao !== PHOTO_NOTICE_VERSION))) {
+          return jsonResponse(400, { message: 'Confirme o aviso atual e informe o ID válido da avaliação.' })
         }
         avaliacaoId = body.avaliacao_id.toLowerCase()
       } catch {
@@ -53,11 +58,15 @@ export function createIniciarTentativaHandler(
         }
 
         // Usa a sessão do aluno; a função confere perfil, MFA, matrícula, horário e unicidade.
-        const { data, error } = await supabase.rpc('iniciar_tentativa', { p_avaliacao_id: avaliacaoId }).retry(false)
+        const { data, error } = await supabase.rpc(env.EXAM_PHOTOS_ENABLED === 'true' ? 'iniciar_tentativa_com_fotos' : 'iniciar_tentativa', {
+          p_avaliacao_id: avaliacaoId, p_aviso_versao: EXAM_NOTICE_VERSION,
+          ...(env.EXAM_PHOTOS_ENABLED === 'true' ? { p_fotos_aviso_versao: PHOTO_NOTICE_VERSION } : {}),
+        }).retry(false)
         if (error) {
           if (error.code === '42501') return jsonResponse(403, { message: 'Início exige aluno ativo, organização ativa, sessão e MFA.' })
           if (error.code === 'P0002') return jsonResponse(404, { message: 'Avaliação não encontrada ou acesso não autorizado.' })
           if (error.code === '55000') return jsonResponse(409, { message: 'A avaliação não está disponível para início ou já possui uma tentativa.' })
+          if (error.code === '23514') return jsonResponse(400, { message: 'O aviso da prova precisa ser confirmado novamente.' })
           return jsonResponse(503, { message: notConfirmed })
         }
         const tentativa = lerTentativaIniciada(data)

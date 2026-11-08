@@ -1,5 +1,7 @@
 # Avaliações (019–027)
 
+Este documento detalha o contrato da equipe até 027. Respostas, encerramento, fotografias e reativação foram integrados depois, em 028–032; consulte o [fluxo atual](tentativas-prova.md). Referências a funcionalidades pendentes abaixo descrevem a etapa 019–027.
+
 RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta no banco/API, confirmação no painel do aluno e exibição do conteúdo na ordem sorteada persistida, sem gabarito. Respostas, finalização e cancelamento ainda pendentes. Não representa os RF12–RF19 completos.
 
 ## Dados e regras

@@ -151,3 +151,37 @@ test('resposta atrasada de tela fechada não substitui a lista ao reabrir', asyn
   expect(screen.queryByText(avaliacao.titulo)).toBeNull()
   expect(screen.getByText(atividade.titulo)).toBeTruthy()
 })
+
+test('Minhas provas mantém cartões e simulação usando a lista nova, sem consumir tentativa no preparo', async () => {
+  render(<MinhasAvaliacoesPanel layout="cards" onActiveChange={vi.fn()} onLeave={vi.fn()} />)
+  expect(screen.getByRole('heading', { name: 'Minhas provas' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Teste local da câmera durante a prova' })).toBeTruthy()
+  const preparar = await screen.findByRole('button', { name: `Preparar prova ${avaliacao.titulo}` })
+  expect(screen.getByRole('button', { name: `Preparar atividade ${atividade.titulo}` })).toBeTruthy()
+  expect(screen.queryByRole('table')).toBeNull()
+  expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/minhas-avaliacoes', expect.any(Object))
+  fireEvent.click(preparar)
+  expect(screen.getByRole('heading', { name: avaliacao.titulo })).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: 'Teste local da câmera durante a prova' })).toBeNull()
+  const aceite = screen.getByRole('checkbox', { name: /Li o aviso da prova/ }) as HTMLInputElement
+  expect(aceite.disabled).toBe(false)
+  expect(aceite.checked).toBe(false)
+  fireEvent.click(screen.getByText(/Li o aviso da prova/))
+  expect(aceite.checked).toBe(true)
+  expect(screen.getByText('Aceite confirmado. Ligue a câmera para habilitar o início.')).toBeTruthy()
+  expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+  expect(screen.getByRole('heading', { name: 'Teste local da câmera durante a prova' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Atualizar provas' })).toBeTruthy()
+})
+
+test('opção desligada mantém cartões e simulação, mas impede iniciar provas reais', async () => {
+  render(<MinhasAvaliacoesPanel layout="cards" executionEnabled={false}
+    onActiveChange={vi.fn()} onLeave={vi.fn()} />)
+  const preparar = await screen.findByRole('button', { name: `Preparar prova ${avaliacao.titulo}` })
+  expect(preparar.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(preparar)
+  expect(screen.queryByRole('checkbox')).toBeNull()
+  expect(screen.getByRole('heading', { name: 'Teste local da câmera durante a prova' })).toBeTruthy()
+  expect(mocks.fetch).toHaveBeenCalledTimes(1)
+})

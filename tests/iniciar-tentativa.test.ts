@@ -5,20 +5,23 @@ import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 import { prepararBancoAvaliacoes } from './helpers/bancoAvaliacoes.ts'
 import { createIniciarTentativaHandler } from '../api/iniciar-tentativa.ts'
+import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
 
 const env = { SUPABASE_URL: 'https://exemplo.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'public-test-key' }
 function request(body: unknown, method = 'POST', query = '') {
+  const payload = body && typeof body === 'object' && !Array.isArray(body) && 'avaliacao_id' in body &&
+    !('aviso_versao' in body) ? { ...body, aviso_versao: EXAM_NOTICE_VERSION } : body
   return new Request(`http://localhost/api/iniciar-tentativa${query}`, {
     method, headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' },
-    body: ['GET', 'HEAD'].includes(method) ? undefined : JSON.stringify(body),
+    body: ['GET', 'HEAD'].includes(method) ? undefined : JSON.stringify(payload),
   })
 }
 
-test('API de início integrada às regras, à auditoria e ao sorteio das queries 025/026', async (t) => {
+test('API de início integrada às regras, ao aviso e ao sorteio das queries 025-028', async (t) => {
   const db = new PGlite()
   t.after(() => db.close())
   const { org, professor, aluno, admin, sessions, queryAs, turmaId, avaliacaoId } = await prepararBancoAvaliacoes(db)
-  for (const file of ['023_publicar_avaliacao.sql', '024_listar_minhas_avaliacoes.sql', '025_iniciar_tentativa.sql', '026_ordem_tentativa.sql']) {
+  for (const file of ['023_publicar_avaliacao.sql', '024_listar_minhas_avaliacoes.sql', '025_iniciar_tentativa.sql', '026_ordem_tentativa.sql', '027_consultar_conteudo_tentativa.sql', '028_respostas_e_encerramento.sql']) {
     await db.exec(await readFile(new URL(`../database/${file}`, import.meta.url), 'utf8'))
   }
   async function publicar() {
@@ -38,9 +41,10 @@ test('API de início integrada às regras, à auditoria e ao sorteio das queries
       assert.equal(new URL(req.url).pathname, '/rest/v1/rpc/iniciar_tentativa')
       assert.equal(req.method, 'POST')
       const params: Record<string, unknown> = await req.json()
-      assert.deepEqual(Object.keys(params), ['p_avaliacao_id'])
+      assert.deepEqual(Object.keys(params), ['p_avaliacao_id', 'p_aviso_versao'])
       try {
-        const result = await queryAs<{ tentativa: unknown }>(usuario, 'SELECT public.iniciar_tentativa($1) AS tentativa', [params.p_avaliacao_id], aal)
+        const result = await queryAs<{ tentativa: unknown }>(usuario, 'SELECT public.iniciar_tentativa($1,$2) AS tentativa',
+          [params.p_avaliacao_id, params.p_aviso_versao], aal)
         return Response.json(result.rows[0].tentativa)
       } catch (error) {
         return Response.json({ code: error instanceof Error && 'code' in error ? error.code : 'XX000', message: 'Detalhe interno' }, { status: 400 })
@@ -61,6 +65,7 @@ test('API de início integrada às regras, à auditoria e ao sorteio das queries
     assert.equal(tentativa.aluno_id, aluno)
     assert.equal(tentativa.avaliacao_id, publicada)
     assert.equal(tentativa.situacao, 'EM_ANDAMENTO')
+    assert.equal((await db.query<{ aviso_versao: string }>('SELECT aviso_versao FROM public.tentativas WHERE id=$1', [tentativa.id])).rows[0].aviso_versao, EXAM_NOTICE_VERSION)
     assert.equal(Date.parse(tentativa.limite_em) - Date.parse(tentativa.iniciada_em), 3600000)
     assert.equal(transport.mock.callCount(), 2)
     const original = (await db.query('SELECT * FROM public.tentativas WHERE id=$1', [tentativa.id])).rows
@@ -143,9 +148,15 @@ test('API de início: validações de entrada, identidade e resposta', async (t)
     const transport = t.mock.fn(async () => Response.json({}))
     const handler = createIniciarTentativaHandler(env, transport)
     for (const entrada of [null, [], 'texto', {}, { avaliacao_id: 1 }, { avaliacao_id: 'inválido' },
+      { ...body, aviso_versao: 'antigo' },
       ...['aluno_id', 'iniciada_em', 'limite_em', 'situacao'].map((key) => ({ ...body, [key]: 'forjado' }))]) {
       assert.equal((await handler.fetch(request(entrada))).status, 400)
     }
+    const missingNotice = new Request('http://localhost/api/iniciar-tentativa', {
+      method: 'POST', headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    assert.equal((await handler.fetch(missingNotice)).status, 400)
     const malformed = request(body)
     assert.equal((await handler.fetch(new Request(malformed, { body: '{' }))).status, 400)
     for (const method of ['GET', 'PATCH', 'DELETE', 'HEAD']) {

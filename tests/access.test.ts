@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import { AuthError, createClient, type Session, type User } from '@supabase/supabase-js'
-import { resolveAccess } from '../src/services/access.ts'
+import { resolveAccess, resolveRecoveryAccess } from '../src/services/access.ts'
 
 const activeProfile = {
   nome: 'Aluno de teste',
@@ -72,6 +72,24 @@ test('sem sessão retorna signed-out sem consultar identidade, MFA ou auditoria'
   assert.deepEqual(result, { kind: 'signed-out' })
   assert.equal(getUser.mock.callCount(), 0)
   assert.equal(assurance.mock.callCount(), 0)
+  assert.equal(registerAccess.mock.callCount(), 0)
+})
+
+test('recuperação sem sessão não chega ao banco', async (t) => {
+  const { client, registerAccess } = createAccessClient(t, { session: false })
+  assert.deepEqual(await resolveRecoveryAccess(client), { kind: 'signed-out' })
+  assert.equal(registerAccess.mock.callCount(), 0)
+})
+
+test('recuperação exige o fator TOTP antes de permitir a nova senha', async (t) => {
+  const { client, registerAccess } = createAccessClient(t, { aal: 'aal1', hasFactor: true })
+  assert.deepEqual(await resolveRecoveryAccess(client), { kind: 'verify-totp', factorId: 'fator' })
+  assert.equal(registerAccess.mock.callCount(), 0)
+})
+
+test('recuperação com MFA confirmado permite alterar a senha sem abrir o painel', async (t) => {
+  const { client, registerAccess } = createAccessClient(t)
+  assert.deepEqual(await resolveRecoveryAccess(client), { kind: 'verified' })
   assert.equal(registerAccess.mock.callCount(), 0)
 })
 

@@ -1,0 +1,4 @@
+# Esta função usa um token exclusivo de agendamento, conferido no código.
+# Ela não aceita JWT de usuário como autorização para apagar arquivos.
+[functions.examentech-limpar-fotos]
+verify_jwt = false

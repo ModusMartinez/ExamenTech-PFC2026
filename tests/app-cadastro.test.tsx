@@ -6,9 +6,13 @@ import { PRIVACY_VERSION, TERMS_VERSION } from '../src/content/legalDocuments'
 
 const mocks = vi.hoisted(() => ({
   resolveAccess: vi.fn(),
+  resolveRecoveryAccess: vi.fn(),
+  getSession: vi.fn(),
   rpc: vi.fn(),
   signUp: vi.fn(),
   signOut: vi.fn(),
+  resetPasswordForEmail: vi.fn(),
+  updateUser: vi.fn(),
   onAuthStateChange: vi.fn(),
 }))
 
@@ -16,13 +20,19 @@ vi.mock('../src/lib/supabase', () => ({
   supabase: {
     rpc: mocks.rpc,
     auth: {
+      getSession: mocks.getSession,
       signUp: mocks.signUp,
       signOut: mocks.signOut,
+      resetPasswordForEmail: mocks.resetPasswordForEmail,
+      updateUser: mocks.updateUser,
       onAuthStateChange: mocks.onAuthStateChange,
     },
   },
 }))
-vi.mock('../src/services/access', () => ({ resolveAccess: mocks.resolveAccess }))
+vi.mock('../src/services/access', () => ({
+  resolveAccess: mocks.resolveAccess,
+  resolveRecoveryAccess: mocks.resolveRecoveryAccess,
+}))
 vi.mock('../src/components/InvitationPanel', () => ({ InvitationPanel: () => null }))
 vi.mock('../src/components/AuditPanel', () => ({ AuditPanel: () => <p>Consulta de auditoria</p> }))
 vi.mock('../src/components/NovaAvaliacaoPanel', () => ({ NovaAvaliacaoPanel: () => <p>Cadastro de rascunho</p> }))
@@ -32,11 +42,11 @@ vi.mock('../src/components/MatriculasPanel', () => ({
 vi.mock('../src/components/MinhasMatriculasPanel', () => ({
   MinhasMatriculasPanel: () => <p>Consulta das minhas matrículas</p>,
 }))
-vi.mock('../src/components/MinhasAvaliacoesPanel', () => ({
-  MinhasAvaliacoesPanel: () => <p>Consulta das minhas avaliações</p>,
-}))
 vi.mock('../src/components/MfaStep', () => ({
-  MfaStep: ({ mode }: { mode: string }) => <p>Etapa MFA: {mode}</p>,
+  MfaStep: ({ mode, onComplete }: { mode: string; onComplete: () => Promise<void> }) => <>
+    <p>Etapa MFA: {mode}</p>
+    <button type="button" onClick={() => void onComplete()}>Confirmar MFA simulado</button>
+  </>,
 }))
 vi.mock('../src/components/TurnstileWidget', () => ({
   // Só substitui o CAPTCHA dentro dos testes. A aplicação mantém o widget real.
@@ -70,8 +80,11 @@ beforeEach(() => {
   // Qualquer acesso de rede inesperado faz o teste falhar.
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Rede não permitida neste teste.') }))
   mocks.resolveAccess.mockResolvedValue({ kind: 'signed-out' })
+  mocks.resolveRecoveryAccess.mockResolvedValue({ kind: 'verified' })
   mocks.rpc.mockResolvedValue({ data: { ticket: 'ticket-simulado' }, error: null })
   mocks.signUp.mockResolvedValue({ data: { user: session.user, session: null }, error: null })
+  mocks.resetPasswordForEmail.mockResolvedValue({ data: {}, error: null })
+  mocks.updateUser.mockResolvedValue({ data: { user: session.user }, error: null })
   mocks.signOut.mockImplementation(async () => {
     authCallback('SIGNED_OUT', null)
     return { error: null }
@@ -424,18 +437,12 @@ for (const profile of ['Professor', 'Aluno', 'Administrador']) {
       fireEvent.click(screen.getByRole('button', { name: 'Minhas matrículas' }))
       expect(screen.getByText('Consulta das minhas matrículas')).toBeTruthy()
       expect(screen.getByRole('link', { name: 'Termos de Uso (abre em nova aba)' })).toBeTruthy()
-      fireEvent.click(screen.getByRole('button', { name: 'Minhas avaliações' }))
-      expect(screen.getByText('Consulta das minhas avaliações')).toBeTruthy()
-      expect(screen.getByRole('button', { name: 'Minhas avaliações' }).getAttribute('aria-pressed')).toBe('true')
-      expect(screen.getByRole('link', { name: 'Política de Privacidade (abre em nova aba)' })).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: 'Início' }))
       expect(screen.queryByLabelText('Código da turma')).toBeNull()
       expect(screen.queryByText('Consulta das minhas matrículas')).toBeNull()
-      expect(screen.queryByText('Consulta das minhas avaliações')).toBeNull()
     } else {
       expect(screen.queryByRole('button', { name: 'Solicitar matrícula' })).toBeNull()
       expect(screen.queryByRole('button', { name: 'Minhas matrículas' })).toBeNull()
-      expect(screen.queryByRole('button', { name: 'Minhas avaliações' })).toBeNull()
       expect(screen.queryByLabelText('Código da turma')).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: 'Matrículas' }))
       expect(screen.getByText(`Pendências para ${profile}`)).toBeTruthy()
@@ -460,6 +467,81 @@ test('rodapé fica disponível durante a verificação de sessão', () => {
   render(<App />)
   expect(screen.getByText('Verificando sua sessão...')).toBeTruthy()
   expect(screen.getByRole('contentinfo').querySelectorAll('a')).toHaveLength(2)
+})
+
+test('aluno tem uma única seção Minhas provas com a simulação, sem aba de pré-prova', async () => {
+  mocks.resolveAccess.mockResolvedValue({
+    kind: 'ready', user: { name: 'Aluno Teste', email, profile: 'Aluno' },
+  })
+  mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'sessao-simulada' } }, error: null })
+  vi.mocked(fetch).mockResolvedValue(Response.json({ avaliacoes: [] }))
+  render(<App />)
+  const provas = await screen.findByRole('button', { name: 'Minhas provas', exact: true })
+  expect(screen.getAllByRole('button', { name: 'Minhas provas', exact: true })).toHaveLength(1)
+  expect(screen.queryByRole('button', { name: 'Pré-prova' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Avaliações da equipe (teste)' })).toBeNull()
+  fireEvent.click(provas)
+  expect(screen.getByRole('heading', { name: 'Minhas provas' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Teste local da câmera durante a prova' })).toBeTruthy()
+  await screen.findByText('Não há avaliações publicadas para suas turmas ativas.')
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/minhas-avaliacoes', expect.any(Object))
+})
+
+test('solicita link de recuperação com CAPTCHA e retorno ao próprio site', async () => {
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Boas-vindas' })
+  fireEvent.click(screen.getByRole('button', { name: 'Esqueci minha senha' }))
+  fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: email } })
+  fireEvent.click(screen.getByRole('button', { name: 'Validar CAPTCHA de login' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Enviar link de recuperação' }))
+
+  await screen.findByText('Se este e-mail estiver cadastrado, você receberá um link para redefinir a senha.')
+  expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith(email, {
+    redirectTo: window.location.origin,
+    captchaToken: 'captcha-simulado',
+  })
+})
+
+test('link de recuperação passa por MFA e permite definir a nova senha sem abrir o painel', async () => {
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Boas-vindas' })
+  mocks.resolveRecoveryAccess.mockResolvedValueOnce({ kind: 'verify-totp', factorId: 'fator-simulado' })
+    .mockResolvedValue({ kind: 'verified' })
+  mocks.updateUser.mockImplementation(async () => {
+    authCallback('USER_UPDATED', session)
+    return { data: { user: session.user }, error: null }
+  })
+
+  await runEvent(() => authCallback('PASSWORD_RECOVERY', session))
+  expect(screen.getByText('Etapa MFA: verify')).toBeTruthy()
+  expect(mocks.resolveAccess).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar MFA simulado' }))
+  await screen.findByRole('heading', { name: 'Crie uma nova senha' })
+  expect(screen.queryByRole('heading', { name: 'Olá, Aluno.' })).toBeNull()
+
+  fireEvent.change(screen.getByLabelText('Nova senha'), { target: { value: 'NovaSenha123!' } })
+  fireEvent.change(screen.getByLabelText('Confirmar nova senha'), { target: { value: 'NovaSenha123!' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar nova senha' }))
+  await screen.findByText('Senha alterada. Entre com a nova senha e confirme o Authenticator.')
+  expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'NovaSenha123!' })
+  expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' })
+  expect(screen.getByRole('heading', { name: 'Boas-vindas' })).toBeTruthy()
+})
+
+test('retorno inicial de recuperação não abre o painel antes do evento do Supabase', async () => {
+  window.history.replaceState({}, '', '/#access_token=simulado&type=recovery')
+  mocks.resolveAccess.mockResolvedValue({
+    kind: 'ready', user: { name: 'Aluno Teste', email, profile: 'Aluno' },
+  })
+  mocks.resolveRecoveryAccess.mockResolvedValue({ kind: 'verify-totp', factorId: 'fator-simulado' })
+  render(<App />)
+  expect(screen.getByText('Verificando sua sessão...')).toBeTruthy()
+  expect(mocks.resolveAccess).not.toHaveBeenCalled()
+  expect(mocks.resolveRecoveryAccess).not.toHaveBeenCalled()
+  await runEvent(() => authCallback('PASSWORD_RECOVERY', session))
+  await screen.findByText('Etapa MFA: verify')
+  expect(mocks.resolveAccess).not.toHaveBeenCalled()
+  expect(screen.queryByRole('heading', { name: 'Olá, Aluno.' })).toBeNull()
 })
 
 for (const [kind, mode] of [['setup-totp', 'setup'], ['verify-totp', 'verify']]) {

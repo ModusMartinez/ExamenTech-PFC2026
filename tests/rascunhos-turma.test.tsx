@@ -173,7 +173,7 @@ test.each(['PROVA', 'ATIVIDADE'])('edita %s com campos preenchidos, fuso local e
   mocks.fetch.mockResolvedValueOnce(Response.json({ avaliacao: { ...avaliacao, ...campos } }))
   fireEvent.submit(form)
   const success = await screen.findByText('Avaliação “Revisão 2” salva.')
-  expect(document.activeElement).toBe(success)
+  await waitFor(() => expect(document.activeElement).toBe(success))
   expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/avaliacoes', {
     method: 'PATCH', headers: { Authorization: 'Bearer sessao-simulada', 'Content-Type': 'application/json' },
     body: JSON.stringify({ avaliacao_id: avaliacao.id, ...campos }),
@@ -238,7 +238,7 @@ test.each([400, 401, 403, 404, 409, 503])('erro %i mantém a edição e não alt
   mocks.fetch.mockResolvedValueOnce(Response.json({ message: 'Edição recusada.' }, { status }))
   fireEvent.submit(form)
   const alert = await screen.findByRole('alert')
-  expect(document.activeElement).toBe(alert)
+  await waitFor(() => expect(document.activeElement).toBe(alert))
   expect(alert.textContent).toBe('Edição recusada.')
   expect((screen.getByLabelText('Título') as HTMLInputElement).value).toBe('Alteração pendente')
   expect(screen.getByRole('rowheader', { name: avaliacao.titulo })).toBeTruthy()

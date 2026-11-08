@@ -10,7 +10,21 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+# Configurações, tokens e scripts privados gerados em cada ambiente.
+.env
+.env.*
+!.env.example
 *.local
+*.pem
+*.key
+
+# Arquivos gerados por ferramentas de desenvolvimento e testes.
+*.tsbuildinfo
+coverage/
+test-results/
+playwright-report/
+.vercel/
+.supabase/
 
 # Editor directories and files
 .vscode/*
@@ -22,5 +36,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-docs/*
-/docs

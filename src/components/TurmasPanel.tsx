@@ -8,7 +8,10 @@ import { RascunhosTurmaPanel } from './RascunhosTurmaPanel'
 import { PublicadasTurmaPanel } from './PublicadasTurmaPanel'
 import '../styles/turmas.css'
 
-export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor' }) {
+export function TurmasPanel({ profile, initialDraftsTurmaId = null }: {
+  profile: 'Administrador' | 'Professor'
+  initialDraftsTurmaId?: string | null
+}) {
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [nome, setNome] = useState('')
   const [loading, setLoading] = useState(true)
@@ -18,7 +21,7 @@ export function TurmasPanel({ profile }: { profile: 'Administrador' | 'Professor
   const [success, setSuccess] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [turmaAberta, setTurmaAberta] = useState<string | null>(null)
-  const [rascunhosAbertos, setRascunhosAbertos] = useState<string | null>(null)
+  const [rascunhosAbertos, setRascunhosAbertos] = useState<string | null>(initialDraftsTurmaId)
   const [publicadasAbertas, setPublicadasAbertas] = useState<string | null>(null)
   const [atualizacaoPublicadas, setAtualizacaoPublicadas] = useState(0)
   const submitting = useRef(false)

@@ -11,7 +11,13 @@ export type AccessState =
   | { kind: 'denied'; message: string }
   | { kind: 'ready'; user: AccessUser }
 
-export async function resolveAccess(supabase: SupabaseClient): Promise<AccessState> {
+export type RecoveryAccessState =
+  | { kind: 'signed-out' }
+  | { kind: 'setup-totp' }
+  | { kind: 'verify-totp'; factorId: string }
+  | { kind: 'verified' }
+
+export async function resolveRecoveryAccess(supabase: SupabaseClient): Promise<RecoveryAccessState> {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
 
   if (sessionError) {
@@ -49,6 +55,13 @@ export async function resolveAccess(supabase: SupabaseClient): Promise<AccessSta
       ? { kind: 'verify-totp', factorId: totp.id }
       : { kind: 'setup-totp' }
   }
+
+  return { kind: 'verified' }
+}
+
+export async function resolveAccess(supabase: SupabaseClient): Promise<AccessState> {
+  const assurance = await resolveRecoveryAccess(supabase)
+  if (assurance.kind !== 'verified') return assurance
 
   // O banco consulta o próprio perfil e registra o resultado após o MFA.
   // A função não recebe usuário nem resultado informados pelo navegador.
