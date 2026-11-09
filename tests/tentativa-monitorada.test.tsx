@@ -3,13 +3,22 @@ import { StrictMode } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { TentativaMonitoradaPanel } from '../src/components/TentativaMonitoradaPanel'
 import { LegalFooter } from '../src/components/LegalFooter'
+import { ErroSalvamentoResposta } from '../src/services/respostasTentativa'
+import type { DadosRespostaTentativa, RespostaTentativa } from '../src/services/respostaValidation'
 import type { AvaliacaoAluno } from '../src/services/avaliacaoValidation'
 
 const services = vi.hoisted(() => ({
   iniciarTentativa: vi.fn(), consultarConteudoTentativa: vi.fn(),
-  salvarRespostaTentativa: vi.fn(), encerrarTentativa: vi.fn(),
+  salvarRespostaTentativa: vi.fn(), consultarRespostasTentativa: vi.fn(), encerrarTentativa: vi.fn(),
 }))
+vi.mock('../src/lib/supabase', () => ({ supabase: {} }))
 vi.mock('../src/services/tentativas', () => services)
+vi.mock('../src/services/examFeatures', () => ({ photosEnabled: () => false, examManagementEnabled: () => false }))
+vi.mock('../src/services/respostasTentativa', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/services/respostasTentativa')>(),
+  consultarRespostasTentativa: services.consultarRespostasTentativa,
+  salvarRespostaTentativa: services.salvarRespostaTentativa,
+}))
 
 const avaliacao: AvaliacaoAluno = {
   id: '10000000-0000-0000-0000-000000000001', turma_id: '20000000-0000-0000-0000-000000000001',
@@ -33,6 +42,17 @@ const conteudo = { tentativa_id: tentativa.id, avaliacao_id: avaliacao.id,
 const originalMediaDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
 const getUserMedia = vi.fn()
 
+function respostaSalva(dados: Partial<DadosRespostaTentativa> = {}): RespostaTentativa {
+  return { id: '70000000-0000-0000-0000-000000000001', tentativa_id: tentativa.id,
+    questao_id: questao.id, versao: 1, alternativa_id: questao.alternativas[0].id, texto: null,
+    criado_em: '2026-11-08T12:00:00.000Z', atualizado_em: '2026-11-08T12:00:00.000Z', ...dados }
+}
+
+function enviarProva() {
+  fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Enviar e encerrar' }))
+}
+
 function cameraStream() {
   const track = { stop: vi.fn(), onended: null as null | (() => void),
     onmute: null as null | (() => void), onunmute: null as null | (() => void), muted: false, readyState: 'live' }
@@ -50,8 +70,8 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
   services.iniciarTentativa.mockResolvedValue(tentativa)
   services.consultarConteudoTentativa.mockResolvedValue(conteudo)
-  services.salvarRespostaTentativa.mockResolvedValue({ questao_id: questao.id,
-    alternativa_id: questao.alternativas[0].id, texto: null, salva_em: '2026-11-08T12:00:00Z' })
+  services.consultarRespostasTentativa.mockResolvedValue([])
+  services.salvarRespostaTentativa.mockImplementation(async (dados: DadosRespostaTentativa) => respostaSalva(dados))
   services.encerrarTentativa.mockImplementation(async (_id: string, reason: string) => ({
     id: tentativa.id, situacao: reason === 'ENVIO' || reason === 'PRAZO' ? 'FINALIZADA' : 'INTERROMPIDA',
     falhas_camera: reason === 'CAMERA' ? 1 : 0, encerrada_em: '2026-11-08T12:00:00Z',
@@ -82,7 +102,8 @@ test('início exige câmera, permite salvar e enviar sem gerar fotos', async () 
   fireEvent.click(screen.getByRole('radio', { name: '4' }))
   fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
   await waitFor(() => expect(services.salvarRespostaTentativa).toHaveBeenCalledWith(
-    tentativa.id, expect.objectContaining({ id: questao.id }), questao.alternativas[0].id))
+    { tentativa_id: tentativa.id, questao_id: questao.id, versao: 1, alternativa_id: questao.alternativas[0].id, texto: null }))
+  await screen.findByText('Resposta salva')
   fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
   expect(screen.getByRole('dialog', { name: 'Enviar prova?' })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Enviar e encerrar' }))
@@ -151,14 +172,14 @@ test('aceite pode ser marcado antes da câmera e o início funciona em StrictMod
 async function iniciarProva(onLeave = vi.fn()) {
   const { stream, track } = cameraStream()
   getUserMedia.mockResolvedValue(stream)
-  render(<><TentativaMonitoradaPanel avaliacao={avaliacao} onCancelar={vi.fn()}
+  const rendered = render(<><TentativaMonitoradaPanel avaliacao={avaliacao} onCancelar={vi.fn()}
     onLeave={onLeave} onActiveChange={vi.fn()} /><LegalFooter openInNewTab /></>)
   fireEvent.click(screen.getByRole('checkbox', { name: /Li o aviso da prova/ }))
   fireEvent.click(screen.getByRole('button', { name: 'Testar câmera' }))
   await screen.findByText(/Câmera conectada/)
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
   await screen.findByText('Quanto é 2 + 2?')
-  return { track, onLeave }
+  return { track, onLeave, unmount: rendered.unmount }
 }
 
 test('aviso de permanência aparece antes do aceite e sair durante o preparo não interrompe tentativa', async () => {
@@ -260,4 +281,187 @@ test('documentos do rodapé abrem dentro da prova, sem interromper a tentativa',
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(screen.getByText('Quanto é 2 + 2?')).toBeTruthy()
   expect(services.encerrarTentativa).not.toHaveBeenCalled()
+})
+
+test('consulta versões sem gestão habilitada e usa a próxima no salvar e no envio final', async () => {
+  services.consultarRespostasTentativa.mockResolvedValue([respostaSalva({ versao: 4 })])
+  await iniciarProva()
+  expect(services.consultarRespostasTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id)
+  expect((screen.getByRole('radio', { name: '4' }) as HTMLInputElement).checked).toBe(true)
+  fireEvent.click(screen.getByRole('radio', { name: '5' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
+  await screen.findByText('Resposta salva')
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 5, alternativa_id: questao.alternativas[1].id }))
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  enviarProva()
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 6, alternativa_id: questao.alternativas[0].id }))
+})
+
+test('confirma o mesmo envio após falha de rede antes de gravar a alteração seguinte', async () => {
+  services.salvarRespostaTentativa.mockRejectedValueOnce(new ErroSalvamentoResposta('Sem confirmação.', 'NAO_CONFIRMADA'))
+  await iniciarProva()
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
+  await screen.findByText('Sem confirmação.')
+  fireEvent.click(screen.getByRole('radio', { name: '5' }))
+  expect(screen.queryByText('Resposta salva')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Reenviar resposta' }))
+  await screen.findByText('Resposta salva')
+  const calls = services.salvarRespostaTentativa.mock.calls.map(([dados]) => dados)
+  expect(calls).toEqual([
+    { tentativa_id: tentativa.id, questao_id: questao.id, versao: 1, alternativa_id: questao.alternativas[0].id, texto: null },
+    { tentativa_id: tentativa.id, questao_id: questao.id, versao: 1, alternativa_id: questao.alternativas[0].id, texto: null },
+    { tentativa_id: tentativa.id, questao_id: questao.id, versao: 2, alternativa_id: questao.alternativas[1].id, texto: null },
+  ])
+  expect((screen.getByRole('radio', { name: '5' }) as HTMLInputElement).checked).toBe(true)
+})
+
+test('envio final resolve pendência mesmo quando o campo voltou ao último valor confirmado', async () => {
+  services.consultarRespostasTentativa.mockResolvedValue([respostaSalva()])
+  services.salvarRespostaTentativa.mockRejectedValueOnce(new ErroSalvamentoResposta('Sem confirmação.', 'NAO_CONFIRMADA'))
+  await iniciarProva()
+  fireEvent.click(screen.getByRole('radio', { name: '5' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
+  await screen.findByText('Sem confirmação.')
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  enviarProva()
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
+  expect(services.salvarRespostaTentativa.mock.calls.map(([dados]) => dados.versao)).toEqual([2, 2, 3])
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ alternativa_id: questao.alternativas[0].id }))
+})
+
+test('conflito exige consulta explícita, preserva o campo e não envia a prova', async () => {
+  services.salvarRespostaTentativa.mockRejectedValueOnce(new ErroSalvamentoResposta('Versão desatualizada.', 'CONFLITO'))
+  await iniciarProva()
+  fireEvent.click(screen.getByRole('radio', { name: '5' }))
+  enviarProva()
+  await screen.findByText('Versão desatualizada.')
+  enviarProva()
+  await screen.findByText('Confira a resposta salva da questão 1 antes de enviar.')
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+  expect(services.consultarRespostasTentativa).toHaveBeenCalledTimes(1)
+  services.consultarRespostasTentativa.mockRejectedValueOnce(new Error('Consulta indisponível.'))
+  fireEvent.click(screen.getByRole('button', { name: 'Conferir resposta salva' }))
+  await screen.findByText('Consulta indisponível.')
+  expect((screen.getByRole('button', { name: 'Salvar resposta' }) as HTMLButtonElement).disabled).toBe(true)
+  services.consultarRespostasTentativa.mockResolvedValue([respostaSalva({ versao: 7 })])
+  fireEvent.click(screen.getByRole('button', { name: 'Conferir resposta salva' }))
+  await screen.findByText('Resposta no servidor')
+  expect((screen.getByRole('radio', { name: '5' }) as HTMLInputElement).checked).toBe(true)
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
+  await screen.findByText('Resposta salva')
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 8, alternativa_id: questao.alternativas[1].id }))
+})
+
+test.each(['RECUSADA', 'NAO_CONFIRMADA'] as const)('falha %s no envio final mantém campos e impede encerramento', async codigo => {
+  services.salvarRespostaTentativa.mockRejectedValueOnce(new ErroSalvamentoResposta('Falha no salvamento.', codigo))
+  await iniciarProva()
+  fireEvent.click(screen.getByRole('radio', { name: '5' }))
+  enviarProva()
+  await screen.findByText('Falha no salvamento.')
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+  expect((screen.getByRole('radio', { name: '5' }) as HTMLInputElement).checked).toBe(true)
+  enviarProva()
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
+  expect(services.salvarRespostaTentativa.mock.calls[1][0]).toEqual(services.salvarRespostaTentativa.mock.calls[0][0])
+})
+
+test('envio final salva dissertativa com espaços e permite limpar resposta anterior', async () => {
+  const dissertativa = { ...questao, tipo: 'DISSERTATIVA', alternativas: [] }
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [dissertativa] })
+  await iniciarProva()
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '  Minha resposta\ncom espaços  ' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
+  await screen.findByText('Resposta salva')
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 1, texto: '  Minha resposta\ncom espaços  ', alternativa_id: null }))
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '' } })
+  enviarProva()
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 2, texto: null, alternativa_id: null }))
+})
+
+test.each(['consulta', 'questão', 'tipo', 'alternativa'])('falha de %s impede edição sem versão conhecida e permite repetir a consulta', async falha => {
+  if (falha === 'consulta') services.consultarRespostasTentativa.mockRejectedValueOnce(new Error('Consulta indisponível.'))
+  else services.consultarRespostasTentativa.mockResolvedValueOnce([respostaSalva(
+    falha === 'questão' ? { questao_id: '50000000-0000-0000-0000-000000000002' }
+      : falha === 'tipo' ? { alternativa_id: null, texto: 'Texto em objetiva' }
+        : { alternativa_id: '60000000-0000-0000-0000-000000000003' })])
+  const { stream } = cameraStream()
+  getUserMedia.mockResolvedValue(stream)
+  render(<TentativaMonitoradaPanel avaliacao={avaliacao} onCancelar={vi.fn()} onLeave={vi.fn()} onActiveChange={vi.fn()} />)
+  fireEvent.click(screen.getByRole('checkbox'))
+  fireEvent.click(screen.getByRole('button', { name: 'Testar câmera' }))
+  await screen.findByText(/Câmera conectada/)
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Tentar carregar questões' }))
+  await screen.findByText(questao.enunciado)
+  expect(services.consultarRespostasTentativa).toHaveBeenCalledTimes(2)
+  expect(services.iniciarTentativa).toHaveBeenCalledTimes(1)
+  expect(services.salvarRespostaTentativa).not.toHaveBeenCalled()
+})
+
+test.each(['saída', 'desmontagem'])('confirmação tardia após %s não finaliza a prova por envio', async motivo => {
+  let confirm!: (resposta: RespostaTentativa) => void
+  services.salvarRespostaTentativa.mockReturnValueOnce(new Promise(resolve => { confirm = resolve }))
+  const { unmount } = await iniciarProva()
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  enviarProva()
+  await waitFor(() => expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1))
+  if (motivo === 'saída') fireEvent(window, new Event('blur'))
+  else unmount()
+  await act(async () => confirm(respostaSalva()))
+  expect(services.encerrarTentativa).not.toHaveBeenCalledWith(tentativa.id, 'ENVIO')
+})
+
+test('cliques repetidos não duplicam o salvamento e bloqueiam envio até a confirmação', async () => {
+  let confirm!: (resposta: RespostaTentativa) => void
+  services.salvarRespostaTentativa.mockReturnValueOnce(new Promise(resolve => { confirm = resolve }))
+  await iniciarProva()
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  const salvar = screen.getByRole('button', { name: 'Salvar resposta' })
+  fireEvent.click(salvar)
+  fireEvent.click(salvar)
+  fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await act(async () => confirm(respostaSalva()))
+  await screen.findByText('Resposta salva')
+})
+
+test('recusa ao repetir uma resposta incerta não descarta seu conteúdo e versão', async () => {
+  services.salvarRespostaTentativa
+    .mockRejectedValueOnce(new ErroSalvamentoResposta('Sem confirmação.', 'NAO_CONFIRMADA'))
+    .mockRejectedValueOnce(new ErroSalvamentoResposta('Sessão indisponível.', 'RECUSADA'))
+  await iniciarProva()
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
+  await screen.findByText('Sem confirmação.')
+  fireEvent.click(screen.getByRole('radio', { name: '5' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Reenviar resposta' }))
+  await screen.findByText('Sessão indisponível.')
+  fireEvent.click(screen.getByRole('button', { name: 'Reenviar resposta' }))
+  await screen.findByText('Resposta salva')
+  expect(services.salvarRespostaTentativa.mock.calls[2][0]).toEqual(services.salvarRespostaTentativa.mock.calls[0][0])
+  expect(services.salvarRespostaTentativa.mock.calls[3][0]).toMatchObject({ versao: 2, alternativa_id: questao.alternativas[1].id })
+})
+
+test('falha na segunda questão preserva texto e não regrava a primeira ao repetir o envio final', async () => {
+  const segunda = { ...questao, id: '50000000-0000-0000-0000-000000000002', tipo: 'DISSERTATIVA', ordem: 2, enunciado: 'Explique o resultado.', alternativas: [] }
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [questao, segunda] })
+  services.salvarRespostaTentativa.mockImplementationOnce(async (dados: DadosRespostaTentativa) => respostaSalva(dados))
+    .mockRejectedValueOnce(new ErroSalvamentoResposta('Sem confirmação.', 'NAO_CONFIRMADA'))
+  await iniciarProva()
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '  Resposta da segunda questão\n' } })
+  enviarProva()
+  await screen.findByText('Sem confirmação.')
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('  Resposta da segunda questão\n')
+  enviarProva()
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO'))
+  expect(services.salvarRespostaTentativa.mock.calls.map(([dados]) => dados.questao_id)).toEqual([questao.id, segunda.id, segunda.id])
+  expect(services.salvarRespostaTentativa.mock.calls[2][0]).toEqual(services.salvarRespostaTentativa.mock.calls[1][0])
 })

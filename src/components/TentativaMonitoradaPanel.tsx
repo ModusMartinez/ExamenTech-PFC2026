@@ -2,7 +2,9 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useCameraSession } from '../hooks/useCameraSession'
 import type { AvaliacaoAluno } from '../services/avaliacaoValidation'
-import { consultarConteudoTentativa, consultarRespostasTentativa, encerrarTentativa, iniciarTentativa, salvarRespostaTentativa } from '../services/tentativas'
+import { consultarConteudoTentativa, encerrarTentativa, iniciarTentativa } from '../services/tentativas'
+import { consultarRespostasTentativa, ErroSalvamentoResposta, salvarRespostaTentativa } from '../services/respostasTentativa'
+import type { DadosRespostaTentativa, RespostaTentativa } from '../services/respostaValidation'
 import { useExamPhotos } from '../hooks/useExamPhotos'
 import { photosEnabled, examManagementEnabled } from '../services/examFeatures'
 import { PHOTO_NOTICE, PHOTO_NOTICE_VERSION } from '../services/examPhotos'
@@ -23,6 +25,25 @@ type Props = {
 type Phase = 'preparo' | 'iniciando' | 'em-andamento' | 'bloqueada' | 'falhou'
 type BlockReason = 'CAMERA' | 'PRAZO' | 'SAIDA'
 type Confirmation = 'ENVIO' | 'SAIDA'
+type EstadoResposta = {
+  salva?: RespostaTentativa
+  pendente?: DadosRespostaTentativa
+  conflito?: boolean
+  conferida?: boolean
+}
+
+function valorResposta(resposta?: RespostaTentativa) {
+  return resposta?.alternativa_id ?? resposta?.texto ?? ''
+}
+
+function conferirQuestao(resposta: RespostaTentativa, questoes: QuestaoTentativa[]) {
+  const questao = questoes.find(item => item.id === resposta.questao_id)
+  if (!questao || (questao.tipo === 'OBJETIVA' && resposta.texto !== null) ||
+      (questao.tipo === 'DISSERTATIVA' && resposta.alternativa_id !== null) ||
+      (resposta.alternativa_id && !questao.alternativas.some(item => item.id === resposta.alternativa_id))) {
+    throw new Error('As respostas anteriores não correspondem às questões da tentativa.')
+  }
+}
 
 const DEPARTURE_WARNING = 'Durante a prova, permaneça nesta página e nesta aba. Não troque de aba, de janela ou de área de trabalho, nem minimize a janela. Sair, atualizar a página ou tirar o foco da janela da prova interrompe sua única tentativa, sem retorno automático. Se isso acontecer, procure seu professor ou responsável para analisar o caso.'
 
@@ -66,7 +87,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const [tentativa, setTentativa] = useState<TentativaIniciada | null>(null)
   const [conteudo, setConteudo] = useState<ConteudoTentativa | null>(null)
   const [answers, setAnswers] = useState<Record<string, string>>({})
-  const [saved, setSaved] = useState<Record<string, string>>({})
+  const [saved, setSaved] = useState<Record<string, EstadoResposta>>({})
   const [busy, setBusy] = useState(false)
   const [busyQuestion, setBusyQuestion] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
@@ -89,6 +110,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const attemptRef = useRef<TentativaIniciada | null>(null)
   const answerRef = useRef(answers)
   const savedRef = useRef(saved)
+  const savingRef = useRef(false)
   const cameraRef = useRef(cameraStatus)
   const cancelButton = useRef<HTMLButtonElement>(null)
   const withPhotos = photosEnabled()
@@ -124,23 +146,20 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       const result = await consultarConteudoTentativa(current.id)
       if (result.avaliacao_id !== current.avaliacao_id || result.iniciada_em !== current.iniciada_em ||
           result.limite_em !== current.limite_em) throw new Error('O conteúdo não corresponde à tentativa iniciada.')
-      if (withManagement) {
-        const previous = await consultarRespostasTentativa(current.id)
-        const values: Record<string, string> = {}
-        for (const answer of previous) {
-          const question = result.questoes.find(item => item.id === answer.questao_id)
-          if (!question || (answer.alternativa_id && !question.alternativas.some(item => item.id === answer.alternativa_id))) {
-            throw new Error('As respostas anteriores não correspondem às questões da tentativa.')
-          }
-          values[answer.questao_id] = answer.alternativa_id ?? answer.texto ?? ''
-        }
-        if (!activeRef.current || blockedRef.current) return
-        answerRef.current = values
-        savedRef.current = values
-        setAnswers(values)
-        setSaved(values)
+      const previous = await consultarRespostasTentativa(current.id)
+      const values: Record<string, string> = {}
+      const states: Record<string, EstadoResposta> = {}
+      for (const answer of previous) {
+        conferirQuestao(answer, result.questoes)
+        values[answer.questao_id] = valorResposta(answer)
+        states[answer.questao_id] = { salva: answer }
       }
-      if (activeRef.current && !blockedRef.current) setConteudo(result)
+      if (!activeRef.current || blockedRef.current) return
+      answerRef.current = values
+      savedRef.current = states
+      setAnswers(values)
+      setSaved(states)
+      setConteudo(result)
     } catch (cause) {
       if (activeRef.current && !blockedRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível carregar as questões.')
     } finally {
@@ -272,43 +291,110 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     }
   }
 
-  async function saveQuestion(question: QuestaoTentativa) {
+  function updateResponse(questionId: string, state: EstadoResposta) {
+    savedRef.current = { ...savedRef.current, [questionId]: state }
+    setSaved(savedRef.current)
+  }
+
+  function checkAvailable() {
+    if (!activeRef.current || blockedRef.current || closedRef.current || cameraRef.current !== 'ready') {
+      throw new Error('A tentativa ou a câmera está indisponível.')
+    }
+  }
+
+  async function sendResponse(payload: DadosRespostaTentativa) {
+    checkAvailable()
+    const previous = savedRef.current[payload.questao_id] ?? {}
+    updateResponse(payload.questao_id, { ...previous, pendente: payload })
+    let result: RespostaTentativa
+    try {
+      result = await salvarRespostaTentativa(payload)
+    } catch (cause) {
+      if (activeRef.current && !blockedRef.current && cause instanceof ErroSalvamentoResposta) {
+        if (cause.codigo === 'CONFLITO') updateResponse(payload.questao_id, { salva: previous.salva, conflito: true })
+        // Uma recusa na repetição não esclarece o resultado do primeiro envio.
+        if (cause.codigo === 'RECUSADA') updateResponse(payload.questao_id, previous)
+      }
+      throw cause
+    }
+    if (activeRef.current && !blockedRef.current) updateResponse(payload.questao_id, { salva: result })
+    checkAvailable()
+  }
+
+  async function saveAnswer(question: QuestaoTentativa) {
+    checkAvailable()
     const current = attemptRef.current
-    if (!current || blockedRef.current || cameraRef.current !== 'ready' || busyQuestion || busy) return
+    if (!current) throw new Error('Tentativa indisponível.')
+    const previous = savedRef.current[question.id]
+    if (previous?.conflito) throw new Error(`Confira a resposta salva da questão ${question.ordem} antes de enviar.`)
+    // Confirma o envio anterior antes de usar a próxima versão, mesmo se o aluno editou o campo após a falha.
+    if (previous?.pendente) await sendResponse(previous.pendente)
+    const value = answerRef.current[question.id] ?? ''
+    const confirmed = savedRef.current[question.id]?.salva
+    if (value === valorResposta(confirmed)) return
+    await sendResponse({
+      tentativa_id: current.id, questao_id: question.id, versao: (confirmed?.versao ?? 0) + 1,
+      alternativa_id: question.tipo === 'OBJETIVA' ? value || null : null,
+      texto: question.tipo === 'DISSERTATIVA' ? value || null : null,
+    })
+  }
+
+  async function reviewResponse(question: QuestaoTentativa) {
+    const current = attemptRef.current
+    if (!current || savingRef.current || blockedRef.current || cameraRef.current !== 'ready') return
+    savingRef.current = true
     setBusyQuestion(question.id)
     setError('')
+    setNotice('')
     try {
-      const result = await salvarRespostaTentativa(current.id, question, answerRef.current[question.id] ?? '')
-      if (!activeRef.current || blockedRef.current) return
-      const value = result.alternativa_id ?? result.texto ?? ''
-      const next = { ...savedRef.current, [question.id]: value }
-      savedRef.current = next
-      setSaved(next)
+      const responses = await consultarRespostasTentativa(current.id)
+      checkAvailable()
+      const response = responses.find(item => item.questao_id === question.id)
+      if (response) conferirQuestao(response, [question])
+      updateResponse(question.id, { salva: response, conferida: true })
+      setNotice(`Resposta da questão ${question.ordem} conferida. Sua resposta no formulário foi mantida.`)
+    } catch (cause) {
+      if (activeRef.current && !blockedRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível conferir a resposta.')
+    } finally {
+      savingRef.current = false
+      if (activeRef.current) setBusyQuestion(null)
+    }
+  }
+
+  async function saveQuestion(question: QuestaoTentativa) {
+    if (savingRef.current || blockedRef.current || cameraRef.current !== 'ready') return
+    savingRef.current = true
+    setBusyQuestion(question.id)
+    setError('')
+    setNotice('')
+    try {
+      await saveAnswer(question)
+      checkAvailable()
       setNotice(`Resposta da questão ${question.ordem} salva.`)
     } catch (cause) {
       if (activeRef.current && !blockedRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível salvar a resposta.')
     } finally {
+      savingRef.current = false
       if (activeRef.current) setBusyQuestion(null)
     }
   }
 
   async function finish() {
     const current = attemptRef.current
-    if (!current || !conteudo || busy || busyQuestion || blockedRef.current || cameraRef.current !== 'ready') return
+    if (!current || !conteudo || savingRef.current || blockedRef.current || cameraRef.current !== 'ready') return
+    savingRef.current = true
+    let sendingEnd = false
     setBusy(true)
     setError('')
+    setNotice('')
     try {
       for (const question of conteudo.questoes) {
-        if (blockedRef.current || cameraRef.current !== 'ready') throw new Error('A câmera ficou indisponível. A prova foi bloqueada.')
-        const value = answerRef.current[question.id] ?? ''
-        if (!value.trim() || value === (savedRef.current[question.id] ?? '')) continue
-        const result = await salvarRespostaTentativa(current.id, question, value)
-        savedRef.current = { ...savedRef.current, [question.id]: result.alternativa_id ?? result.texto ?? '' }
-        setSaved(savedRef.current)
+        await saveAnswer(question)
       }
-      if (blockedRef.current || cameraRef.current !== 'ready') throw new Error('A câmera ficou indisponível. A prova foi bloqueada.')
+      checkAvailable()
       const photosConfirmed = !withPhotos || await photos.flush()
-      if (blockedRef.current || cameraRef.current !== 'ready') return
+      checkAvailable()
+      sendingEnd = true
       closingRef.current = true
       await encerrarTentativa(current.id, 'ENVIO')
       closedRef.current = true
@@ -320,14 +406,15 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     } catch (cause) {
       if (activeRef.current && !blockedRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível confirmar o envio.')
     } finally {
-      closingRef.current = false
+      if (sendingEnd) closingRef.current = false
+      savingRef.current = false
       if (activeRef.current) setBusy(false)
     }
   }
 
   async function leave() {
     const current = attemptRef.current
-    if (!current || blockedRef.current || busy || busyQuestion) return
+    if (!current || blockedRef.current || savingRef.current) return
     await block('SAIDA')
   }
 
@@ -421,10 +508,22 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
               <textarea value={answers[question.id] ?? ''} maxLength={10000} disabled={busy || Boolean(busyQuestion)}
                 onChange={event => { setAnswers(current => ({ ...current, [question.id]: event.target.value })); setNotice('') }} />
             </label>}
-            <button type="button" className="turmas-refresh" disabled={busy || Boolean(busyQuestion) ||
-              !answers[question.id]?.trim() || answers[question.id] === saved[question.id]}
+            {saved[question.id]?.conflito && <p className="alert error" role="alert">O salvamento foi recusado. Confira a resposta salva antes de reenviar.</p>}
+            {saved[question.id]?.pendente && !busyQuestion && !busy && <p role="status">Salvamento sem confirmação. O reenvio confirma a resposta anterior antes de salvar alterações.</p>}
+            {saved[question.id]?.conferida && <div className="provas-aviso">
+              <strong>Resposta no servidor</strong>
+              <p className="questao-enunciado">{question.tipo === 'OBJETIVA'
+                ? question.alternativas.find(option => option.id === saved[question.id]?.salva?.alternativa_id)?.texto ?? 'Em branco'
+                : saved[question.id]?.salva?.texto ?? 'Em branco'}</p>
+            </div>}
+            {saved[question.id]?.conflito && <button type="button" className="turmas-refresh"
+              disabled={busy || Boolean(busyQuestion)} onClick={() => void reviewResponse(question)}>Conferir resposta salva</button>}
+            <button type="button" className="turmas-refresh" disabled={busy || Boolean(busyQuestion) || saved[question.id]?.conflito ||
+              (!saved[question.id]?.pendente && (answers[question.id] ?? '') === valorResposta(saved[question.id]?.salva))}
               onClick={() => void saveQuestion(question)}>
-              {busyQuestion === question.id ? 'Salvando...' : saved[question.id] === answers[question.id] ? 'Resposta salva' : 'Salvar resposta'}
+              {busyQuestion === question.id ? 'Aguarde...' : saved[question.id]?.pendente ? 'Reenviar resposta'
+                : !saved[question.id]?.conflito && saved[question.id]?.salva && (answers[question.id] ?? '') === valorResposta(saved[question.id]?.salva)
+                  ? 'Resposta salva' : 'Salvar resposta'}
             </button>
           </li>)}
         </ol>

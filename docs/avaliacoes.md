@@ -2,13 +2,13 @@
 
 Este documento detalha o contrato local até `028_salvar_resposta_tentativa.sql`, incluindo a API de respostas com controle de versão. A `entrega0911` acrescentou a tela de realização, encerramento, fotografias e reativação em `028_respostas_e_encerramento.sql`–`032`; consulte o [fluxo da entrega0911](tentativas-prova.md).
 
-**Integração em andamento:** com `033` e `034`, a API com versão e a tela da entrega0911 gravam em `respostas_tentativa`. A tela ainda chama a RPC antiga, sem conferir a versão enviada pelo aluno. Não executar as duas queries `028` nem reaplicar as anteriores; seguir o diagnóstico do banco e as etapas abaixo. Reativação de tentativas e interrupção por falha da câmera também precisam ser alinhadas à ficha do PFC.
+**Integração em andamento:** com `033` e `034`, a API com versão e a tela da entrega0911 gravam em `respostas_tentativa`. O painel agora chama a API com versão no salvamento individual e no envio final. Falta revogar o acesso à RPC antiga de quatro argumentos. Não executar as duas queries `028` nem reaplicar as anteriores; seguir o diagnóstico do banco e as etapas abaixo. Reativação de tentativas e interrupção por falha da câmera também precisam ser alinhadas à ficha do PFC.
 
 Para conferir o banco, executar [diagnostico-banco-provas.sql](diagnostico-banco-provas.sql) no SQL Editor do projeto configurado no ambiente local, com o papel `postgres`. A consulta identifica as tabelas, colunas e assinaturas das funções dos dois modelos, sem ler respostas nem alterar registros. Guardar o resultado antes de preparar a unificação. A existência dos objetos não confirma que todas as migrations foram aplicadas nem que os dados das duas tabelas coincidem.
 
 O diagnóstico informado na integração confirmou `respostas_tentativa`, consulta, encerramento, reativação e fotos, sem a tabela `respostas` nem a RPC com versão. Para esse banco, a tabela mantida será `respostas_tentativa`. Não executar `028_salvar_resposta_tentativa.sql`; seu contrato abaixo permanece como referência da implementação local anterior.
 
-RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta no banco/API, confirmação no painel do aluno e exibição do conteúdo na ordem sorteada persistida, sem gabarito. Respostas têm banco, função e API de salvamento; a conexão dessa API com a tela da entrega0911 e o salvamento automático ainda estão pendentes. As seções abaixo descrevem o contrato local; não representam os RF12–RF19 completos.
+RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta no banco/API, confirmação no painel do aluno e exibição do conteúdo na ordem sorteada persistida, sem gabarito. Respostas têm banco, função e API com versão conectada ao painel da entrega0911. O salvamento automático ainda está pendente. As seções abaixo descrevem o contrato local; não representam os RF12–RF19 completos.
 
 ## 033 — Preparação das respostas da entrega0911
 
@@ -20,7 +20,7 @@ Aplicar somente `database/033_preparar_respostas_com_versao.sql` no banco diagno
 - A consulta mantém `salva_em` e acrescenta ID, tentativa, versão, data inicial e `atualizado_em` (igual a `salva_em`). A tela atual aceita os campos adicionais. Permissões, MFA e RLS continuam aplicados.
 - Reaplicar a `033` preserva os IDs, versões e datas já preenchidos. A query é transacional e não altera as regras de câmera, fotos, reativação ou encerramento.
 
-Este bloco prepara os dados. A API com `p_versao` exige também a `034`, descrita abaixo. A chamada antiga não detecta uma versão desatualizada enviada pelo aluno; a conexão da tela à API continua pendente.
+Este bloco prepara os dados. A API com `p_versao` exige também a `034`, descrita abaixo. A chamada antiga não detecta uma versão desatualizada enviada pelo aluno; a conexão da tela exige a `034` e o serviço descrito abaixo.
 
 Teste local: `node --test tests/preparar-respostas-versao.test.ts`. Usa PGlite e sessões simuladas, sem acessar o Supabase remoto. Após aplicar a query, testar uma avaliação pela tela atual e conferir `id`, `versao`, `criado_em` e `salva_em` em `respostas_tentativa`: a segunda gravação deve aumentar a versão e manter ID/data inicial.
 
@@ -35,11 +35,11 @@ Com a `033` aplicada, executar somente `database/034_salvar_resposta_com_versao.
 - Mantém as validações da implementação local: aluno ativo, organização, sessão/MFA, vínculo, questão/alternativa da tentativa, situação e prazo. O bloqueio da tentativa serializa gravação, encerramento e as duas assinaturas de salvamento. Reenvio também exige acesso e prazo válidos.
 - Usa o trigger da `033` para a sequência e mantém ID/data inicial. Retorna os oito campos que a API já valida, com `atualizado_em` igual a `salva_em`. A consulta e a API leem a mesma resposta, sem gabarito.
 - Permite limpar alternativa/texto e preserva espaços da dissertativa, até 10.000 caracteres. O evento `RESPOSTA_SALVA` continua identificando a tentativa, como no modelo da entrega; não registra o conteúdo. Falha na auditoria desfaz a resposta e o incremento da versão.
-- A RPC antiga mantém seu contrato e segue disponível neste bloco. Ela ainda pode substituir uma resposta sem verificar a versão do cliente. Conectar a tela à API e retirar o acesso à assinatura antiga são os próximos passos para concluir a proteção.
+- A RPC antiga mantém seu contrato e segue disponível neste bloco. Ela ainda pode substituir uma resposta sem verificar a versão do cliente. O painel já usa a API com versão; retirar o acesso à assinatura antiga fica para o próximo bloco.
 
 Testes: `node --test tests/respostas-entrega.test.ts tests/salvar-resposta-tentativa-api.test.ts tests/fotos-sql.test.ts`. A API é exercitada com a função SQL real no PGlite; Auth/HTTP são simulados. Inclui aplicação sobre respostas existentes, reaplicação, versões, reenvio após perda da confirmação, permissões, prazo, encerramento, rollback de auditoria e compatibilidade com fotos. PGlite serializa transações; não substitui concorrência entre conexões reais nem validação do PostgREST remoto.
 
-Conferência após aplicar no Supabase: `SELECT to_regprocedure('public.salvar_resposta_tentativa(uuid,uuid,integer,uuid,text)');` deve retornar a assinatura. A query solicita atualização do cache de funções do PostgREST. O teste do fluxo completo pela tela será feito ao conectar o frontend à API; abrir o console ou mudar de foco durante a prova atual pode interromper a tentativa.
+Conferência após aplicar no Supabase: `SELECT to_regprocedure('public.salvar_resposta_tentativa(uuid,uuid,integer,uuid,text)');` deve retornar a assinatura. A query solicita atualização do cache de funções do PostgREST. O frontend já está conectado à API; validar o fluxo no Supabase configurado seguindo o teste manual abaixo. Abrir o console ou mudar de foco durante a prova atual pode interromper a tentativa.
 
 Referências: [bloqueios no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html) e [funções no Supabase](https://supabase.com/docs/guides/database/functions).
 
@@ -52,9 +52,26 @@ Referências: [bloqueios no PostgreSQL](https://www.postgresql.org/docs/current/
 - A confirmação precisa ser HTTP 200 e corresponder à tentativa, questão, versão e conteúdo enviados. Preserva espaços e quebras de linha; texto vazio é confirmado como `null`, conforme a função SQL.
 - `ErroSalvamentoResposta.codigo` distingue `CONFLITO` (409), `RECUSADA` (entrada, sessão ou recusa explícita) e `NAO_CONFIRMADA` (rede, servidor ou confirmação inválida). Isso permite que a tela trate o conflito sem comparar mensagens de texto. Em confirmação perdida, manter o mesmo conteúdo e versão para eventual reenvio explícito.
 
-O painel ainda usa as funções antigas de `tentativas.ts`. Próximo bloco: conectar o formulário e o envio final ao novo serviço, manter a versão por questão e tratar respostas pendentes sem perder o texto digitado. Depois, retirar a chamada antiga sem versão.
+O `TentativaMonitoradaPanel` usa esse serviço. As funções antigas de consulta e salvamento foram retiradas de `tentativas.ts`; início, conteúdo e encerramento permanecem nesse arquivo.
 
-Teste local: `npm run test:ui -- tests/respostas-service.test.tsx tests/tentativas-service.test.tsx`. Sessão, RPC e HTTP simulados; não acessa o Supabase remoto. Cobre consulta, erros, versões explícitas, limpeza, confirmação divergente, reenvio após falha e alteração do objeto enquanto a sessão é consultada.
+- Consulta as respostas e suas versões antes de liberar os campos, mesmo sem a gestão de tentativas habilitada. Erro de consulta permite repetir o carregamento, sem presumir versão inicial.
+- Salvar e Enviar prova usam o mesmo fluxo. Só envia conteúdo alterado, com a próxima versão; preserva espaços e permite apagar uma dissertativa já salva.
+- Sem confirmação, mantém o conteúdo e a versão enviados em memória. Reenviar confirma essa pendência primeiro e, se o campo mudou depois da falha, grava a alteração na versão seguinte. Uma recusa durante essa repetição não descarta a pendência original.
+- Conflito mantém o formulário e impede novo envio daquela questão. **Conferir resposta salva** consulta e mostra a resposta do servidor, sem escrever ou substituir o campo. Depois de conferir, o aluno pode salvar sua resposta explicitamente.
+- Envios são sequenciais; campos e botões ficam indisponíveis durante a requisição. Falha de salvamento impede o encerramento por envio. Na repetição, respostas já confirmadas não são gravadas de novo. Saída, prazo e câmera continuam com as regras existentes.
+
+Não há salvamento automático nem armazenamento de respostas no navegador após sair/recarregar. Sem query nova neste bloco. Próximo: revogar a assinatura antiga de quatro argumentos, ainda acessível no banco.
+
+Teste manual, com `033` e `034` aplicadas e `npm run dev:full`:
+
+1. Iniciar uma avaliação de teste com questões objetiva e dissertativa. Salvar cada resposta, alterar e salvar novamente.
+2. Apagar a dissertativa já salva e clicar em Salvar resposta; o campo deve continuar vazio e confirmado.
+3. Alterar respostas sem salvar individualmente e usar Enviar prova, confirmando o encerramento.
+4. Depois de sair da prova, conferir em `respostas_tentativa` o conteúdo final, a versão crescente e o mesmo ID/data inicial. Conferir também os eventos de salvamento e encerramento.
+
+Não trocar de aba ou abrir ferramentas que tirem o foco durante o teste real: a regra atual interrompe a tentativa. Falhas de rede, conflitos e confirmações tardias são cobertos nos testes simulados.
+
+Teste local: `npm run test:ui -- tests/respostas-service.test.tsx tests/tentativas-service.test.tsx tests/tentativa-monitorada.test.tsx tests/tentativa-com-fotos.test.tsx`. Sessão, RPC e HTTP simulados; não acessa o Supabase remoto. Cobre consulta, erros, versões explícitas, limpeza, confirmação divergente, reenvio após falha e alteração do objeto enquanto a sessão é consultada.
 
 Referências: [RPC no Supabase](https://supabase.com/docs/reference/javascript/rpc) e [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch).
 

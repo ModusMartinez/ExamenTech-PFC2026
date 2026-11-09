@@ -5,8 +5,11 @@ import { TentativaMonitoradaPanel } from '../src/components/TentativaMonitoradaP
 import type { AvaliacaoAluno } from '../src/services/avaliacaoValidation'
 
 const services=vi.hoisted(()=>({start:vi.fn(),content:vi.fn(),answers:vi.fn(),save:vi.fn(),end:vi.fn(),plan:vi.fn(),send:vi.fn(),capture:vi.fn(),stop:vi.fn()}))
+vi.mock('../src/lib/supabase', () => ({ supabase: {} }))
 vi.mock('../src/services/tentativas',()=>({iniciarTentativa:services.start,consultarConteudoTentativa:services.content,
-  consultarRespostasTentativa:services.answers,salvarRespostaTentativa:services.save,encerrarTentativa:services.end}))
+  encerrarTentativa:services.end}))
+vi.mock('../src/services/respostasTentativa',async importOriginal=>({...await importOriginal<typeof import('../src/services/respostasTentativa')>(),
+  consultarRespostasTentativa:services.answers,salvarRespostaTentativa:services.save}))
 vi.mock('../src/services/examFeatures',()=>({photosEnabled:()=>true,examManagementEnabled:()=>true}))
 vi.mock('../src/services/examPhotos',()=>({PHOTO_NOTICE:'Uma foto inicial e três durante a prova. Prazo máximo de 90 dias.',
   PHOTO_NOTICE_VERSION:'2026-11-08-fotos-v1',consultarPlanoFotos:services.plan,enviarFoto:services.send}))
@@ -29,7 +32,9 @@ beforeEach(()=>{
   services.start.mockResolvedValue(attempt)
   services.content.mockResolvedValue({tentativa_id:attempt.id,avaliacao_id:assessment.id,titulo:assessment.titulo,tipo:'PROVA',
     iniciada_em:attempt.iniciada_em,limite_em:attempt.limite_em,questoes:[question]})
-  services.answers.mockResolvedValue([{questao_id:question.id,alternativa_id:question.alternativas[1].id,texto:null,salva_em:'2026-11-08T12:00:00Z'}])
+  services.answers.mockResolvedValue([{id:'80000000-0000-0000-0000-000000000001',tentativa_id:attempt.id,
+    questao_id:question.id,alternativa_id:question.alternativas[1].id,texto:null,versao:2,
+    criado_em:'2026-11-08T12:00:00Z',atualizado_em:'2026-11-08T12:00:00Z'}])
   services.plan.mockImplementation(async()=>({tentativa_id:attempt.id,ciclo:2,servidor_em:new Date().toISOString(),
     capturas:['INICIAL','PROVA_1','PROVA_2','PROVA_3'].map((momento,i)=>({id:`70000000-0000-0000-0000-00000000000${i+1}`,
       momento,agendada_em:new Date(Date.now()+i*600000).toISOString(),recebida_em:null}))}))
