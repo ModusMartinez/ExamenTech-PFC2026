@@ -4,7 +4,27 @@ Este documento detalha o contrato local até `028_salvar_resposta_tentativa.sql`
 
 **Integração em andamento:** a API local grava em `respostas`, enquanto a tela da entrega0911 chama a RPC sem versão e grava em `respostas_tentativa`. A união dos arquivos ainda não unifica esses dados. Não executar as duas queries `028` nem as seguintes no Supabase como parte deste merge; primeiro conciliar as estruturas com o que já foi aplicado em cada banco. Reativação de tentativas e interrupção por falha da câmera também precisam ser alinhadas à ficha do PFC.
 
+Para conferir o banco, executar [diagnostico-banco-provas.sql](diagnostico-banco-provas.sql) no SQL Editor do projeto configurado no ambiente local, com o papel `postgres`. A consulta identifica as tabelas, colunas e assinaturas das funções dos dois modelos, sem ler respostas nem alterar registros. Guardar o resultado antes de preparar a unificação. A existência dos objetos não confirma que todas as migrations foram aplicadas nem que os dados das duas tabelas coincidem.
+
+O diagnóstico informado na integração confirmou `respostas_tentativa`, consulta, encerramento, reativação e fotos, sem a tabela `respostas` nem a RPC com versão. Para esse banco, a tabela mantida será `respostas_tentativa`. Não executar `028_salvar_resposta_tentativa.sql`; seu contrato abaixo permanece como referência da implementação local anterior.
+
 RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta no banco/API, confirmação no painel do aluno e exibição do conteúdo na ordem sorteada persistida, sem gabarito. Respostas têm banco, função e API de salvamento; a conexão dessa API com a tela da entrega0911 e o salvamento automático ainda estão pendentes. As seções abaixo descrevem o contrato local; não representam os RF12–RF19 completos.
+
+## 033 — Preparação das respostas da entrega0911
+
+Aplicar somente `database/033_preparar_respostas_com_versao.sql` no banco diagnosticado. A query exige a base de respostas e consulta da entrega0911 e recusa bancos que também tenham `public.respostas`, para evitar escolher entre registros de duas tabelas automaticamente.
+
+- Acrescenta `id`, `versao` e `criado_em` a `respostas_tentativa`, mantendo a chave por tentativa/questão. Conteúdo, `salva_em`, tentativas e eventos anteriores são preservados. A tabela antiga `respostas_prova` não é alterada.
+- Respostas existentes começam com versão 1. Como não há histórico do primeiro envio, `criado_em` recebe o `salva_em` conhecido na aplicação da query. Para novas respostas, recebe a data do primeiro envio.
+- Um trigger mantém ID e data inicial nas atualizações e incrementa a versão. A RPC sem versão continua com os mesmos parâmetros e retorno. Cada atualização por ela avança a versão, inclusive reenvio do mesmo conteúdo.
+- A consulta mantém `salva_em` e acrescenta ID, tentativa, versão, data inicial e `atualizado_em` (igual a `salva_em`). A tela atual aceita os campos adicionais. Permissões, MFA e RLS continuam aplicados.
+- Reaplicar a `033` preserva os IDs, versões e datas já preenchidos. A query é transacional e não altera as regras de câmera, fotos, reativação ou encerramento.
+
+Este bloco prepara os dados. A API com `p_versao` ainda não funciona nesse banco; falta adaptar sua função SQL para esta tabela e conectar a tela. A chamada antiga não detecta uma versão desatualizada enviada pelo aluno. Não representa a proteção contra sobrescrita concluída.
+
+Teste local: `node --test tests/preparar-respostas-versao.test.ts`. Usa PGlite e sessões simuladas, sem acessar o Supabase remoto. Após aplicar a query, testar uma avaliação pela tela atual e conferir `id`, `versao`, `criado_em` e `salva_em` em `respostas_tentativa`: a segunda gravação deve aumentar a versão e manter ID/data inicial.
+
+Referência: [alteração de tabelas no PostgreSQL](https://www.postgresql.org/docs/current/ddl-alter.html).
 
 ## Dados e regras
 

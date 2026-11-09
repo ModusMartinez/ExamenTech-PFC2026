@@ -15,6 +15,7 @@ test('fotos: aviso, quatro horários, acesso restrito, reenvio idempotente e exc
     GRANT SELECT ON storage.objects TO authenticated;
     CREATE POLICY exemplo_permissiva_antiga ON storage.objects FOR SELECT TO authenticated USING(TRUE)`)
   await db.exec(await readFile(new URL('../database/031_fotos_tentativa.sql',import.meta.url),'utf8'))
+  await db.exec(await readFile(new URL('../database/033_preparar_respostas_com_versao.sql',import.meta.url),'utf8'))
   const { avaliacaoId } = await criarProva()
   const iniciar = () => queryAs<{t:{id:string}}>(aluno,'SELECT public.iniciar_tentativa_com_fotos($1,$2,$3) AS t',
     [avaliacaoId,'2026-11-06-v2','2026-11-08-fotos-v1'])
