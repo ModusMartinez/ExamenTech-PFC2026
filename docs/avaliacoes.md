@@ -1,6 +1,6 @@
-# Avaliações (019–027)
+# Avaliações (019–028)
 
-RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta no banco/API, confirmação no painel do aluno e exibição do conteúdo na ordem sorteada persistida, sem gabarito. Respostas, finalização e cancelamento ainda pendentes. Não representa os RF12–RF19 completos.
+RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta no banco/API, confirmação no painel do aluno e exibição do conteúdo na ordem sorteada persistida, sem gabarito. Respostas têm banco, função e API de salvamento; falta a interface com salvamento automático. Finalização e cancelamento ainda pendentes. Não representa os RF12–RF19 completos.
 
 ## Dados e regras
 
@@ -699,7 +699,7 @@ Referências: [funções e permissões no Supabase](https://supabase.com/docs/gu
 - Reutiliza o contrato `AvaliacaoAluno`, a validação `lerMinhasAvaliacoes` e os estilos de tabela existentes. Sem dependências ou query adicionais.
 - **Atualizar** consulta novamente e fica desabilitado durante o carregamento. Carregamento, vazio e erro têm mensagens próprias; falha oculta a lista anterior. Resposta atrasada de uma tela fechada é ignorada.
 - Foco no título ao abrir; tabela com cabeçalhos e rolagem horizontal acessível por teclado no celular. Textos longos quebram linha, sem interpretar HTML.
-- Este bloco permite consultar as avaliações. O botão de início, respostas e resultados continuam pendentes. Os links legais permanecem no rodapé.
+- A listagem agora tem botão de início, descrito abaixo. Os links legais permanecem no rodapé. Respostas na interface e resultados continuam pendentes.
 
 Teste manual com a `024` aplicada e `npm run dev:full`:
 
@@ -748,7 +748,7 @@ console.log(resultadoTentativa.data, resultadoTentativa.error);
 
 Teste automatizado: `node --test tests/tentativas-sql.test.ts`. Executa funções, constraints, RLS e rollback no PostgreSQL local (PGlite), com identidades fictícias. PGlite serializa transações; chamadas enfileiradas e unicidade são testadas, mas não conexões simultâneas reais do Supabase. Nenhuma consulta ou gravação remota é feita pelos testes.
 
-Pendentes neste fluxo: respostas, encerramento, controle de saída/desconexão e captura inicial. A criação do registro ainda não representa uma prova executável; ultrapassar `limite_em` não altera a situação automaticamente neste bloco.
+Pendentes neste fluxo: interface das respostas, encerramento, controle de saída/desconexão e captura inicial. A criação do registro ainda não representa uma prova executável; ultrapassar `limite_em` não altera a situação automaticamente neste bloco.
 
 Referências: [unicidade no PostgreSQL](https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-UNIQUE-CONSTRAINTS), [bloqueios de linhas](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS), [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions).
 
@@ -854,7 +854,7 @@ console.log(resultadoConteudo.data, resultadoConteudo.error);
 
 Testes: `node --test tests/conteudo-tentativa.test.ts tests/ordem-tentativa.test.ts tests/tentativas-sql.test.ts tests/iniciar-tentativa.test.ts`. PostgreSQL local via PGlite, sem acesso remoto. Cobrem retorno permitido, ordem persistida, isolamento, MFA/sessão, vínculos, horários, preservação dos registros e acesso direto bloqueado.
 
-**Situação dos RF17–RF19:** ainda parciais. Início e consulta têm banco e API; o sorteio fica salvo no banco. A interface já permite iniciar e visualizar as questões. Faltam os campos e o salvamento das respostas objetivas/dissertativas. A execução também precisará vincular a tentativa à sessão inicial e encerrar o acesso por saída/desconexão, conforme a ficha; esta consulta valida a sessão atual, mas não detecta esses eventos. Finalização e cancelamento serão tratados nos blocos próprios.
+**Situação dos RF17–RF19:** ainda parciais. Início e consulta têm banco e API; o sorteio fica salvo no banco. A interface já permite iniciar e visualizar as questões. A query `028` e a API salvam respostas objetivas/dissertativas; faltam os campos com salvamento automático na interface. A execução também precisará vincular a tentativa à sessão inicial e encerrar o acesso por saída/desconexão, conforme a ficha; esta consulta valida a sessão atual, mas não detecta esses eventos. Finalização e cancelamento serão tratados nos blocos próprios.
 
 Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions), [agregação com ordem no PostgreSQL](https://www.postgresql.org/docs/current/functions-aggregate.html), [construção explícita de JSON](https://www.postgresql.org/docs/current/functions-json.html).
 
@@ -953,4 +953,121 @@ npm run build
 
 Os testes usam serviços reais do frontend com sessão e HTTP simulados, sem acessar o Supabase remoto. Cobrem cancelamento, clique duplo, ordem salva, texto seguro, falhas de início/consulta, prazo e resposta atrasada. Prévia local conferida em desktop e celular com dados fictícios; validação integrada com o Supabase fica para o teste manual.
 
-Próximo bloco: banco e regras para salvar respostas da tentativa. RF17–RF19 ainda não estão concluídos.
+Banco e regras das respostas adicionados na `028`, descrita abaixo. RF17–RF19 ainda não estão concluídos.
+
+
+## 028 — Banco e regras das respostas
+
+Aplicar `database/028_salvar_resposta_tentativa.sql` depois da `027`. Este bloco cria `public.respostas` e `public.salvar_resposta_tentativa`. Sem mudança nas APIs ou telas.
+
+- Uma linha por tentativa/questão: `id`, `tentativa_id`, `questao_id`, `alternativa_id`, `texto`, `versao`, `criado_em` e `atualizado_em`. Guarda a última resposta recebida; não guarda todas as versões do texto.
+- Objetiva recebe o ID da alternativa da própria questão e tentativa. Dissertativa recebe até 10.000 caracteres. Não aceita texto em objetiva nem alternativa em dissertativa. O limite de texto é uma decisão deste bloco, não um limite especificado na ficha.
+- Espaços e quebras de linha da dissertativa são preservados. Texto vazio vira `NULL`. Enviar ambos os campos como `NULL` limpa a resposta, mantendo o registro. Não há exclusão pela aplicação.
+- FKs exigem questão da ordem salva e alternativa vinculada àquela questão/tentativa. Um índice único na tabela de alternativas sorteadas permite a FK com os três IDs. Tentativas antigas sem ordem salva não recebem respostas.
+- Somente o aluno dono, ativo, da organização ativa, com sessão válida, MFA e matrícula ativa. Turma precisa estar ativa, avaliação publicada e tentativa em andamento, dentro da janela e do prazo. Professor/admin não respondem pelo aluno.
+- A função bloqueia a tentativa durante a gravação e confere o relógio do banco depois dos bloqueios. Alterar uma resposta não muda o prazo, a situação ou o sorteio. Finalização e cancelamento ainda não são implementados pela `028`.
+- RLS habilitada e acesso direto à tabela revogado. A função pública usa `SECURITY INVOKER`; a privada usa `SECURITY DEFINER`, `search_path` vazio e as mesmas verificações mesmo quando chamada diretamente.
+- Cada nova versão registra `RESPOSTA_SALVA` na mesma transação. `recurso_id` aponta para `respostas.id`. O log registra usuário, ação e horário, sem texto, alternativa selecionada ou gabarito. Se a auditoria falhar, a resposta também é desfeita. A constraint de eventos da `025` é preservada.
+
+### Versões e confirmação
+
+A primeira gravação de cada questão usa `p_versao: 1`; a alteração seguinte usa `2`, depois `3` etc. Repetir a última versão com o mesmo conteúdo devolve a mesma confirmação, sem atualizar horário ou duplicar evento. Versão antiga, salto na sequência ou versão repetida com outro conteúdo retorna erro.
+
+Isso evita que um envio atrasado substitua uma resposta mais recente. A futura interface deverá enviar uma gravação por vez por questão, avançar a versão após confirmar o salvamento e repetir o mesmo conteúdo/versão se perder a confirmação. Mesmo uma repetição exige acesso e prazo válidos. Não é um mecanismo de retomada da avaliação.
+
+Contrato da RPC:
+
+```text
+salvar_resposta_tentativa(
+  p_tentativa_id UUID,
+  p_questao_id UUID,
+  p_versao INTEGER,
+  p_alternativa_id UUID = NULL,
+  p_texto TEXT = NULL
+)
+```
+
+Retorno: objeto com os oito campos da resposta. Sem gabarito, correção ou nota. Erros SQL: `42501` para sessão/perfil/MFA; `P0002` para tentativa fora do acesso ou questão ausente na ordem; `23514` para formato/tamanho/tipo da resposta; `55000` para prazo, situação ou versão incompatível. UUID malformado é recusado pelo PostgreSQL.
+
+### Teste manual
+
+1. Aplicar a `028` no SQL Editor. Executar `npm run dev:full`, entrar como aluno com MFA e matrícula ativa e iniciar uma avaliação nova de teste, com questões objetivas e dissertativas. Usar o ID dessa tentativa; o teste precisa ocorrer antes do prazo.
+2. No console do navegador, substituir os IDs e executar. Obter os IDs da questão e alternativa na resposta de `/api/conteudo-tentativa`, na aba Network. Não usar o SQL Editor para simular o aluno, pois ele tem privilégios administrativos.
+
+```js
+const { supabase: supabaseRespostas } = await import('/src/lib/supabase.ts');
+const respostaObjetiva = await supabaseRespostas.rpc('salvar_resposta_tentativa', {
+  p_tentativa_id: 'UUID_DA_TENTATIVA',
+  p_questao_id: 'UUID_DA_QUESTAO_OBJETIVA',
+  p_versao: 1,
+  p_alternativa_id: 'UUID_DA_ALTERNATIVA',
+});
+console.log(respostaObjetiva.data, respostaObjetiva.error);
+
+const respostaDissertativa = await supabaseRespostas.rpc('salvar_resposta_tentativa', {
+  p_tentativa_id: 'UUID_DA_TENTATIVA',
+  p_questao_id: 'UUID_DA_QUESTAO_DISSERTATIVA',
+  p_versao: 1,
+  p_texto: 'Resposta de teste.\nSegunda linha.',
+});
+console.log(respostaDissertativa.data, respostaDissertativa.error);
+```
+
+3. Conferir duas linhas em `respostas` e dois eventos `RESPOSTA_SALVA`. Repetir os mesmos parâmetros: mesmos IDs/horários, sem novas linhas ou eventos. Para alterar, usar versão `2`; para limpar, enviar os campos de conteúdo como `null` na próxima versão.
+4. Tentar enviar uma versão antiga, alternativa de outra questão ou como outro usuário: erro e preservação da resposta salva. Depois de vencer o prazo, novos salvamentos e repetições devem ser recusados.
+
+Teste automatizado: `node --test tests/respostas-tentativa.test.ts`. Usa PostgreSQL local via PGlite: salvamento e limpeza, versões, isolamento, MFA/sessão, vínculos, prazo, FKs, acesso direto bloqueado, rollback da auditoria e reaplicação. PGlite enfileira transações; disputa de versão é testada, mas concorrência entre conexões reais no Supabase fica para a validação integrada.
+
+**Para concluir o grupo RF17–RF19:** adicionar seleção de alternativa e texto dissertativo com salvamento automático e estados de confirmação/erro; validar o fluxo completo. A execução também precisa cumprir a regra da ficha de encerrar acesso por saída/desconexão e impedir retomada, vinculando a tentativa à sessão inicial. A `028` ainda valida somente a sessão atual. Finalização automática/manual, correção e publicação de resultados pertencem aos outros grupos de RFs.
+
+API de salvamento adicionada conforme a seção abaixo.
+
+Referências: [INSERT e ON CONFLICT no PostgreSQL](https://www.postgresql.org/docs/current/sql-insert.html), [bloqueios de linhas](https://www.postgresql.org/docs/current/explicit-locking.html), [segurança de funções no Supabase](https://supabase.com/docs/guides/database/functions).
+
+
+## API de salvamento das respostas
+
+`POST /api/salvar-resposta-tentativa` → `auth.getUser` → `public.salvar_resposta_tentativa` da `028` → validação da confirmação. Rota registrada em `scripts/api-dev.ts`, no mesmo padrão das APIs de início e conteúdo. Sem query ou dependência nova.
+
+- Exige `Authorization: Bearer <access_token>` e `Content-Type: application/json`. Recebe `tentativa_id`, `questao_id`, `versao` e pelo menos um dos campos `alternativa_id` ou `texto`. Campos extras e parâmetros na URL são recusados. Para limpar, enviar conteúdo explicitamente `null`.
+- A versão deve ser inteira entre 1 e 2.147.483.647. Texto aceita até 10.000 caracteres Unicode, preservando espaços e quebras de linha. NUL, Unicode inválido e conteúdo misturando alternativa e texto são recusados antes de chamar o banco. O servidor local permite até 128 KiB nessa rota para comportar o texto com Unicode escapado; demais limites existentes são mantidos.
+- `respostaValidation.ts` concentra os tipos e a validação dos dados enviados e recebidos, reaproveitando UUID e datas do projeto. Texto vazio segue até a função, que confere o tipo da questão e o converte em `NULL`.
+- A RPC usa a chave pública e a sessão do aluno. Dono, perfil, organização, MFA, matrícula, prazo e sequência da versão continuam validados no banco. Não usa service role nem aceita aluno ou horários no corpo.
+- Sucesso: `200` com `{ resposta }`, tanto na criação como na alteração ou repetição confirmada. Confere tentativa, questão, versão, alternativa e texto; devolve somente os oito campos da resposta. Datas e IDs são normalizados, sem gabarito, nota ou colunas internas.
+- Erros: `400` para entrada/tipo de resposta inválidos; `401` sessão inválida; `403` perfil/MFA sem permissão; `404` tentativa/questão fora do acesso; `409` tentativa indisponível ou versão fora de sequência; `415` formato diferente de JSON; `405` método diferente de POST; `503` indisponibilidade ou confirmação inválida. Respostas sem cache e sem detalhes internos do banco.
+- Não repete a RPC automaticamente. Se a confirmação se perder, a resposta pode já estar gravada: repetir **o mesmo conteúdo e a mesma versão**, enquanto o acesso e o prazo forem válidos. A `028` confirma essa repetição sem duplicar registro ou auditoria. Não avançar a versão antes de confirmar.
+
+### Teste manual da API
+
+1. Com a `028` aplicada, executar `npm run dev:full`. Entrar como aluno com MFA e matrícula ativa e iniciar uma avaliação nova de teste dentro da janela.
+2. Na aba Network, obter o ID da tentativa, questão e alternativa da consulta de conteúdo. No console do navegador, substituir os IDs e executar:
+
+```js
+const { supabase: supabaseApiResposta } = await import('/src/lib/supabase.ts');
+const { data: sessaoApiResposta } = await supabaseApiResposta.auth.getSession();
+const dadosApiResposta = {
+  tentativa_id: 'UUID_DA_TENTATIVA',
+  questao_id: 'UUID_DA_QUESTAO_OBJETIVA',
+  versao: 1,
+  alternativa_id: 'UUID_DA_ALTERNATIVA',
+};
+const retornoApiResposta = await fetch('/api/salvar-resposta-tentativa', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${sessaoApiResposta.session.access_token}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify(dadosApiResposta),
+});
+console.log(retornoApiResposta.status, await retornoApiResposta.json());
+```
+
+3. Esperado: `200`, uma linha em `respostas` e um evento `RESPOSTA_SALVA`. Repetir a requisição mantendo os dados: mesmos ID/horários e nenhum novo evento. Para alterar, usar a versão seguinte.
+4. Para dissertativa, usar seu ID e trocar `alternativa_id` por `texto`. Texto vazio limpa a resposta. Se a questão já foi respondida no teste da RPC, usar a próxima versão ou uma avaliação nova de teste.
+5. Enviar uma versão antiga após alterar a resposta: `409`. Outro aluno: `404`; professor/admin ou sem MFA: `403`; prazo vencido: `409`. As recusas não devem alterar a resposta já salva.
+
+Testes: `node --test tests/salvar-resposta-tentativa-api.test.ts tests/respostas-tentativa.test.ts`. Integração com SQL real no PGlite e Auth/HTTP simulados, sem acesso ao Supabase remoto. Cobrem gravação, alteração, limpeza, repetição após perda da confirmação, Unicode, permissões, prazo, rollback de auditoria e proteção dos campos retornados. Lint e build verificados. Rota e limites de tamanho conferidos também por HTTP no servidor local, com Auth/RPC simulados.
+
+Próximo bloco: chamada da API no frontend e campos de resposta com salvamento automático, mantendo as etapas pequenas. RF17–RF19 continuam parciais.
+
+Referências: [identidade pelo Supabase Auth](https://supabase.com/docs/reference/javascript/auth-getuser), [chamada RPC](https://supabase.com/docs/reference/javascript/rpc).
