@@ -43,6 +43,21 @@ Conferência após aplicar no Supabase: `SELECT to_regprocedure('public.salvar_r
 
 Referências: [bloqueios no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html) e [funções no Supabase](https://supabase.com/docs/guides/database/functions).
 
+## Serviço de respostas com versão no frontend
+
+`src/services/respostasTentativa.ts` reúne a consulta e o salvamento com versão, reutilizando `respostaValidation.ts`. Sem query ou dependência adicional; a consulta exige a `033` e o salvamento exige a `034`.
+
+- `consultarRespostasTentativa(id)` chama a RPC de consulta existente. Confere IDs, versão, conteúdo e datas; recusa registros de outra tentativa, duplicados e respostas incompletas. Retorna somente os oito campos previstos. Erro de consulta não vira lista vazia.
+- `salvarRespostaTentativa(dados)` recebe tentativa, questão, versão, alternativa e texto. Usa a sessão atual e faz um POST em `/api/salvar-resposta-tentativa`, sem cache. Não consulta a versão mais recente para substituir a enviada nem repete a gravação automaticamente.
+- A confirmação precisa ser HTTP 200 e corresponder à tentativa, questão, versão e conteúdo enviados. Preserva espaços e quebras de linha; texto vazio é confirmado como `null`, conforme a função SQL.
+- `ErroSalvamentoResposta.codigo` distingue `CONFLITO` (409), `RECUSADA` (entrada, sessão ou recusa explícita) e `NAO_CONFIRMADA` (rede, servidor ou confirmação inválida). Isso permite que a tela trate o conflito sem comparar mensagens de texto. Em confirmação perdida, manter o mesmo conteúdo e versão para eventual reenvio explícito.
+
+O painel ainda usa as funções antigas de `tentativas.ts`. Próximo bloco: conectar o formulário e o envio final ao novo serviço, manter a versão por questão e tratar respostas pendentes sem perder o texto digitado. Depois, retirar a chamada antiga sem versão.
+
+Teste local: `npm run test:ui -- tests/respostas-service.test.tsx tests/tentativas-service.test.tsx`. Sessão, RPC e HTTP simulados; não acessa o Supabase remoto. Cobre consulta, erros, versões explícitas, limpeza, confirmação divergente, reenvio após falha e alteração do objeto enquanto a sessão é consultada.
+
+Referências: [RPC no Supabase](https://supabase.com/docs/reference/javascript/rpc) e [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch).
+
 ## Dados e regras
 
 `public.avaliacoes`: ID, turma, professor autor, título, tipo, início, fim, duração em minutos, situação e data de criação. A avaliação pertence à turma inteira; não há seleção individual de alunos.
