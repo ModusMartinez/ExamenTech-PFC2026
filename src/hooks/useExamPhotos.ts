@@ -3,16 +3,22 @@ import type { RefObject } from 'react'
 import { capturePhotoFrame } from '../services/photoEvidence'
 import { consultarPlanoFotos, enviarFoto } from '../services/examPhotos'
 import type { PhotoPlan, PhotoSlot } from '../services/examPhotos'
+import { ErroAcessoTentativa, ErroConexaoTentativa } from '../services/tentativaValidation'
 
 type Pending = { slot: PhotoSlot; blob: Blob | null; uploadId: string; sending?: Promise<boolean> }
-type Session = { active: boolean; plan: PhotoPlan; offset: number; captured: Set<string>; failed: Set<string>; pending: Map<string, Pending>;
+type Session = { active: boolean; chaveExecucao: string; plan: PhotoPlan; offset: number; captured: Set<string>; failed: Set<string>; pending: Map<string, Pending>;
   timers: number[]; abort: AbortController }
 
-export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptureFailure: () => void) {
+export function useExamPhotos(
+  video: RefObject<HTMLVideoElement | null>,
+  onCaptureFailure: () => void,
+  onExecutionFailure: (cause: unknown) => void,
+) {
   const session = useRef<Session | null>(null)
   const generation = useRef(0)
   const mounted = useRef(true)
   const callback = useRef(onCaptureFailure)
+  const reportFailure = useRef(onExecutionFailure)
   const [pending, setPending] = useState(0)
   const [initialReady, setInitialReady] = useState(false)
   const [message, setMessage] = useState('')
@@ -20,6 +26,7 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
   const preparation = useRef<Promise<boolean> | null>(null)
   const [preparing, setPreparing] = useState(false)
   useEffect(() => { callback.current = onCaptureFailure }, [onCaptureFailure])
+  useEffect(() => { reportFailure.current = onExecutionFailure }, [onExecutionFailure])
 
   const dispose = useCallback(() => {
     generation.current++
@@ -43,7 +50,7 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
           // Cada requisição tem tempo limitado. O mesmo arquivo e uploadId são
           // reutilizados: perder a resposta não cria uma segunda fotografia.
           const signal = AbortSignal.any([current.abort.signal, AbortSignal.timeout(12000)])
-          await enviarFoto(item.slot.id, item.uploadId, item.blob, signal)
+          await enviarFoto(item.slot.id, item.uploadId, item.blob, signal, current.chaveExecucao)
           if (!current.active) return false
           item.blob = null
           current.pending.delete(item.slot.id)
@@ -51,8 +58,12 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
           if (item.slot.momento === 'INICIAL') setInitialReady(true)
           if (current.pending.size === 0) setMessage('')
           return true
-        } catch {
+        } catch (cause) {
           if (!current.active) return false
+          if (cause instanceof ErroConexaoTentativa || cause instanceof ErroAcessoTentativa) {
+            reportFailure.current(cause)
+            return false
+          }
           if (attempt < 2) await new Promise<void>(resolve => {
             const timer = window.setTimeout(done, (attempt + 1) * 1000)
             function done() { window.clearTimeout(timer); current.abort.signal.removeEventListener('abort', done); resolve() }
@@ -93,16 +104,16 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
     }
   }
 
-  async function initialize(tentativaId: string) {
+  async function initialize(tentativaId: string, chaveExecucao: string) {
     dispose()
     const currentGeneration = generation.current
     setInitialReady(false)
     setPending(0)
     setToast('')
     setMessage('Preparando a foto inicial...')
-    const plan = await consultarPlanoFotos(tentativaId)
+    const plan = await consultarPlanoFotos(tentativaId, chaveExecucao)
     if (!mounted.current || generation.current !== currentGeneration) return false
-    const current: Session = { active: true, plan, offset: Date.parse(plan.servidor_em) - Date.now(),
+    const current: Session = { active: true, chaveExecucao, plan, offset: Date.parse(plan.servidor_em) - Date.now(),
       captured: new Set(plan.capturas.filter(slot => slot.recebida_em).map(slot => slot.id)),
       failed: new Set(), pending: new Map(), timers: [], abort: new AbortController() }
     session.current = current
@@ -122,12 +133,12 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
     return results.every(Boolean)
   }
 
-  function prepare(tentativaId: string): Promise<boolean> {
+  function prepare(tentativaId: string, chaveExecucao: string): Promise<boolean> {
     if (preparation.current) return preparation.current
     setPreparing(true)
     const request = (async () => {
       const current = session.current
-      if (!current?.active || current.plan.tentativa_id !== tentativaId) return initialize(tentativaId)
+      if (!current?.active || current.plan.tentativa_id !== tentativaId) return initialize(tentativaId, chaveExecucao)
       await retry()
       // Reconectar não consulta outro plano nem duplica os horários já agendados.
       return capture(current, current.plan.capturas[0])

@@ -132,7 +132,7 @@ export function TurmasPanel({ profile, initialDraftsTurmaId = null }: {
                 podeEditar={isTeacher && turma.situacao === 'ATIVA'}
                 onPublicada={() => setAtualizacaoPublicadas((current) => current + 1)} />}
               {publicadasAbertas === turma.id && <PublicadasTurmaPanel key={`publicadas-${turma.id}`} turmaId={turma.id}
-                turmaNome={turma.nome} atualizacao={atualizacaoPublicadas} />}
+                turmaNome={turma.nome} atualizacao={atualizacaoPublicadas} podeCorrigir={isTeacher} />}
             </li>
           ))}
         </ul>

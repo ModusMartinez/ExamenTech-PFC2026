@@ -47,9 +47,9 @@ O modelo completo está em [.env.example](.env.example). O arquivo local, as cha
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | Projeto e chave pública no navegador. |
 | `VITE_TURNSTILE_SITE_KEY` | Chave pública do Turnstile. |
 | `VITE_INVITES_ENABLED` | Cadastro por convite, após configurar as migrações correspondentes. |
-| `VITE_MONITORED_EXAMS_ENABLED` | Habilita a execução da prova; depende da sequência canônica 025–028. |
+| `VITE_MONITORED_EXAMS_ENABLED` | Habilita a execução de avaliações com o banco atualizado até 043. |
 | `VITE_EXAM_MANAGEMENT_ENABLED` | Gestão de tentativas e versões novas dos documentos; requer 030–032. |
-| `VITE_EXAM_PHOTOS_ENABLED`, `EXAM_PHOTOS_ENABLED` | Habilitam fotos na interface e API, após preparar banco, bucket e limpeza. Devem concordar. |
+| `VITE_EXAM_PHOTOS_ENABLED`, `EXAM_PHOTOS_ENABLED` | Necessárias para iniciar Provas. Habilite as duas após preparar banco, bucket e limpeza. |
 | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Configuração opcional explícita da API; se ausentes, usa as equivalentes `VITE_`. |
 | `SUPABASE_SECRET_KEY` ou `SUPABASE_SERVICE_ROLE_KEY` | Credencial privada do servidor para arquivos já autorizados e limpeza. Nunca recebe prefixo `VITE_`. |
 | `TURNSTILE_SECRET_KEY`, `TURNSTILE_EXPECTED_HOSTNAMES` | Integração separada da API Turnstile. |
@@ -70,17 +70,21 @@ Arquivos SQL no repositório não são executados pelo Git nem pelo Vite. Em ban
 | Turmas e matrículas | `database/011` a `018`. |
 | Avaliações, questões, publicação e tentativa | `database/019` a `027`. |
 | Respostas, encerramento e versões anteriores dos documentos | `database/028` e `029`. |
-| Reativação com histórico | `database/030_reativacao_autorizada.sql`. |
+| Histórico de antigas autorizações | `database/030_reativacao_autorizada.sql`. A 038 revoga a reativação. |
 | Fotografias privadas, consentimento e retenção | `database/031_fotos_tentativa.sql`. |
-| Versões dos documentos com fotos e reativação | `database/032_documentos_fotos.sql`. |
+| Versões anteriores dos documentos com fotos | `database/032_documentos_fotos.sql`. |
+| Execução segura e ocorrências de prova | `database/043_execucao_segura_prova.sql`, após a 042. |
 
 O bucket usado é **`examentech-evidencias`**, privado, somente `image/jpeg`, até 1 MiB. O banco mantém a coleta desligada ao aplicar 031. A ativação depende de conferir o bucket, a função de limpeza, o agendamento e os avisos.
 
 Roteiros:
 
 - [Fluxo de provas e validação](docs/tentativas-prova.md).
-- [Fluxograma da prova com câmera, fotos e reativação](docs/fluxo-prova-monitorada.md).
-- [Ativar fotografias e reativação](docs/ativar-fotos-e-reativacao.md).
+- [Fluxograma da prova com sessão, câmera e fotos](docs/fluxo-prova-monitorada.md).
+- [Migração 038 e homologação da tentativa única](docs/tentativas-prova.md#homologação-da-migração-038).
+- [Migração 042 e homologação do cancelamento em tempo real](docs/tentativas-prova.md#cancelamento-da-avaliação-rf28rf29).
+- [Migração 043 e homologação da execução segura](docs/tentativas-prova.md#execução-segura-e-antifraude-rf30rf36).
+- [Ativar fotografias e a consulta pelo responsável](docs/ativar-fotos-e-reativacao.md).
 - [Limpeza automática no Supabase para uso em localhost](docs/limpeza-fotos-supabase.md).
 - [Termos, Política e versões dos aceites](docs/termos-privacidade.md).
 - [Preparação da branch entrega0911](docs/entrega-0911.md).
@@ -116,7 +120,7 @@ O CAPTCHA de login/cadastro é enviado ao Supabase Auth em `captchaToken`; confi
 
 ## Modelagem BPMN e branches
 
-`main` guarda a documentação principal; `desenv` reúne o desenvolvimento. As branches `entrega1409` e `entrega2809` representam entregas anteriores. A integração de novembro será revisada na branch `entrega0911`. O [fluxograma atual](docs/fluxo-prova-monitorada.md) descreve câmera, fotografias e reativação dessa etapa.
+`main` guarda a documentação principal; `desenv` reúne o desenvolvimento. As branches `entrega1409` e `entrega2809` representam entregas anteriores. A integração de novembro será revisada na branch `entrega0911`. O [fluxograma atual](docs/fluxo-prova-monitorada.md) descreve sessão, câmera e fotografias dessa etapa.
 
 Os diagramas abaixo descrevem a entrega de **28/09**, não incluem fotografias e reativação de novembro:
 

@@ -4,9 +4,10 @@ import { TurmasPanel } from '../src/components/TurmasPanel'
 import { listarAvaliacoesPublicadas, publicarAvaliacao } from '../src/services/avaliacoes'
 import type { AvaliacaoPublicada, AvaliacaoRascunho } from '../src/services/avaliacaoValidation'
 
-const mocks = vi.hoisted(() => ({ listar: vi.fn(), getSession: vi.fn(), fetch: vi.fn() }))
+const mocks = vi.hoisted(() => ({ listar: vi.fn(), getSession: vi.fn(), fetch: vi.fn(), rpc: vi.fn(), gestaoAtiva: vi.fn() }))
 vi.mock('../src/services/turmas', () => ({ listarTurmas: mocks.listar, criarTurma: vi.fn() }))
-vi.mock('../src/lib/supabase', () => ({ supabase: { auth: { getSession: mocks.getSession } } }))
+vi.mock('../src/lib/supabase', () => ({ supabase: { auth: { getSession: mocks.getSession }, rpc: mocks.rpc } }))
+vi.mock('../src/services/examFeatures', () => ({ examManagementEnabled: mocks.gestaoAtiva, photosEnabled: () => false }))
 const turma = { id: '10000000-0000-0000-0000-000000000001', nome: 'Engenharia 8B',
   professor_id: '20000000-0000-0000-0000-000000000001', situacao: 'ATIVA', codigo_ingresso: 'ABCDEF123456', criado_em: '2026-10-20T12:00:00Z' }
 const outra = { ...turma, id: '10000000-0000-0000-0000-000000000002', nome: 'Outra turma' }
@@ -20,6 +21,7 @@ let publicadas: AvaliacaoPublicada[]
 
 beforeEach(() => {
   vi.resetAllMocks()
+  mocks.gestaoAtiva.mockReturnValue(false)
   rascunhos = [avaliacao]; publicadas = []
   mocks.listar.mockResolvedValue([turma, outra])
   mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'sessao-simulada', user: { id: turma.professor_id } } }, error: null })
@@ -108,6 +110,47 @@ test('admin em turma ativa também não recebe o botão Publicar', async () => {
   expect(screen.queryByRole('button', { name: /^Publicar / })).toBeNull()
 })
 
+test.each(['Professor', 'Administrador'] as const)('%s consulta o histórico, com cancelamento reservado ao professor', async profile => {
+  mocks.gestaoAtiva.mockReturnValue(true)
+  publicadas = [publicada]
+  const cancelada = { id: publicada.id, situacao: 'CANCELADA', cancelada_em: '2026-11-09T22:30:00.000Z' } as const
+  mocks.rpc.mockImplementation(async (funcao: string) => {
+    if (funcao === 'listar_tentativas_responsavel') return { data: [], error: null }
+    if (funcao === 'consultar_publicacao_resultados') {
+      return { data: { avaliacao_id: publicada.id, estado: 'JANELA_ABERTA', publicado_em: null }, error: null }
+    }
+    if (funcao === 'cancelar_avaliacao') {
+      publicadas = [{ ...publicada, ...cancelada }]
+      return { data: cancelada, error: null }
+    }
+    throw new Error('RPC inesperada')
+  })
+  await abrir(profile)
+  fireEvent.click(screen.getByRole('button', { name: `Publicadas de ${turma.nome}` }))
+  fireEvent.click(await screen.findByRole('button', { name: `Gerenciar ${publicada.titulo}` }))
+  await screen.findByText('Nenhum aluno iniciou esta avaliação.')
+  if (profile === 'Administrador') {
+    expect(screen.queryByRole('button', { name: 'Cancelar avaliação' })).toBeNull()
+    expect(mocks.rpc).not.toHaveBeenCalledWith('cancelar_avaliacao', expect.anything())
+    return
+  }
+  const botao = screen.getByRole('button', { name: 'Cancelar avaliação' })
+  fireEvent.click(botao)
+  const manter = screen.getByRole('button', { name: 'Manter avaliação' })
+  expect(document.activeElement).toBe(manter)
+  fireEvent.click(manter)
+  expect(mocks.rpc).not.toHaveBeenCalledWith('cancelar_avaliacao', expect.anything())
+  fireEvent.click(botao)
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+  const aviso = await screen.findByText(/Avaliação cancelada em/)
+  await waitFor(() => expect(document.activeElement).toBe(aviso))
+  expect(screen.getByText('Cancelada')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Cancelar avaliação' })).toBeNull()
+  expect(mocks.rpc).toHaveBeenCalledWith('cancelar_avaliacao', { p_avaliacao_id: publicada.id })
+  fireEvent.click(screen.getByRole('button', { name: 'Atualizar publicadas' }))
+  await screen.findByText('Cancelada')
+})
+
 test('envio duplicado é bloqueado e resposta após fechar rascunhos é ignorada', async () => {
   await abrir()
   const { form } = await abrirConfirmacao()
@@ -134,7 +177,7 @@ test.each([400, 401, 403, 409, 503])('falha %i mantém rascunho e confirmação,
   fireEvent.submit(form)
   const notice = await screen.findByRole('alert')
   expect(notice.textContent).toBe('Publicação recusada.')
-  expect(document.activeElement).toBe(notice)
+  await waitFor(() => expect(document.activeElement).toBe(notice))
   expect(screen.getByRole('rowheader', { name: avaliacao.titulo })).toBeTruthy()
   expect(screen.getByRole('form', { name: 'Publicar avaliação' })).toBe(form)
   expect(mocks.fetch).toHaveBeenCalledTimes(1)

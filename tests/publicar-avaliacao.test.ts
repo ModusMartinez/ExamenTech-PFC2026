@@ -57,13 +57,13 @@ test('publicação: API integrada às regras e à auditoria no PostgreSQL local'
           return Response.json((await queryAs(id, 'SELECT id FROM public.turmas WHERE id=$1', [url.searchParams.get('id')?.slice(3)], aal)).rows)
         }
         if (url.pathname === '/rest/v1/avaliacoes') {
-          const publicadas = url.searchParams.get('situacao') === 'eq.PUBLICADA'
-          assert.equal(url.searchParams.get('select'), 'id,turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,criado_em' + (publicadas ? ',publicada_em' : ''))
+          const publicadas = url.searchParams.get('situacao') === 'in.(PUBLICADA,CANCELADA)'
+          assert.equal(url.searchParams.get('select'), 'id,turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,criado_em' + (publicadas ? ',publicada_em,cancelada_em' : ''))
           assert.equal(url.searchParams.get('order'), `${publicadas ? 'publicada_em' : 'criado_em'}.desc,id.desc`)
           assert.equal(url.searchParams.get('limit'), '50')
-          return Response.json((await queryAs(id, `SELECT * FROM public.avaliacoes WHERE turma_id=$1 AND situacao=$2
+          return Response.json((await queryAs(id, `SELECT * FROM public.avaliacoes WHERE turma_id=$1 AND situacao=ANY($2::text[])
             ORDER BY ${publicadas ? 'publicada_em' : 'criado_em'} DESC,id DESC LIMIT 50`,
-          [url.searchParams.get('turma_id')?.slice(3), url.searchParams.get('situacao')?.slice(3)], aal)).rows)
+          [url.searchParams.get('turma_id')?.slice(3), publicadas ? ['PUBLICADA', 'CANCELADA'] : ['RASCUNHO']], aal)).rows)
         }
         assert.equal(url.pathname, '/rest/v1/rpc/publicar_avaliacao')
         assert.equal(req.method, 'POST')

@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase'
-import { lerAvaliacaoPublicada, lerAvaliacaoRascunho, lerDadosAvaliacao, lerDadosEdicaoAvaliacao, lerMinhasAvaliacoes, lerPublicacaoAvaliacao, UUID_PATTERN } from './avaliacaoValidation'
+import { lerAvaliacaoPublicada, lerAvaliacaoRascunho, lerDadosAvaliacao, lerDadosEdicaoAvaliacao, lerDataComFuso, lerMinhasAvaliacoes, lerPublicacaoAvaliacao, UUID_PATTERN } from './avaliacaoValidation'
 import type { DadosAvaliacaoRascunho, DadosEdicaoAvaliacaoRascunho } from './avaliacaoValidation'
 
 export async function criarAvaliacaoRascunho(dados: DadosAvaliacaoRascunho) {
@@ -64,6 +64,18 @@ export function listarAvaliacoesRascunho(turmaId: string) {
 
 export function listarAvaliacoesPublicadas(turmaId: string) {
   return listarAvaliacoes(turmaId, 'PUBLICADA', lerAvaliacaoPublicada)
+}
+
+export async function cancelarAvaliacao(avaliacaoId: string) {
+  if (!UUID_PATTERN.test(avaliacaoId)) throw new Error('ID da avaliação inválido.')
+  const { data, error } = await supabase.rpc('cancelar_avaliacao', { p_avaliacao_id: avaliacaoId })
+  if (error?.code === '42501') throw new Error('O cancelamento exige o professor autor com MFA.')
+  if (error?.code === '55000') throw new Error('Só é possível cancelar avaliações publicadas sem resultados divulgados.')
+  const canceladaEm = lerDataComFuso(data?.cancelada_em)
+  if (error || data?.id !== avaliacaoId || data.situacao !== 'CANCELADA' || !canceladaEm) {
+    throw new Error('Não foi possível confirmar o cancelamento. Atualize a lista de avaliações e confira a situação.')
+  }
+  return canceladaEm
 }
 
 export async function listarMinhasAvaliacoes() {

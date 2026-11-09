@@ -4,15 +4,15 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 import { prepararBancoCamera } from './helpers/bancoCamera.ts'
-import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
 
 const migration = await readFile(new URL('../database/037_camera_sem_interrupcao.sql', import.meta.url), 'utf8')
+const avisoDaMigracao037 = '2026-11-08-v3'
 test('037 integra câmera, início com aviso atual e encerramento sem motivo CAMERA', async t => {
   const db = new PGlite()
   t.after(() => db.close())
   const { aluno, queryAs, criarProva } = await prepararBancoCamera(db)
   const anterior = await criarProva()
-  const iniciar = async (id: string, versao = EXAM_NOTICE_VERSION, fotos = false) => (await queryAs<{ t: { id: string } }>(aluno,
+  const iniciar = async (id: string, versao = avisoDaMigracao037, fotos = false) => (await queryAs<{ t: { id: string } }>(aluno,
     fotos ? 'SELECT public.iniciar_tentativa_com_fotos($1,$2,\'2026-11-08-fotos-v1\') AS t'
       : 'SELECT public.iniciar_tentativa($1,$2) AS t', [id, versao])).rows[0].t.id
   const idAnterior = await iniciar(anterior.avaliacaoId, '2026-11-06-v2')
@@ -32,7 +32,7 @@ test('037 integra câmera, início com aviso atual e encerramento sem motivo CAM
     await assert.rejects(iniciar(prova.avaliacaoId, '2026-11-06-v2'), { code: '23514' })
     const id = await iniciar(prova.avaliacaoId)
     assert.deepEqual((await db.query('SELECT aviso_versao,situacao FROM public.tentativas WHERE id=$1', [id])).rows,
-      [{ aviso_versao: EXAM_NOTICE_VERSION, situacao: 'EM_ANDAMENTO' }])
+      [{ aviso_versao: avisoDaMigracao037, situacao: 'EM_ANDAMENTO' }])
     const antes = await registros()
     for (const schema of ['public', 'examentech_private']) {
       await assert.rejects(queryAs(aluno, `SELECT ${schema}.encerrar_tentativa($1,'CAMERA')`, [id]), { code: '23514' })
@@ -49,7 +49,7 @@ test('037 integra câmera, início com aviso atual e encerramento sem motivo CAM
     const prova = await criarProva()
     await assert.rejects(iniciar(prova.avaliacaoId), { code: '23514' })
     await assert.rejects(iniciar(prova.avaliacaoId, '2026-11-06-v2', true), { code: '23514' })
-    const id = await iniciar(prova.avaliacaoId, EXAM_NOTICE_VERSION, true)
+    const id = await iniciar(prova.avaliacaoId, avisoDaMigracao037, true)
     await queryAs(aluno, 'SELECT public.registrar_falha_camera($1,$2)', [id, randomUUID()])
     await assert.rejects(queryAs(aluno, 'SELECT public.consultar_conteudo_tentativa($1)', [id]), { code: '55000' })
     const foto = (await db.query<{ id: string }>("SELECT id FROM public.fotos_tentativa WHERE tentativa_id=$1 AND momento='INICIAL'", [id])).rows[0].id
@@ -96,5 +96,5 @@ test('037 integra câmera, início com aviso atual e encerramento sem motivo CAM
   assert.deepEqual(await registros(), antes)
   assert.equal((await db.query<{ situacao: string }>('SELECT situacao FROM public.tentativas WHERE id=$1', [idAnterior])).rows[0].situacao, 'INTERROMPIDA')
   await assert.rejects(queryAs(aluno, 'SELECT examentech_private.iniciar_tentativa_sem_fotos($1,$2)',
-    [anterior.avaliacaoId, EXAM_NOTICE_VERSION]), { code: '42501' })
+    [anterior.avaliacaoId, avisoDaMigracao037]), { code: '42501' })
 })

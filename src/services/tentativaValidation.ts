@@ -2,6 +2,24 @@ import { lerDataComFuso, UUID_PATTERN } from './avaliacaoValidation.ts'
 import { lerTextoAlternativa } from './alternativaValidation.ts'
 import { enunciadoQuestaoValido, pontuacaoQuestaoValida } from './questaoValidation.ts'
 
+export const MOTIVOS_SAIDA_TENTATIVA = ['SAIDA', 'ABA_OU_FOCO', 'TELA_CHEIA'] as const
+export type MotivoSaidaTentativa = typeof MOTIVOS_SAIDA_TENTATIVA[number]
+export const OPERACOES_CLIPBOARD = ['copy', 'cut', 'paste'] as const
+export type OperacaoClipboard = typeof OPERACOES_CLIPBOARD[number]
+
+export function motivoSaidaValido(value: unknown): value is MotivoSaidaTentativa {
+  return MOTIVOS_SAIDA_TENTATIVA.some(motivo => motivo === value)
+}
+
+export const EXECUCAO_HEADER = 'X-ExamenTech-Execucao'
+
+export function lerChaveExecucao(value: string | null): string | null {
+  return value && UUID_PATTERN.test(value) ? value.toLowerCase() : null
+}
+
+export class ErroConexaoTentativa extends Error {}
+export class ErroAcessoTentativa extends Error {}
+
 export type TentativaIniciada = {
   id: string
   avaliacao_id: string

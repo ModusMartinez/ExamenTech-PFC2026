@@ -3,23 +3,26 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import { prepararBancoExecucao } from './helpers/bancoExecucao.ts'
+import { prepararBancoCamera } from './helpers/bancoCamera.ts'
 import { createSalvarRespostaTentativaHandler } from '../api/salvar-resposta-tentativa.ts'
 import type { RespostaTentativa } from '../src/services/respostaValidation.ts'
 
+import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
+
+const chaveExecucao = randomUUID()
 const env = { SUPABASE_URL: 'https://exemplo.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'public-test-key' }
 function request(body: unknown, method = 'POST', query = '') {
   return new Request(`http://localhost/api/salvar-resposta-tentativa${query}`, {
-    method, headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' },
+    method, headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json', 'X-ExamenTech-Execucao': chaveExecucao },
     body: ['GET', 'HEAD'].includes(method) ? undefined : JSON.stringify(body),
   })
 }
 
-test('API de respostas integrada à função 034, com a assinatura antiga bloqueada pela 035', async t => {
+test('API de respostas integrada à gravação versionada com chave da página', async t => {
   const db = new PGlite()
   t.after(() => db.close())
-  const { professor, colega, aluno, admin, turmaId, queryAs } = await prepararBancoExecucao(db)
-  for (const file of ['033_preparar_respostas_com_versao.sql', '034_salvar_resposta_com_versao.sql', '035_bloquear_resposta_sem_versao.sql']) {
+  const { professor, colega, aluno, admin, turmaId, queryAs } = await prepararBancoCamera(db)
+  for (const file of ['037_camera_sem_interrupcao.sql', '038_tentativa_sessao.sql']) {
     await db.exec(await readFile(new URL(`../database/${file}`, import.meta.url), 'utf8'))
   }
   const avaliacao = (await queryAs<{ avaliacao: { id: string } }>(professor, `SELECT public.criar_avaliacao_rascunho(
@@ -34,7 +37,7 @@ test('API de respostas integrada à função 034, com a assinatura antiga bloque
     "SELECT public.criar_alternativas_rascunho($1,ARRAY['Primeira','Segunda'],2) AS alternativas", [objetiva])).rows[0].alternativas
   await queryAs(professor, 'SELECT public.publicar_avaliacao($1)', [avaliacao])
   const tentativa = (await queryAs<{ tentativa: { id: string } }>(aluno,
-    'SELECT public.iniciar_tentativa($1,$2) AS tentativa', [avaliacao, '2026-11-06-v2'])).rows[0].tentativa.id
+    'SELECT public.iniciar_tentativa($1,$2,$3) AS tentativa', [avaliacao, EXAM_NOTICE_VERSION, chaveExecucao])).rows[0].tentativa.id
   const entrada = { tentativa_id: tentativa, questao_id: objetiva, versao: 1, alternativa_id: alternativas[0].id }
   function apiFor(usuario = aluno, aal = 'aal2', perderConfirmacao = false) {
     const transport = t.mock.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -45,12 +48,12 @@ test('API de respostas integrada à função 034, com a assinatura antiga bloque
       assert.equal(new URL(req.url).pathname, '/rest/v1/rpc/salvar_resposta_tentativa')
       assert.equal(req.method, 'POST')
       const params: Record<string, unknown> = await req.json()
-      assert.deepEqual(Object.keys(params).sort(), ['p_tentativa_id', 'p_questao_id', 'p_versao', 'p_alternativa_id', 'p_texto'].sort())
+      assert.deepEqual(Object.keys(params).sort(), ['p_tentativa_id', 'p_questao_id', 'p_versao', 'p_alternativa_id', 'p_texto', 'p_chave_execucao'].sort())
       let resposta: unknown
       try {
         const result = await queryAs<{ resposta: unknown }>(usuario,
-          'SELECT public.salvar_resposta_tentativa($1,$2,$3,$4,$5) AS resposta',
-          [params.p_tentativa_id, params.p_questao_id, params.p_versao, params.p_alternativa_id, params.p_texto], aal)
+          'SELECT public.salvar_resposta_tentativa($1,$2,$3,$4,$5,$6) AS resposta',
+          [params.p_tentativa_id, params.p_questao_id, params.p_versao, params.p_alternativa_id, params.p_texto, params.p_chave_execucao], aal)
         resposta = result.rows[0].resposta
       } catch (error) {
         return Response.json({ code: error instanceof Error && 'code' in error ? error.code : 'XX000', message: 'SEGREDO_INTERNO' }, { status: 400 })
@@ -125,7 +128,7 @@ test('API de respostas integrada à função 034, com a assinatura antiga bloque
     assert.equal((await apiFor(aluno, 'aal1').handler.fetch(request(entrada))).status, 403)
     await db.query("UPDATE public.perfis SET perfil='ALUNO' WHERE id=$1", [colega])
     await db.query("INSERT INTO public.turma_alunos(turma_id,aluno_id,situacao) VALUES ($1,$2,'ATIVA')", [turmaId, colega])
-    assert.equal((await apiFor(colega).handler.fetch(request(entrada))).status, 404)
+    assert.equal((await apiFor(colega).handler.fetch(request(entrada))).status, 403)
     const { handler } = apiFor()
     for (const [dados, status] of [
       [{ ...entrada, questao_id: randomUUID() }, 404], [{ ...entrada, alternativa_id: randomUUID() }, 400],

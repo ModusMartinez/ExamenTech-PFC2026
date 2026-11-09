@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase'
 import { UUID_PATTERN } from './avaliacaoValidation'
 import { lerDadosRespostaTentativa, lerRespostaTentativa } from './respostaValidation'
 import type { DadosRespostaTentativa, RespostaTentativa } from './respostaValidation'
+import { ErroAcessoTentativa, ErroConexaoTentativa, EXECUCAO_HEADER, lerChaveExecucao } from './tentativaValidation'
 
 export class ErroSalvamentoResposta extends Error {
   readonly codigo: 'CONFLITO' | 'RECUSADA' | 'NAO_CONFIRMADA'
@@ -13,17 +14,18 @@ export class ErroSalvamentoResposta extends Error {
   }
 }
 
-export async function consultarRespostasTentativa(tentativaId: string): Promise<RespostaTentativa[]> {
+export async function consultarRespostasTentativa(tentativaId: string, chaveExecucao: string): Promise<RespostaTentativa[]> {
   if (typeof tentativaId !== 'string' || !UUID_PATTERN.test(tentativaId)) throw new Error('Tentativa inválida.')
+  if (!lerChaveExecucao(chaveExecucao)) throw new Error('Identificação da página da prova inválida.')
   const id = tentativaId.toLowerCase()
-  let dados: unknown
-  try {
-    const resultado = await supabase.rpc('consultar_respostas_tentativa', { p_tentativa_id: id })
-    if (resultado.error) throw resultado.error
-    dados = resultado.data
-  } catch {
-    throw new Error('Não foi possível recuperar as respostas já salvas.')
-  }
+  const falhaConsulta = 'Não foi possível recuperar as respostas já salvas.'
+  const { data, error, status } = await supabase.rpc('consultar_respostas_tentativa', {
+    p_tentativa_id: id, p_chave_execucao: chaveExecucao,
+  }).abortSignal(AbortSignal.timeout(12000)).retry(false)
+  if (status === 0) throw new ErroConexaoTentativa(falhaConsulta)
+  if (error?.code === '42501' || status === 401) throw new ErroAcessoTentativa(falhaConsulta)
+  if (error) throw new Error(falhaConsulta)
+  const dados: unknown = data
   const falha = 'As respostas anteriores não puderam ser confirmadas.'
   if (!Array.isArray(dados)) throw new Error(falha)
   const respostas: RespostaTentativa[] = []
@@ -36,29 +38,34 @@ export async function consultarRespostasTentativa(tentativaId: string): Promise<
   return respostas
 }
 
-export async function salvarRespostaTentativa(dados: DadosRespostaTentativa): Promise<RespostaTentativa> {
+export async function salvarRespostaTentativa(dados: DadosRespostaTentativa, chaveExecucao: string): Promise<RespostaTentativa> {
   // Copiar e validar antes de aguardar a sessão: esta requisição representa uma versão específica.
   const entrada = lerDadosRespostaTentativa(dados)
   if (!entrada) throw new ErroSalvamentoResposta('Confira a questão, a versão e o conteúdo da resposta.', 'RECUSADA')
+  if (!lerChaveExecucao(chaveExecucao)) throw new Error('Identificação da página da prova inválida.')
   const { data, error } = await supabase.auth.getSession().catch(() => {
-    throw new ErroSalvamentoResposta('Não foi possível conferir sua sessão. Entre novamente.', 'RECUSADA')
+    throw new ErroAcessoTentativa('Não foi possível conferir sua sessão. Entre novamente.')
   })
-  if (error || !data.session) throw new ErroSalvamentoResposta('Sua sessão terminou. Entre novamente.', 'RECUSADA')
+  if (error || !data.session) throw new ErroAcessoTentativa('Sua sessão terminou. Entre novamente.')
 
   const naoConfirmada = 'Não foi possível confirmar o salvamento. A resposta pode ter sido salva. Reenvie o mesmo conteúdo e a mesma versão.'
   let response: Response
   try {
     response = await fetch('/api/salvar-resposta-tentativa', {
       method: 'POST', cache: 'no-store',
-      headers: { Authorization: `Bearer ${data.session.access_token}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${data.session.access_token}`, 'Content-Type': 'application/json',
+        [EXECUCAO_HEADER]: chaveExecucao }, signal: AbortSignal.timeout(12000),
       body: JSON.stringify(entrada),
     })
   } catch {
-    throw new ErroSalvamentoResposta(naoConfirmada, 'NAO_CONFIRMADA')
+    throw new ErroConexaoTentativa('A conexão foi perdida antes da confirmação do salvamento.')
   }
 
   let resultado: unknown
-  try { resultado = await response.json() } catch {
+  try { resultado = await response.json() } catch (cause) {
+    if (cause instanceof TypeError || cause instanceof DOMException) {
+      throw new ErroConexaoTentativa('A conexão foi perdida antes da confirmação do salvamento.')
+    }
     throw new ErroSalvamentoResposta(naoConfirmada, 'NAO_CONFIRMADA')
   }
   if (!resultado || typeof resultado !== 'object' || Array.isArray(resultado)) {
@@ -67,10 +74,11 @@ export async function salvarRespostaTentativa(dados: DadosRespostaTentativa): Pr
   if (!response.ok) {
     const mensagem = 'message' in resultado && typeof resultado.message === 'string' && resultado.message.trim()
       ? resultado.message : null
+    if ([401, 403, 410].includes(response.status)) throw new ErroAcessoTentativa(mensagem ?? 'A tentativa não está disponível nesta sessão.')
     if (response.status === 409) {
       throw new ErroSalvamentoResposta(mensagem ?? 'A tentativa está indisponível ou a versão da resposta está desatualizada.', 'CONFLITO')
     }
-    if ([400, 401, 403, 404, 405, 413, 415].includes(response.status)) {
+    if ([400, 404, 405, 413, 415].includes(response.status)) {
       throw new ErroSalvamentoResposta(mensagem ?? 'O salvamento da resposta foi recusado.', 'RECUSADA')
     }
     throw new ErroSalvamentoResposta(naoConfirmada, 'NAO_CONFIRMADA')

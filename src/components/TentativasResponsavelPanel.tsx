@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
-import { listarTentativasResponsavel, reativarTentativa } from '../services/examManagement'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { listarTentativasResponsavel } from '../services/examManagement'
 import type { ResponsibleAttempt } from '../services/examManagement'
 import { consultarImagemFoto, listarFotosResponsavel } from '../services/examPhotos'
 import type { ResponsiblePhoto } from '../services/examPhotos'
 import { photosEnabled } from '../services/examFeatures'
+import { CorrecaoTentativaPanel } from './CorrecaoTentativaPanel'
+import { PublicacaoResultadosPanel } from './PublicacaoResultadosPanel'
 import '../styles/provas.css'
 
 const momentLabels = { INICIAL: 'Foto inicial', PROVA_1: 'Foto durante a prova 1', PROVA_2: 'Foto durante a prova 2', PROVA_3: 'Foto durante a prova 3' }
@@ -82,23 +83,32 @@ function FotosResponsavel({ tentativaId }: { tentativaId: string }) {
   </section>
 }
 
-export function TentativasResponsavelPanel({ avaliacaoId, duracao }: { avaliacaoId: string; duracao: number }) {
+const situacoesTentativa: Record<ResponsibleAttempt['situacao'], string> = {
+  EM_ANDAMENTO: 'Em andamento',
+  FINALIZADA: 'Finalizada',
+  INTERROMPIDA: 'Interrompida',
+  CANCELADA: 'Cancelada',
+}
+
+export function TentativasResponsavelPanel({ avaliacaoId, podeCorrigir = false, avaliacaoCancelada = false }: {
+  avaliacaoId: string; podeCorrigir?: boolean; avaliacaoCancelada?: boolean
+}) {
   const [attempts, setAttempts] = useState<ResponsibleAttempt[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
   const [loadError, setLoadError] = useState('')
   const [refresh, setRefresh] = useState(0)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [photos, setPhotos] = useState<string | null>(null)
-  const [reason, setReason] = useState('')
-  const [minutes, setMinutes] = useState(String(Math.min(duracao, 30)))
-  const submitting = useRef(false)
-  const [busy, setBusy] = useState(false)
+  const [selecao, setSelecao] = useState<{ id: string; painel: 'fotos' | 'correcao' } | null>(null)
+  const [resultadosPublicados, setResultadosPublicados] = useState(false)
+  const [revisaoCorrecao, setRevisaoCorrecao] = useState(0)
+  const marcarPublicados = useCallback(() => setResultadosPublicados(true), [])
+
+  function alternarPainel(id: string, painel: 'fotos' | 'correcao') {
+    setSelecao(atual => atual?.id === id && atual.painel === painel ? null : { id, painel })
+  }
   useEffect(() => {
     let active = true
     async function load() {
-      setLoading(true); setError(''); setLoadError('')
+      setLoading(true); setLoadError('')
       return listarTentativasResponsavel(avaliacaoId)
     }
     load().then(result => { if (active) setAttempts(result) })
@@ -106,51 +116,31 @@ export function TentativasResponsavelPanel({ avaliacaoId, duracao }: { avaliacao
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [avaliacaoId, refresh])
-  async function authorize(event: FormEvent) {
-    event.preventDefault()
-    if (!selected || submitting.current) return
-    submitting.current = true; setBusy(true); setError(''); setNotice('')
-    try {
-      const count = Number(minutes)
-      if (count > duracao) throw new Error('O tempo autorizado não pode superar a duração original da avaliação.')
-      await reativarTentativa(selected, reason, count)
-      setSelected(null); setReason('')
-      setNotice('Reativação autorizada. O aluno deve preparar a câmera e confirmar o início novamente, dentro da janela da avaliação. As respostas salvas serão recuperadas.')
-      setRefresh(value => value + 1)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível confirmar a reativação.') }
-    finally { submitting.current = false; setBusy(false) }
-  }
-  return <section className="provas-gestao" aria-label="Tentativas e reativação">
+  return <section className="provas-gestao" aria-label="Tentativas dos alunos">
     <h4>Tentativas dos alunos</h4>
-    <p>Somente o professor responsável ou o ADM da mesma organização pode autorizar uma retomada. Respostas, ordem das questões e histórico são preservados. Uma prova já enviada ou finalizada por prazo não é reaberta aqui.</p>
-    <button type="button" className="turmas-refresh" disabled={loading || busy} onClick={() => { setPhotos(null); setRefresh(value => value + 1) }}>Atualizar tentativas</button>
+    <p>Tentativas encerradas ou interrompidas ficam no histórico da avaliação com as respostas recebidas.</p>
+    {podeCorrigir && !avaliacaoCancelada && <PublicacaoResultadosPanel avaliacaoId={avaliacaoId} revisao={revisaoCorrecao + refresh}
+      onPublicada={marcarPublicados} />}
+    <button type="button" className="turmas-refresh" disabled={loading} onClick={() => { setSelecao(null); setRefresh(value => value + 1) }}>Atualizar tentativas</button>
     {loading && <p role="status">Carregando tentativas...</p>}
-    {error && <p className="alert error" role="alert">{error}</p>}
     {loadError && <p className="alert error" role="alert">{loadError}</p>}
-    {notice && <p className="alert success" role="status">{notice}</p>}
     {!loading && !attempts.length && !loadError && <p>Nenhum aluno iniciou esta avaliação.</p>}
-    {!loading && !loadError && <ul className="provas-tentativas-lista">{attempts.map(attempt => <li key={attempt.id}>
-      <h5>{attempt.aluno_nome}</h5>
-      <p>{attempt.situacao === 'INTERROMPIDA' ? 'Interrompida' : attempt.situacao === 'FINALIZADA' ? 'Finalizada' : 'Em andamento'} · ciclo {attempt.ciclo}
-        {attempt.retomada_autorizada && ' · Reativação autorizada, aguardando o aluno.'}</p>
-      <div className="provas-actions">
-        {attempt.situacao === 'INTERROMPIDA' && !attempt.retomada_autorizada && <button type="button" className="turmas-refresh" disabled={busy}
-          onClick={() => { setSelected(attempt.id); setReason(''); setError('') }}>Reativar tentativa de {attempt.aluno_nome}</button>}
-        {photosEnabled() && <button type="button" className="turmas-refresh" aria-expanded={photos === attempt.id}
-          onClick={() => setPhotos(value => value === attempt.id ? null : attempt.id)}>{photos === attempt.id ? 'Fechar fotos' : `Fotos de ${attempt.aluno_nome}`}</button>}
-      </div>
-      {selected === attempt.id && <form className="turma-form" onSubmit={event => void authorize(event)} aria-label={`Reativar tentativa de ${attempt.aluno_nome}`}>
-        <label>Justificativa da reativação<textarea required minLength={5} maxLength={500} value={reason} disabled={busy}
-          onChange={event => setReason(event.target.value)} /></label>
-        <label>Minutos para continuar<input type="number" required min={1} max={Math.min(duracao, 1440)} value={minutes} disabled={busy}
-          onChange={event => setMinutes(event.target.value)} /></label>
-        <p>A contagem começa quando o aluno confirmar a retomada e termina, no máximo, no fim da janela da avaliação. A autorização é registrada com sua conta.</p>
-        <div className="provas-actions">
-          <button type="submit" className="turmas-refresh" disabled={busy}>{busy ? 'Autorizando...' : 'Confirmar reativação'}</button>
-          <button type="button" className="turmas-refresh" disabled={busy} onClick={() => setSelected(null)}>Cancelar reativação</button>
+    {!loading && !loadError && <ul className="provas-tentativas-lista">{attempts.map(attempt => {
+      const painel = selecao?.id === attempt.id ? selecao.painel : null
+      return <li key={attempt.id}>
+        <h5>{attempt.aluno_nome}</h5>
+        <p>{situacoesTentativa[attempt.situacao]} · ciclo {attempt.ciclo}</p>
+        <div className="avaliacao-form-actions">
+          {photosEnabled() && <button type="button" className="turmas-refresh" aria-expanded={painel === 'fotos'}
+            onClick={() => alternarPainel(attempt.id, 'fotos')}>{painel === 'fotos' ? 'Fechar fotos' : `Fotos de ${attempt.aluno_nome}`}</button>}
+          {podeCorrigir && attempt.situacao === 'FINALIZADA' && <button type="button" className="turmas-refresh" aria-expanded={painel === 'correcao'}
+            onClick={() => alternarPainel(attempt.id, 'correcao')}>{painel === 'correcao' ? 'Fechar correção'
+              : `${resultadosPublicados ? 'Ver correção de' : 'Corrigir tentativa de'} ${attempt.aluno_nome}`}</button>}
         </div>
-      </form>}
-      {photos === attempt.id && <FotosResponsavel key={attempt.id} tentativaId={attempt.id} />}
-    </li>)}</ul>}
+        {painel === 'fotos' && <FotosResponsavel tentativaId={attempt.id} />}
+        {painel === 'correcao' && podeCorrigir && <CorrecaoTentativaPanel tentativaId={attempt.id} alunoNome={attempt.aluno_nome}
+          somenteConsulta={resultadosPublicados} onCorrecaoSalva={() => setRevisaoCorrecao(valor => valor + 1)} />}
+      </li>
+    })}</ul>}
   </section>
 }

@@ -5,23 +5,27 @@ import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 import { prepararBancoCamera } from './helpers/bancoCamera.ts'
 import { createIniciarTentativaHandler } from '../api/iniciar-tentativa.ts'
+import { createEncerrarTentativaHandler } from '../api/encerrar-tentativa.ts'
 import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
 
+const chaveExecucao = randomUUID()
 const env = { SUPABASE_URL: 'https://exemplo.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'public-test-key' }
 function request(body: unknown, method = 'POST', query = '') {
   const payload = body && typeof body === 'object' && !Array.isArray(body) && 'avaliacao_id' in body &&
     !('aviso_versao' in body) ? { ...body, aviso_versao: EXAM_NOTICE_VERSION } : body
   return new Request(`http://localhost/api/iniciar-tentativa${query}`, {
-    method, headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' },
+    method, headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json', 'X-ExamenTech-Execucao': chaveExecucao },
     body: ['GET', 'HEAD'].includes(method) ? undefined : JSON.stringify(payload),
   })
 }
 
-test('API de início integrada às regras, ao aviso e ao sorteio das queries até 037', async (t) => {
+test('API de início integrada às regras, ao aviso e ao sorteio da migração 038', async (t) => {
   const db = new PGlite()
   t.after(() => db.close())
   const { org, professor, aluno, admin, sessions, queryAs, turmaId, avaliacaoId } = await prepararBancoCamera(db)
-  await db.exec(await readFile(new URL('../database/037_camera_sem_interrupcao.sql', import.meta.url), 'utf8'))
+  for (const file of ['037_camera_sem_interrupcao.sql', '038_tentativa_sessao.sql']) {
+    await db.exec(await readFile(new URL(`../database/${file}`, import.meta.url), 'utf8'))
+  }
   async function publicar() {
     const id = (await queryAs<{ avaliacao: { id: string } }>(professor, `SELECT public.criar_avaliacao_rascunho(
       $1,'Prova para início','PROVA',now()-interval '5 minutes',now()+interval '2 hours',60
@@ -39,10 +43,11 @@ test('API de início integrada às regras, ao aviso e ao sorteio das queries at�
       assert.equal(new URL(req.url).pathname, '/rest/v1/rpc/iniciar_tentativa')
       assert.equal(req.method, 'POST')
       const params: Record<string, unknown> = await req.json()
-      assert.deepEqual(Object.keys(params), ['p_avaliacao_id', 'p_aviso_versao'])
+      assert.deepEqual(Object.keys(params), ['p_avaliacao_id', 'p_aviso_versao', 'p_chave_execucao'])
+      assert.equal(params.p_chave_execucao, chaveExecucao)
       try {
-        const result = await queryAs<{ tentativa: unknown }>(usuario, 'SELECT public.iniciar_tentativa($1,$2) AS tentativa',
-          [params.p_avaliacao_id, params.p_aviso_versao], aal)
+        const result = await queryAs<{ tentativa: unknown }>(usuario, 'SELECT public.iniciar_tentativa($1,$2,$3) AS tentativa',
+          [params.p_avaliacao_id, params.p_aviso_versao, params.p_chave_execucao], aal)
         return Response.json(result.rows[0].tentativa)
       } catch (error) {
         return Response.json({ code: error instanceof Error && 'code' in error ? error.code : 'XX000', message: 'Detalhe interno' }, { status: 400 })
@@ -133,6 +138,39 @@ test('API de início integrada às regras, ao aviso e ao sorteio das queries at�
     assert.equal((await apiFor().handler.fetch(request({ avaliacao_id: id }))).status, 409)
     assert.equal((await db.query("SELECT id FROM public.eventos_seguranca WHERE evento='TENTATIVA_INICIADA' AND recurso_id=$1", [rows[0].id])).rows.length, 1)
   })
+
+  await t.test('saída exige a chave da página e pode repetir a confirmação sem novo evento', async () => {
+    const avaliacao_id = await publicar()
+    const response = await apiFor().handler.fetch(request({ avaliacao_id }))
+    const { tentativa } = await response.json()
+    const handler = createEncerrarTentativaHandler(env, async (input, init) => {
+      const req = new Request(input, init)
+      assert.equal(new URL(req.url).pathname, '/rest/v1/rpc/encerrar_tentativa')
+      assert.equal(req.headers.get('authorization'), 'Bearer test-session')
+      const { p_tentativa_id, p_motivo, p_chave_execucao } = await req.json()
+      assert.equal(p_motivo, 'SAIDA')
+      try {
+        const result = await queryAs<{ encerramento: unknown }>(aluno,
+          'SELECT public.encerrar_tentativa($1,$2,$3) AS encerramento', [p_tentativa_id, p_motivo, p_chave_execucao])
+        return Response.json(result.rows[0].encerramento)
+      } catch (error) {
+        const code = error instanceof Error && 'code' in error ? error.code : 'XX000'
+        return Response.json({ code }, { status: 403 })
+      }
+    })
+    const sair = (chave: string) => handler.fetch(new Request(`http://localhost/api/encerrar-tentativa?tentativa_id=${tentativa.id}`, {
+      method: 'POST', headers: { Authorization: 'Bearer test-session', 'X-ExamenTech-Execucao': chave },
+    }))
+    assert.equal((await sair('')).status, 400)
+    assert.equal((await sair(randomUUID())).status, 403)
+    const encerrada = await sair(chaveExecucao)
+    assert.equal(encerrada.status, 200)
+    const resultado = await encerrada.json()
+    assert.equal(resultado.encerramento.situacao, 'INTERROMPIDA')
+    assert.deepEqual(await (await sair(chaveExecucao)).json(), resultado)
+    const eventos = await db.query("SELECT id FROM public.eventos_seguranca WHERE recurso_id=$1 AND evento='TENTATIVA_INTERROMPIDA'", [tentativa.id])
+    assert.equal(eventos.rows.length, 1)
+  })
 })
 
 test('API de início: validações de entrada, identidade e resposta', async (t) => {
@@ -151,7 +189,7 @@ test('API de início: validações de entrada, identidade e resposta', async (t)
       assert.equal((await handler.fetch(request(entrada))).status, 400)
     }
     const missingNotice = new Request('http://localhost/api/iniciar-tentativa', {
-      method: 'POST', headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json' },
+      method: 'POST', headers: { Authorization: 'Bearer test-session', 'Content-Type': 'application/json', 'X-ExamenTech-Execucao': chaveExecucao },
       body: JSON.stringify(body),
     })
     assert.equal((await handler.fetch(missingNotice)).status, 400)
@@ -162,6 +200,8 @@ test('API de início: validações de entrada, identidade e resposta', async (t)
       assert.equal(response.status, 405); assert.equal(response.headers.get('allow'), 'POST')
       assert.equal(response.headers.get('cache-control'), 'no-store')
     }
+    const semChave = request(body); semChave.headers.delete('x-examentech-execucao')
+    assert.equal((await handler.fetch(semChave)).status, 400)
     const noToken = request(body); noToken.headers.delete('authorization')
     assert.equal((await handler.fetch(noToken)).status, 401)
     const invalidToken = request(body); invalidToken.headers.set('authorization', 'Bearer um dois')

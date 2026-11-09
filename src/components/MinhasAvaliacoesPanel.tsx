@@ -4,9 +4,11 @@ import type { AvaliacaoAluno } from '../services/avaliacaoValidation'
 import { TentativaAlunoPanel } from './TentativaAlunoPanel'
 import { TentativaMonitoradaPanel } from './TentativaMonitoradaPanel'
 import { ProvaCameraDemo } from './ProvaCameraDemo'
-import { examManagementEnabled } from '../services/examFeatures'
+import { ResultadosAlunoPanel } from './ResultadosAlunoPanel'
 import '../styles/turmas.css'
 import '../styles/provas.css'
+
+const ignorarEstadoExecucao = () => undefined
 
 export function MinhasAvaliacoesPanel({ onActiveChange, onLeave, layout = 'table', executionEnabled = true }: {
   onActiveChange?: (active: boolean) => void
@@ -19,8 +21,9 @@ export function MinhasAvaliacoesPanel({ onActiveChange, onLeave, layout = 'table
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [selecionada, setSelecionada] = useState<AvaliacaoAluno | null>(null)
+  const [mostrandoResultados, setMostrandoResultados] = useState(false)
   const heading = useRef<HTMLHeadingElement>(null)
-  useEffect(() => { if (!selecionada) heading.current?.focus() }, [selecionada])
+  useEffect(() => { if (!selecionada && !mostrandoResultados) heading.current?.focus() }, [selecionada, mostrandoResultados])
 
   useEffect(() => {
     let active = true
@@ -40,21 +43,30 @@ export function MinhasAvaliacoesPanel({ onActiveChange, onLeave, layout = 'table
     return () => { active = false }
   }, [refresh])
 
-  if (selecionada && onActiveChange && onLeave) return <TentativaMonitoradaPanel
-    key={selecionada.id} avaliacao={selecionada} onCancelar={() => setSelecionada(null)}
-    onActiveChange={onActiveChange} onLeave={onLeave} />
-  if (selecionada) return <TentativaAlunoPanel key={selecionada.id} avaliacao={selecionada} onCancelar={() => setSelecionada(null)} />
+  function voltarAsAvaliacoes() {
+    setSelecionada(null)
+    setRefresh(current => current + 1)
+  }
+
+  if (selecionada && (selecionada.tipo === 'PROVA' || (onActiveChange && onLeave))) return <TentativaMonitoradaPanel
+    key={selecionada.id} avaliacao={selecionada} onCancelar={voltarAsAvaliacoes}
+    onActiveChange={onActiveChange ?? ignorarEstadoExecucao} onLeave={onLeave ?? voltarAsAvaliacoes} />
+  if (selecionada) return <TentativaAlunoPanel key={selecionada.id} avaliacao={selecionada} onCancelar={voltarAsAvaliacoes} />
+  if (mostrandoResultados) return <ResultadosAlunoPanel onVoltar={() => setMostrandoResultados(false)} />
 
   if (layout === 'cards') return (
     <section className="provas-panel" aria-labelledby="minhas-provas-title">
       <header>
         <p className="overline">AVALIAÇÕES</p>
         <h1 id="minhas-provas-title" ref={heading} tabIndex={-1}>Minhas provas</h1>
-        <p className="subtitle">Há uma tentativa por avaliação. Após sair ou perder a câmera, não há retorno automático.{examManagementEnabled() && ' Procure o professor responsável ou o ADM para analisar uma reativação.'}</p>
+        <p className="subtitle">Há uma tentativa por avaliação. Se você sair, recarregar a página ou ficar sem conexão, a tentativa não poderá ser retomada.</p>
       </header>
       <ProvaCameraDemo />
-      <button type="button" className="btn-outline" disabled={loading}
-        onClick={() => setRefresh(current => current + 1)}>Atualizar provas</button>
+      <div className="avaliacao-form-actions">
+        <button type="button" className="btn-outline" disabled={loading}
+          onClick={() => setRefresh(current => current + 1)}>Atualizar provas</button>
+        <button type="button" className="btn-outline" onClick={() => setMostrandoResultados(true)}>Ver resultados publicados</button>
+      </div>
       {!executionEnabled && <p className="provas-note">O início das avaliações ainda não está disponível neste ambiente. Você pode usar a simulação para testar a câmera.</p>}
       {loading && <p role="status">Carregando provas...</p>}
       {error && <p className="alert error" role="alert">{error}</p>}
@@ -79,6 +91,7 @@ export function MinhasAvaliacoesPanel({ onActiveChange, onLeave, layout = 'table
         <h1 id="minhas-avaliacoes-title" ref={heading} tabIndex={-1}>Minhas avaliações</h1>
         <button type="button" className="turmas-refresh" disabled={loading}
           onClick={() => setRefresh((current) => current + 1)}>Atualizar</button>
+        <button type="button" className="turmas-refresh" onClick={() => setMostrandoResultados(true)}>Ver resultados publicados</button>
       </header>
       <p className="turmas-note" role="note">Integração local: inicie somente uma avaliação de teste. O início consome a tentativa única.</p>
       <p className="turmas-note">Até 50 publicações mais recentes. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
@@ -95,7 +108,7 @@ export function MinhasAvaliacoesPanel({ onActiveChange, onLeave, layout = 'table
             </tr></thead>
             <tbody>{avaliacoes.map((avaliacao) => <tr key={avaliacao.id}>
               <th scope="row">{avaliacao.titulo}</th>
-              <td><button type="button" className="turmas-refresh" aria-label={`Iniciar ${avaliacao.titulo}`}
+              <td><button type="button" className="turmas-refresh" disabled={!executionEnabled} aria-label={`Iniciar ${avaliacao.titulo}`}
                 onClick={() => setSelecionada(avaliacao)}>Iniciar</button></td>
               <td>{avaliacao.turma_nome}</td>
               <td>{avaliacao.tipo === 'PROVA' ? 'Prova' : 'Atividade'}</td>

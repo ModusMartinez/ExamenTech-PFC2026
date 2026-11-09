@@ -2,18 +2,26 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { StrictMode } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { TentativaMonitoradaPanel } from '../src/components/TentativaMonitoradaPanel'
+import { instalarTelaCheia } from './helpers/telaCheia'
 import { LegalFooter } from '../src/components/LegalFooter'
+import { ErroAcessoTentativa, ErroConexaoTentativa } from '../src/services/tentativaValidation'
 import { ErroSalvamentoResposta } from '../src/services/respostasTentativa'
 import type { DadosRespostaTentativa, RespostaTentativa } from '../src/services/respostaValidation'
 import type { AvaliacaoAluno } from '../src/services/avaliacaoValidation'
 
 const services = vi.hoisted(() => ({
-  iniciarTentativa: vi.fn(), consultarConteudoTentativa: vi.fn(), registrarFalhaCamera: vi.fn(),
+  iniciarTentativa: vi.fn(), consultarConteudoTentativa: vi.fn(), registrarFalhaCamera: vi.fn(), registrarBloqueioClipboard: vi.fn(),
   salvarRespostaTentativa: vi.fn(), consultarRespostasTentativa: vi.fn(), encerrarTentativa: vi.fn(),
 }))
-vi.mock('../src/lib/supabase', () => ({ supabase: {} }))
+const realtime = vi.hoisted(() => ({ channel: vi.fn(), from: vi.fn(), removeChannel: vi.fn(), on: vi.fn(), subscribe: vi.fn(),
+  situacao: vi.fn() }))
+vi.mock('../src/lib/supabase', () => ({ supabase: realtime }))
 vi.mock('../src/services/tentativas', () => services)
-vi.mock('../src/services/examFeatures', () => ({ photosEnabled: () => false, examManagementEnabled: () => false }))
+vi.mock('../src/services/examFeatures', () => ({ photosEnabled: () => true, examManagementEnabled: () => false }))
+vi.mock('../src/hooks/useExamPhotos', () => ({ useExamPhotos: () => ({
+  initialReady: true, pending: 0, message: '', toast: '', preparing: false,
+  dispose: () => undefined, prepare: async () => true, flush: async () => true,
+}) }))
 vi.mock('../src/services/respostasTentativa', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/respostasTentativa')>(),
   consultarRespostasTentativa: services.consultarRespostasTentativa,
@@ -48,6 +56,10 @@ function respostaSalva(dados: Partial<DadosRespostaTentativa> = {}): RespostaTen
     criado_em: '2026-11-08T12:00:00.000Z', atualizado_em: '2026-11-08T12:00:00.000Z', ...dados }
 }
 
+function chaveDaExecucao() {
+  return services.iniciarTentativa.mock.calls[0][1]
+}
+
 function enviarProva() {
   fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
   fireEvent.click(screen.getByRole('button', { name: 'Enviar e encerrar' }))
@@ -60,8 +72,16 @@ function cameraStream() {
   return { stream, track }
 }
 
+let telaCheia: ReturnType<typeof instalarTelaCheia>
 beforeEach(() => {
   vi.resetAllMocks()
+  telaCheia = instalarTelaCheia()
+  realtime.channel.mockReturnValue({ on: realtime.on })
+  realtime.on.mockReturnValue({ subscribe: realtime.subscribe })
+  realtime.from.mockReturnValue({
+    select: () => ({ eq: () => ({ abortSignal: () => ({ maybeSingle: realtime.situacao }) }) }),
+  })
+  realtime.situacao.mockResolvedValue({ data: { id: tentativa.id, situacao: 'EM_ANDAMENTO' }, error: null })
   Object.defineProperties(HTMLDialogElement.prototype, {
     showModal: { configurable: true, value() { this.setAttribute('open', '') } },
     close: { configurable: true, value() { this.removeAttribute('open') } },
@@ -80,13 +100,14 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  telaCheia.restaurar()
   vi.useRealTimers()
   vi.restoreAllMocks()
   if (originalMediaDevices) Object.defineProperty(navigator, 'mediaDevices', originalMediaDevices)
   else Reflect.deleteProperty(navigator, 'mediaDevices')
 })
 
-test('início exige câmera, permite salvar e enviar sem gerar fotos', async () => {
+test('início exige câmera, tela cheia e os dois aceites para salvar e enviar', async () => {
   const { stream } = cameraStream()
   getUserMedia.mockResolvedValue(stream)
   const onLeave = vi.fn()
@@ -97,19 +118,19 @@ test('início exige câmera, permite salvar e enviar sem gerar fotos', async () 
   fireEvent.click(screen.getByRole('button', { name: 'Testar câmera' }))
   await screen.findByText(/Câmera conectada/)
   expect(startButton.disabled).toBe(true)
-  fireEvent.click(screen.getByRole('checkbox', { name: /Li o aviso da prova/ }))
+  aceitarAvisosDaProva()
   expect(startButton.disabled).toBe(false)
   fireEvent.click(startButton)
   await screen.findByText('Quanto é 2 + 2?')
   fireEvent.click(screen.getByRole('radio', { name: '4' }))
   fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
   await waitFor(() => expect(services.salvarRespostaTentativa).toHaveBeenCalledWith(
-    { tentativa_id: tentativa.id, questao_id: questao.id, versao: 1, alternativa_id: questao.alternativas[0].id, texto: null }))
+    { tentativa_id: tentativa.id, questao_id: questao.id, versao: 1, alternativa_id: questao.alternativas[0].id, texto: null }, chaveDaExecucao()))
   await screen.findByText('Resposta salva')
   fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
   expect(screen.getByRole('dialog', { name: 'Enviar prova?' })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Enviar e encerrar' }))
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO', chaveDaExecucao()))
   await waitFor(() => expect(onLeave).toHaveBeenCalledWith(expect.stringContaining('Prova enviada')))
 })
 
@@ -119,12 +140,12 @@ test('perda da câmera registra ocorrência e permite salvar e enviar sem recone
   await act(async () => { track.onended?.() })
   expect(screen.getByText('Quanto é 2 + 2?')).toBeTruthy()
   await screen.findByText('Ocorrência da câmera registrada.')
-  expect(services.registrarFalhaCamera).toHaveBeenCalledExactlyOnceWith(tentativa.id, expect.any(String))
+  expect(services.registrarFalhaCamera).toHaveBeenCalledExactlyOnceWith(tentativa.id, expect.any(String), chaveDaExecucao())
   expect(services.encerrarTentativa).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('radio', { name: '4' }))
   await screen.findByText('Resposta salva')
   enviarProva()
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO', chaveDaExecucao()))
   expect(onLeave).toHaveBeenCalledWith(expect.stringContaining('Prova enviada'))
 })
 
@@ -156,22 +177,27 @@ test('aceite pode ser marcado antes da câmera e o início funciona em StrictMod
   expect(inicio.disabled).toBe(true)
   fireEvent.click(screen.getByText(/Li o aviso da prova/))
   expect(aceite.checked).toBe(false)
-  fireEvent.click(screen.getByText(/Li o aviso da prova/))
+  aceitarAvisosDaProva()
   fireEvent.click(screen.getByRole('button', { name: 'Testar câmera' }))
   await screen.findByText(/Câmera conectada/)
   expect(inicio.disabled).toBe(false)
   fireEvent.click(inicio)
   await screen.findByText('Quanto é 2 + 2?')
-  expect(services.iniciarTentativa).toHaveBeenCalledExactlyOnceWith(avaliacao.id)
-  expect(services.consultarConteudoTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id)
+  expect(services.iniciarTentativa).toHaveBeenCalledExactlyOnceWith(avaliacao.id, expect.stringMatching(/^[0-9a-f-]{36}$/), true)
+  expect(services.consultarConteudoTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, chaveDaExecucao())
 })
+
+function aceitarAvisosDaProva() {
+  fireEvent.click(screen.getByRole('checkbox', { name: /Li o aviso da prova/ }))
+  fireEvent.click(screen.getByRole('checkbox', { name: /Autorizo especificamente/ }))
+}
 
 async function iniciarProva(onLeave = vi.fn()) {
   const { stream, track } = cameraStream()
   getUserMedia.mockResolvedValue(stream)
   const rendered = render(<><TentativaMonitoradaPanel avaliacao={avaliacao} onCancelar={vi.fn()}
     onLeave={onLeave} onActiveChange={vi.fn()} /><LegalFooter openInNewTab /></>)
-  fireEvent.click(screen.getByRole('checkbox', { name: /Li o aviso da prova/ }))
+  aceitarAvisosDaProva()
   fireEvent.click(screen.getByRole('button', { name: 'Testar câmera' }))
   await screen.findByText(/Câmera conectada/)
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
@@ -179,10 +205,98 @@ async function iniciarProva(onLeave = vi.fn()) {
   return { track, onLeave, unmount: rendered.unmount }
 }
 
+test('recusar tela cheia preserva a tentativa para um novo início', async () => {
+  telaCheia.solicitar.mockRejectedValueOnce(new DOMException('Negado', 'NotAllowedError'))
+  getUserMedia.mockResolvedValue(cameraStream().stream)
+  render(<TentativaMonitoradaPanel avaliacao={avaliacao} onCancelar={vi.fn()}
+    onLeave={vi.fn()} onActiveChange={vi.fn()} />)
+  aceitarAvisosDaProva()
+  fireEvent.click(screen.getByRole('button', { name: 'Testar câmera' }))
+  await screen.findByText(/Câmera conectada/)
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
+  await screen.findByText(/Nenhuma tentativa foi iniciada/)
+  expect(services.iniciarTentativa).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
+  await screen.findByText('Quanto é 2 + 2?')
+  expect(document.fullscreenElement).toBe(document.documentElement)
+  expect(services.iniciarTentativa).toHaveBeenCalledTimes(1)
+})
+
+test('sair da tela cheia interrompe e registra a causa uma única vez', async () => {
+  const { track } = await iniciarProva()
+  await act(() => document.exitFullscreen())
+  await screen.findByText(/A tela cheia foi encerrada/)
+  expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
+  fireEvent(window, new Event('blur'))
+  expect(track.stop).toHaveBeenCalled()
+  expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'TELA_CHEIA', chaveDaExecucao())
+})
+
+test('bloqueia copiar, colar e recortar e envia só o tipo de ocorrência, mantendo as questões', async () => {
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [{ ...questao, tipo: 'DISSERTATIVA', alternativas: [] }] })
+  const { unmount } = await iniciarProva()
+  const resposta = screen.getByRole('textbox')
+  for (const operacao of ['copy', 'cut', 'paste']) {
+    const evento = new Event(operacao, { bubbles: true, cancelable: true })
+    expect(fireEvent(resposta, evento)).toBe(false)
+    await waitFor(() => expect(services.registrarBloqueioClipboard).toHaveBeenCalledWith(
+      tentativa.id, expect.any(String), chaveDaExecucao(), operacao))
+  }
+  expect(screen.getByRole('textbox')).toBe(resposta)
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+  unmount()
+  expect(fireEvent(document, new Event('copy', { cancelable: true }))).toBe(true)
+})
+
+test('atividade inicia sem câmera, fotos ou tela cheia e permite área de transferência', async () => {
+  const atividade = { ...avaliacao, tipo: 'ATIVIDADE' as const }
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, tipo: 'ATIVIDADE' })
+  render(<TentativaMonitoradaPanel avaliacao={atividade} onCancelar={vi.fn()}
+    onLeave={vi.fn()} onActiveChange={vi.fn()} />)
+  expect(screen.queryByRole('button', { name: 'Testar câmera' })).toBeNull()
+  fireEvent.click(screen.getByRole('checkbox', { name: /Li o aviso da atividade/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
+  await screen.findByRole('button', { name: 'Enviar atividade' })
+  expect(telaCheia.solicitar).not.toHaveBeenCalled()
+  expect(services.iniciarTentativa).toHaveBeenCalledExactlyOnceWith(atividade.id, chaveDaExecucao(), false)
+  expect(fireEvent(document, new Event('paste', { cancelable: true }))).toBe(true)
+  expect(services.registrarBloqueioClipboard).not.toHaveBeenCalled()
+})
+
+test('cancelamento Realtime da própria tentativa fecha a prova, a confirmação e a câmera', async () => {
+  const { track, onLeave } = await iniciarProva()
+  expect(realtime.on).toHaveBeenCalledWith('postgres_changes', {
+    event: 'UPDATE', schema: 'public', table: 'tentativas', filter: `id=eq.${tentativa.id}`,
+  }, expect.any(Function))
+  fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  const receberEvento = realtime.on.mock.calls[0][2]
+  act(() => receberEvento({ new: { id: avaliacao.id, situacao: 'CANCELADA' } }))
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  act(() => receberEvento({ new: { id: tentativa.id, situacao: 'CANCELADA' } }))
+  const aviso = await screen.findByRole('heading', { name: 'Avaliação cancelada' })
+  expect(document.activeElement).toBe(aviso)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
+  expect(track.stop).toHaveBeenCalled()
+  expect(realtime.removeChannel).toHaveBeenCalled()
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+  expect(onLeave).not.toHaveBeenCalled()
+})
+
+test('consulta o servidor depois de assinar o canal e detecta um cancelamento ocorrido antes da inscrição', async () => {
+  await iniciarProva()
+  realtime.situacao.mockResolvedValue({ data: { id: tentativa.id, situacao: 'CANCELADA' }, error: null })
+  const mudarEstadoCanal = realtime.subscribe.mock.calls[0][0]
+  act(() => mudarEstadoCanal('SUBSCRIBED'))
+  await screen.findByText(/O professor cancelou esta avaliação/)
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+})
+
 test('aviso de permanência aparece antes do aceite e sair durante o preparo não interrompe tentativa', async () => {
   render(<TentativaMonitoradaPanel avaliacao={avaliacao} onCancelar={vi.fn()}
     onLeave={vi.fn()} onActiveChange={vi.fn()} />)
-  expect(screen.getByText(/Não troque de aba, de janela ou de área de trabalho/)).toBeTruthy()
+  expect(screen.getByText(/Sair, atualizar a página, perder o foco ou ficar sem conexão/)).toBeTruthy()
   fireEvent(window, new Event('blur'))
   fireEvent(window, new Event('pagehide'))
   expect(screen.getByRole('button', { name: 'Confirmar início' })).toBeTruthy()
@@ -196,17 +310,73 @@ test('trocar de aba oculta questões e encerra a tentativa sem retorno ao tornar
   expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
   visibility.mockReturnValue('visible')
   fireEvent(document, new Event('visibilitychange'))
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'SAIDA'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ABA_OU_FOCO', chaveDaExecucao()))
   expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
-  expect(onLeave).toHaveBeenCalledWith(expect.stringContaining('Procure seu professor ou responsável'))
+  expect(onLeave).toHaveBeenCalledWith(expect.stringContaining('perdeu o foco'))
 })
 
 test.each(['blur', 'pagehide'])('%s da janela interrompe definitivamente uma prova iniciada', async event => {
   await iniciarProva()
   fireEvent(window, new Event(event))
   expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'SAIDA'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, event === 'blur' ? 'ABA_OU_FOCO' : 'SAIDA', chaveDaExecucao()))
 })
+
+test('reconexão permite registrar apenas o encerramento e nunca recuperar as questões', async () => {
+  const { track } = await iniciarProva()
+  const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
+  fireEvent(window, new Event('offline'))
+  expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
+  expect(screen.getByText(/A conexão foi interrompida/)).toBeTruthy()
+  expect(track.stop).toHaveBeenCalled()
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+
+  online.mockReturnValue(true)
+  fireEvent(window, new Event('online'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'SAIDA', chaveDaExecucao()))
+  expect(services.consultarConteudoTentativa).toHaveBeenCalledTimes(1)
+  expect(services.salvarRespostaTentativa).not.toHaveBeenCalled()
+  expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
+})
+
+test('página restaurada do cache do navegador fica bloqueada', async () => {
+  await iniciarProva()
+  fireEvent(window, new PageTransitionEvent('pageshow', { persisted: true }))
+  expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'SAIDA', chaveDaExecucao()))
+})
+
+test('o envio confirmado prevalece quando a saída acontece enquanto o servidor processa o envio', async () => {
+  const { onLeave } = await iniciarProva()
+  let confirmarEnvio!: () => void
+  services.encerrarTentativa.mockImplementation((_id: string, motivo: string) => {
+    if (motivo === 'ABA_OU_FOCO') return Promise.reject(new Error('Tentativa já encerrada.'))
+    return new Promise<void>(resolve => { confirmarEnvio = resolve })
+  })
+
+  enviarProva()
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO', chaveDaExecucao()))
+  fireEvent(window, new Event('blur'))
+  expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
+  await act(async () => confirmarEnvio())
+  expect(onLeave).toHaveBeenCalledExactlyOnceWith('Prova enviada. A tentativa foi encerrada.')
+})
+
+test.each([new ErroConexaoTentativa('Rede indisponível.'), new ErroAcessoTentativa('Sessão inválida.')])(
+  'falha da execução durante o salvamento bloqueia as questões e o reenvio (%s)', async falha => {
+    await iniciarProva()
+    services.salvarRespostaTentativa.mockRejectedValueOnce(falha)
+    fireEvent.click(screen.getByRole('radio', { name: '4' }))
+    await screen.findByRole('heading', { name: 'Prova bloqueada' })
+    expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reenviar resposta' })).toBeNull()
+    if (falha instanceof ErroConexaoTentativa) {
+      expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'SAIDA', chaveDaExecucao())
+    } else {
+      expect(services.encerrarTentativa).not.toHaveBeenCalled()
+    }
+  },
+)
 
 test('perda de foco enquanto o início está pendente encerra a tentativa criada sem abrir questões', async () => {
   let concluirInicio!: (value: typeof tentativa) => void
@@ -215,13 +385,14 @@ test('perda de foco enquanto o início está pendente encerra a tentativa criada
   getUserMedia.mockResolvedValue(stream)
   render(<TentativaMonitoradaPanel avaliacao={avaliacao} onCancelar={vi.fn()}
     onLeave={vi.fn()} onActiveChange={vi.fn()} />)
-  fireEvent.click(screen.getByRole('checkbox'))
+  aceitarAvisosDaProva()
   fireEvent.click(screen.getByRole('button', { name: 'Testar câmera' }))
   await screen.findByText(/Câmera conectada/)
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
+  await waitFor(() => expect(services.iniciarTentativa).toHaveBeenCalled())
   fireEvent(window, new Event('blur'))
   await act(async () => concluirInicio(tentativa))
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'SAIDA'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ABA_OU_FOCO', chaveDaExecucao()))
   expect(services.consultarConteudoTentativa).not.toHaveBeenCalled()
 })
 
@@ -234,7 +405,7 @@ test('falha no registro da saída mantém questões ocultas e permite repetir so
   expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Tentar registrar encerramento' }))
   await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledTimes(2))
-  expect(services.encerrarTentativa.mock.calls.every(([, motivo]) => motivo === 'SAIDA')).toBe(true)
+  expect(services.encerrarTentativa.mock.calls.every(([, motivo]) => motivo === 'ABA_OU_FOCO')).toBe(true)
   expect(services.iniciarTentativa).toHaveBeenCalledTimes(1)
 })
 
@@ -244,7 +415,7 @@ test('eventos seguidos de foco, aba e câmera não duplicam o encerramento', asy
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
   fireEvent(document, new Event('visibilitychange'))
   await act(async () => { track.onended?.() })
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'SAIDA'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ABA_OU_FOCO', chaveDaExecucao()))
 })
 
 test('cancelar a confirmação do próprio site não conta como saída de janela', async () => {
@@ -265,7 +436,7 @@ test('confirmar saída no diálogo encerra a tentativa', async () => {
   await iniciarProva()
   fireEvent.click(screen.getByRole('button', { name: 'Sair e encerrar' }))
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar saída' }))
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'SAIDA'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'SAIDA', chaveDaExecucao()))
 })
 
 test('documentos do rodapé abrem dentro da prova, sem interromper a tentativa', async () => {
@@ -283,19 +454,19 @@ test('documentos do rodapé abrem dentro da prova, sem interromper a tentativa',
 test('consulta versões sem gestão habilitada e usa a próxima no salvar e no envio final', async () => {
   services.consultarRespostasTentativa.mockResolvedValue([respostaSalva({ versao: 4 })])
   await iniciarProva()
-  expect(services.consultarRespostasTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id)
+  expect(services.consultarRespostasTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, chaveDaExecucao())
   expect((screen.getByRole('radio', { name: '4' }) as HTMLInputElement).checked).toBe(true)
   fireEvent.click(screen.getByRole('radio', { name: '5' }))
   fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
   await screen.findByText('Resposta salva')
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 5, alternativa_id: questao.alternativas[1].id }))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 5, alternativa_id: questao.alternativas[1].id }), chaveDaExecucao())
   fireEvent.click(screen.getByRole('radio', { name: '4' }))
   enviarProva()
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 6, alternativa_id: questao.alternativas[0].id }))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO', chaveDaExecucao()))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 6, alternativa_id: questao.alternativas[0].id }), chaveDaExecucao())
 })
 
-test('confirma o mesmo envio após falha de rede antes de gravar a alteração seguinte', async () => {
+test('confirma o mesmo envio sem confirmação antes de gravar a alteração seguinte', async () => {
   services.salvarRespostaTentativa.mockRejectedValueOnce(new ErroSalvamentoResposta('Sem confirmação.', 'NAO_CONFIRMADA'))
   await iniciarProva()
   fireEvent.click(screen.getByRole('radio', { name: '4' }))
@@ -323,9 +494,9 @@ test('envio final resolve pendência mesmo quando o campo voltou ao último valo
   await screen.findByText('Sem confirmação.')
   fireEvent.click(screen.getByRole('radio', { name: '4' }))
   enviarProva()
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO', chaveDaExecucao()))
   expect(services.salvarRespostaTentativa.mock.calls.map(([dados]) => dados.versao)).toEqual([2, 2, 3])
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ alternativa_id: questao.alternativas[0].id }))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ alternativa_id: questao.alternativas[0].id }), chaveDaExecucao())
 })
 
 test('conflito exige consulta explícita, preserva o campo e não envia a prova', async () => {
@@ -350,7 +521,7 @@ test('conflito exige consulta explícita, preserva o campo e não envia a prova'
   expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
   fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
   await screen.findByText('Resposta salva')
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 8, alternativa_id: questao.alternativas[1].id }))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 8, alternativa_id: questao.alternativas[1].id }), chaveDaExecucao())
 })
 
 test.each(['RECUSADA', 'NAO_CONFIRMADA'] as const)('falha %s no envio final mantém campos e impede encerramento', async codigo => {
@@ -362,7 +533,7 @@ test.each(['RECUSADA', 'NAO_CONFIRMADA'] as const)('falha %s no envio final mant
   expect(services.encerrarTentativa).not.toHaveBeenCalled()
   expect((screen.getByRole('radio', { name: '5' }) as HTMLInputElement).checked).toBe(true)
   enviarProva()
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO', chaveDaExecucao()))
   expect(services.salvarRespostaTentativa.mock.calls[1][0]).toEqual(services.salvarRespostaTentativa.mock.calls[0][0])
 })
 
@@ -373,11 +544,11 @@ test('envio final salva dissertativa com espaços e permite limpar resposta ante
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '  Minha resposta\ncom espaços  ' } })
   fireEvent.click(screen.getByRole('button', { name: 'Salvar resposta' }))
   await screen.findByText('Resposta salva')
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 1, texto: '  Minha resposta\ncom espaços  ', alternativa_id: null }))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 1, texto: '  Minha resposta\ncom espaços  ', alternativa_id: null }), chaveDaExecucao())
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '' } })
   enviarProva()
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO'))
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 2, texto: null, alternativa_id: null }))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledWith(tentativa.id, 'ENVIO', chaveDaExecucao()))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 2, texto: null, alternativa_id: null }), chaveDaExecucao())
 })
 
 test.each(['consulta', 'questão', 'tipo', 'alternativa'])('falha de %s impede edição sem versão conhecida e permite repetir a consulta', async falha => {
@@ -389,7 +560,7 @@ test.each(['consulta', 'questão', 'tipo', 'alternativa'])('falha de %s impede e
   const { stream } = cameraStream()
   getUserMedia.mockResolvedValue(stream)
   render(<TentativaMonitoradaPanel avaliacao={avaliacao} onCancelar={vi.fn()} onLeave={vi.fn()} onActiveChange={vi.fn()} />)
-  fireEvent.click(screen.getByRole('checkbox'))
+  aceitarAvisosDaProva()
   fireEvent.click(screen.getByRole('button', { name: 'Testar câmera' }))
   await screen.findByText(/Câmera conectada/)
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
@@ -410,7 +581,7 @@ test.each(['saída', 'desmontagem'])('confirmação tardia após %s não finaliz
   if (motivo === 'saída') fireEvent(window, new Event('blur'))
   else unmount()
   await act(async () => confirm(respostaSalva()))
-  expect(services.encerrarTentativa).not.toHaveBeenCalledWith(tentativa.id, 'ENVIO')
+  expect(services.encerrarTentativa).not.toHaveBeenCalledWith(tentativa.id, 'ENVIO', chaveDaExecucao())
 })
 
 test('cliques repetidos não duplicam o salvamento e bloqueiam envio até a confirmação', async () => {
@@ -458,7 +629,7 @@ test('falha na segunda questão preserva texto e não regrava a primeira ao repe
   expect(services.encerrarTentativa).not.toHaveBeenCalled()
   expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('  Resposta da segunda questão\n')
   enviarProva()
-  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO'))
+  await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO', chaveDaExecucao()))
   expect(services.salvarRespostaTentativa.mock.calls.map(([dados]) => dados.questao_id)).toEqual([questao.id, segunda.id, segunda.id])
   expect(services.salvarRespostaTentativa.mock.calls[2][0]).toEqual(services.salvarRespostaTentativa.mock.calls[1][0])
 })
@@ -481,7 +652,7 @@ test('selecionar alternativa salva automaticamente na próxima versão; carregam
   await avancar(0)
   expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith({
     tentativa_id: tentativa.id, questao_id: questao.id, versao: 5, alternativa_id: questao.alternativas[1].id, texto: null,
-  })
+  }, chaveDaExecucao())
   expect(screen.getByRole('button', { name: 'Resposta salva' })).toBeTruthy()
   await avancar(5000)
   expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
@@ -499,10 +670,10 @@ test('dissertativa espera 800 ms sem digitar, preserva espaços e salva a limpez
   await avancar(799)
   expect(services.salvarRespostaTentativa).not.toHaveBeenCalled()
   await avancar(1)
-  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ versao: 1, texto: '  Resposta completa\n', alternativa_id: null }))
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ versao: 1, texto: '  Resposta completa\n', alternativa_id: null }), chaveDaExecucao())
   fireEvent.change(campo, { target: { value: '' } })
   await avancar(800)
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 2, texto: null }))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 2, texto: null }), chaveDaExecucao())
 })
 
 test('digitação continua durante a requisição e a confirmação antiga não substitui o texto mais recente', async () => {
@@ -524,7 +695,7 @@ test('digitação continua durante a requisição e a confirmação antiga não 
   expect(campo.value).toBe('Texto mais recente')
   expect(screen.queryByText('Resposta salva')).toBeNull()
   await avancar(0)
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 2, texto: 'Texto mais recente' }))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 2, texto: 'Texto mais recente' }), chaveDaExecucao())
   expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(2)
   expect(document.activeElement).toBe(campo)
 })
@@ -539,9 +710,9 @@ test('editar outra questão não adia o salvamento da primeira', async () => {
   await avancar(700)
   fireEvent.change(screen.getByRole('textbox', { name: 'Resposta da questão 2' }), { target: { value: 'Segunda' } })
   await avancar(100)
-  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ questao_id: primeira.id, texto: 'Primeira' }))
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ questao_id: primeira.id, texto: 'Primeira' }), chaveDaExecucao())
   await avancar(700)
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ questao_id: segunda.id, texto: 'Segunda', versao: 1 }))
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ questao_id: segunda.id, texto: 'Segunda', versao: 1 }), chaveDaExecucao())
   expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(2)
 })
 
@@ -565,7 +736,7 @@ test.each(['NAO_CONFIRMADA', 'RECUSADA', 'CONFLITO'] as const)('falha automátic
   if (codigo === 'NAO_CONFIRMADA') expect(services.salvarRespostaTentativa.mock.calls[1][0]).toEqual(services.salvarRespostaTentativa.mock.calls[0][0])
   expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({
     alternativa_id: questao.alternativas[1].id, versao: codigo === 'CONFLITO' ? 8 : codigo === 'NAO_CONFIRMADA' ? 2 : 1,
-  }))
+  }), chaveDaExecucao())
   expect((screen.getByRole('radio', { name: '5' }) as HTMLInputElement).checked).toBe(true)
 })
 
@@ -576,8 +747,8 @@ test('envio final salva imediatamente o texto que ainda aguardava o temporizador
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Texto para enviar' } })
   fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Enviar e encerrar' })) })
-  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ versao: 1, texto: 'Texto para enviar' }))
-  expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO')
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ versao: 1, texto: 'Texto para enviar' }), chaveDaExecucao())
+  expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO', chaveDaExecucao())
   await avancar(5000)
   expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
 })
@@ -596,8 +767,8 @@ test('envio aguarda a requisição automática em andamento e depois inclui a al
   fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Enviar e encerrar' })) })
   expect(services.salvarRespostaTentativa.mock.calls.map(([dados]) => dados.versao)).toEqual([1, 2])
-  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ alternativa_id: questao.alternativas[1].id }))
-  expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO')
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ alternativa_id: questao.alternativas[1].id }), chaveDaExecucao())
+  expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO', chaveDaExecucao())
 })
 
 test.each(['saída', 'desmontagem', 'prazo'])('%s impede o salvamento automático agendado', async motivo => {
@@ -622,7 +793,7 @@ test('confirmação de encerramento pausa o temporizador e cancelar permite salv
   expect(services.salvarRespostaTentativa).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: 'Continuar na prova' }))
   await avancar(0)
-  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ texto: 'Texto ainda não enviado' }))
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ texto: 'Texto ainda não enviado' }), chaveDaExecucao())
   expect(services.encerrarTentativa).not.toHaveBeenCalled()
 })
 
@@ -675,7 +846,7 @@ test('falha contínua e reconexão negada não duplicam a ocorrência nem bloque
   await act(async () => { track.onended?.() })
   await avancar(4000)
   expect(screen.getByRole('textbox')).toBe(campo)
-  expect(services.salvarRespostaTentativa).toHaveBeenCalledWith(expect.objectContaining({ texto: 'Continua salvando sem câmera' }))
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledWith(expect.objectContaining({ texto: 'Continua salvando sem câmera' }), chaveDaExecucao())
   getUserMedia.mockRejectedValueOnce(new DOMException('Negado', 'NotAllowedError'))
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reconectar câmera' })) })
   expect(services.registrarFalhaCamera).toHaveBeenCalledTimes(1)
@@ -689,8 +860,8 @@ test('falha de registro não impede envio e informa a pendência após encerrar'
   await act(async () => { track.onended?.() })
   await screen.findByText('Registro indisponível.')
   enviarProva()
-  await waitFor(() => expect(onLeave).toHaveBeenCalledWith(expect.stringContaining('ocorrências da câmera sem confirmação')))
-  expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO')
+  await waitFor(() => expect(onLeave).toHaveBeenCalledWith(expect.stringContaining('ocorrências sem confirmação')))
+  expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO', chaveDaExecucao())
   expect(services.registrarFalhaCamera).toHaveBeenCalledTimes(2)
   expect(services.registrarFalhaCamera.mock.calls[1]).toEqual(services.registrarFalhaCamera.mock.calls[0])
 })

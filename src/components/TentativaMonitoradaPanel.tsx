@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useCameraSession } from '../hooks/useCameraSession'
-import { useCameraIncidents } from '../hooks/useCameraIncidents'
+import { useOcorrenciasProva } from '../hooks/useOcorrenciasProva'
+import { useEventosExecucao } from '../hooks/useEventosExecucao'
+import { AVISO_CANCELAMENTO, useCancelamentoTentativa } from '../hooks/useCancelamentoTentativa'
 import type { AvaliacaoAluno } from '../services/avaliacaoValidation'
 import { consultarConteudoTentativa, encerrarTentativa, iniciarTentativa } from '../services/tentativas'
 import { consultarRespostasTentativa, ErroSalvamentoResposta, salvarRespostaTentativa } from '../services/respostasTentativa'
 import type { DadosRespostaTentativa, RespostaTentativa } from '../services/respostaValidation'
 import { useExamPhotos } from '../hooks/useExamPhotos'
-import { photosEnabled, examManagementEnabled } from '../services/examFeatures'
+import { photosEnabled } from '../services/examFeatures'
 import { PHOTO_NOTICE, PHOTO_NOTICE_VERSION } from '../services/examPhotos'
-import type { ConteudoTentativa, QuestaoTentativa, TentativaIniciada } from '../services/tentativaValidation'
-import { EXAM_NOTICE_SUMMARY, EXAM_NOTICE_VERSION } from '../content/legalDocuments'
+import { ErroAcessoTentativa, ErroConexaoTentativa } from '../services/tentativaValidation'
+import type { ConteudoTentativa, MotivoSaidaTentativa, QuestaoTentativa, TentativaIniciada } from '../services/tentativaValidation'
+import { EXAM_NOTICE_VERSION, PROVA_NOTICE_VERSION } from '../content/legalDocuments'
 import type { LegalDocumentType } from '../content/legalDocuments'
 import { LegalModal } from './LegalModal'
 import '../styles/turmas.css'
@@ -24,7 +27,7 @@ type Props = {
 }
 
 type Phase = 'preparo' | 'iniciando' | 'em-andamento' | 'bloqueada' | 'falhou'
-type BlockReason = 'PRAZO' | 'SAIDA'
+type BlockReason = MotivoSaidaTentativa | 'PRAZO' | 'CONEXAO' | 'ACESSO' | 'CANCELAMENTO'
 type Confirmation = 'ENVIO' | 'SAIDA'
 type EstadoResposta = {
   salva?: RespostaTentativa
@@ -47,15 +50,25 @@ function conferirQuestao(resposta: RespostaTentativa, questoes: QuestaoTentativa
   }
 }
 
-const DEPARTURE_WARNING = 'Durante a prova, permaneça nesta página e nesta aba. Não troque de aba, de janela ou de área de trabalho, nem minimize a janela. Sair, atualizar a página ou tirar o foco da janela da prova interrompe sua única tentativa, sem retorno automático. Se isso acontecer, procure seu professor ou responsável para analisar o caso.'
+const DEPARTURE_WARNING = 'Permaneça nesta página e nesta aba. Sair, atualizar a página, perder o foco ou ficar sem conexão interrompe sua única tentativa. A tentativa não pode ser retomada.'
+const MONITORING_NOTICE = 'A prova exige tela cheia. Sair da tela cheia encerra a tentativa. Copiar, colar e recortar são bloqueados. O sistema registra o tipo e o horário dessas ocorrências, sem coletar o conteúdo da área de transferência.'
+const BLOCK_MESSAGES: Record<BlockReason, string> = {
+  SAIDA: 'Você saiu da avaliação. A tentativa não pode ser retomada. Procure seu professor ou responsável se precisar de orientação.',
+  ABA_OU_FOCO: 'A aba ou janela da prova perdeu o foco. A tentativa não pode ser retomada. As respostas recebidas ficam salvas.',
+  TELA_CHEIA: 'A tela cheia foi encerrada. A tentativa não pode ser retomada. As respostas recebidas ficam salvas.',
+  CONEXAO: 'A conexão foi interrompida. A tentativa não pode ser retomada. As respostas recebidas pelo sistema ficam salvas.',
+  ACESSO: 'A sessão desta tentativa ficou indisponível. A tentativa não pode ser retomada.',
+  PRAZO: 'O prazo terminou. As respostas recebidas pelo sistema ficam salvas.',
+  CANCELAMENTO: AVISO_CANCELAMENTO,
+}
 
 function relogio(milliseconds: number) {
   const seconds = Math.max(0, Math.ceil(milliseconds / 1000))
   return `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-function ConfirmarEncerramento({ action, onCancel, onConfirm }: {
-  action: Confirmation; onCancel: () => void; onConfirm: () => void
+function ConfirmarEncerramento({ action, prova, onCancel, onConfirm }: {
+  action: Confirmation; prova: boolean; onCancel: () => void; onConfirm: () => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
@@ -72,10 +85,10 @@ function ConfirmarEncerramento({ action, onCancel, onConfirm }: {
   }, [])
   return <dialog ref={dialogRef} className="provas-confirmacao" aria-modal="true" aria-labelledby={titleId}
     onCancel={event => { event.preventDefault(); onCancel() }}>
-    <h2 id={titleId}>{action === 'ENVIO' ? 'Enviar prova?' : 'Sair da prova?'}</h2>
-    <p>{action === 'ENVIO' ? 'Suas respostas serão enviadas e a tentativa será encerrada.' : 'Sair interrompe sua única tentativa.'} Não há retorno automático. Uma interrupção exige análise do professor ou responsável.</p>
+    <h2 id={titleId}>{action === 'ENVIO' ? `Enviar ${prova ? 'prova' : 'atividade'}?` : `Sair da ${prova ? 'prova' : 'atividade'}?`}</h2>
+    <p>{action === 'ENVIO' ? 'Suas respostas serão enviadas e a tentativa será encerrada.' : 'Sair interrompe sua única tentativa. Ela não poderá ser retomada.'}</p>
     <div className="provas-actions">
-      <button type="button" className="btn-outline" ref={cancelRef} onClick={onCancel}>Continuar na prova</button>
+      <button type="button" className="btn-outline" ref={cancelRef} onClick={onCancel}>Continuar na {prova ? 'prova' : 'atividade'}</button>
       <button type="button" className="btn-primary" onClick={onConfirm}>
         {action === 'ENVIO' ? 'Enviar e encerrar' : 'Confirmar saída'}
       </button>
@@ -101,12 +114,14 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const [photosAcknowledged, setPhotosAcknowledged] = useState(false)
   const [legalDocument, setLegalDocument] = useState<LegalDocumentType | null>(null)
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null)
+  const [chaveExecucao] = useState(() => crypto.randomUUID())
   const noticeId = useId()
   const activeRef = useRef(true)
+  const preparandoTelaCheia = useRef(false)
+  const telaCheiaDaProva = useRef(false)
   const startingRef = useRef(false)
   const closingRef = useRef(false)
   const closedRef = useRef(false)
-  const leftDuringStartRef = useRef(false)
   const blockReasonRef = useRef<BlockReason | null>(null)
   const blockedRef = useRef(false)
   const attemptRef = useRef<TentativaIniciada | null>(null)
@@ -115,40 +130,54 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const savingRef = useRef(false)
   const saveAtRef = useRef<Record<string, number>>({})
   const cancelButton = useRef<HTMLButtonElement>(null)
-  const withPhotos = photosEnabled()
-  const withManagement = examManagementEnabled()
-  const allAcknowledged = noticeAcknowledged && (!withPhotos || photosAcknowledged)
-  const photos = useExamPhotos(videoRef, reportNoImage)
-  const cameraIncidents = useCameraIncidents(tentativa?.id ?? null, cameraStatus, phase === 'em-andamento')
+  const blockHeading = useRef<HTMLHeadingElement>(null)
+  const prova = avaliacao.tipo === 'PROVA'
+  const withPhotos = prova && photosEnabled()
+  const allAcknowledged = noticeAcknowledged && (!prova || photosAcknowledged)
+  const podeIniciar = allAcknowledged && (!prova || (withPhotos && cameraStatus === 'ready'))
+  const photos = useExamPhotos(videoRef, reportNoImage, handleExecutionFailure)
+  const ocorrencias = useOcorrenciasProva(tentativa?.id ?? null, chaveExecucao, cameraStatus,
+    prova && phase === 'em-andamento', handleExecutionFailure)
   const disposePhotos = photos.dispose
+
+  const sairTelaCheia = useCallback(() => {
+    if (!telaCheiaDaProva.current) return
+    telaCheiaDaProva.current = false
+    if (document.fullscreenElement === document.documentElement) void document.exitFullscreen().catch(() => undefined)
+  }, [])
+  useEffect(() => sairTelaCheia, [sairTelaCheia])
 
   useEffect(() => {
     activeRef.current = true
     cancelButton.current?.focus()
     return () => { activeRef.current = false }
   }, [])
-  useEffect(() => { attemptRef.current = tentativa }, [tentativa])
   useEffect(() => { answerRef.current = answers }, [answers])
   useEffect(() => { savedRef.current = saved }, [saved])
   useEffect(() => {
-    onActiveChange(phase === 'iniciando' || phase === 'em-andamento' || phase === 'bloqueada')
-  }, [phase, onActiveChange])
+    onActiveChange(phase === 'iniciando' || phase === 'em-andamento' ||
+      (phase === 'bloqueada' && blockReason !== 'CANCELAMENTO'))
+  }, [phase, blockReason, onActiveChange])
   useEffect(() => () => onActiveChange(false), [onActiveChange])
   useEffect(() => {
-    if (!tentativa) return
+    if (phase === 'bloqueada') blockHeading.current?.focus()
+  }, [phase, blockReason])
+  useEffect(() => {
+    if (!tentativa || phase !== 'em-andamento') return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [tentativa])
+  }, [tentativa, phase])
 
   async function loadContent(current: TentativaIniciada) {
-    if (blockedRef.current || Date.now() >= Date.parse(current.limite_em)) return
+    if (blockedRef.current || now >= Date.parse(current.limite_em)) return
     setLoadingContent(true)
     setError('')
     try {
-      const result = await consultarConteudoTentativa(current.id)
+      const result = await consultarConteudoTentativa(current.id, chaveExecucao)
+      checkAvailable()
       if (result.avaliacao_id !== current.avaliacao_id || result.iniciada_em !== current.iniciada_em ||
           result.limite_em !== current.limite_em) throw new Error('O conteúdo não corresponde à tentativa iniciada.')
-      const previous = await consultarRespostasTentativa(current.id)
+      const previous = await consultarRespostasTentativa(current.id, chaveExecucao)
       const values: Record<string, string> = {}
       const states: Record<string, EstadoResposta> = {}
       for (const answer of previous) {
@@ -163,6 +192,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       setSaved(states)
       setConteudo(result)
     } catch (cause) {
+      handleExecutionFailure(cause)
       if (activeRef.current && !blockedRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível carregar as questões.')
     } finally {
       if (activeRef.current) setLoadingContent(false)
@@ -170,58 +200,61 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   }
 
   const block = useCallback(async (reason: BlockReason) => {
+    if (closedRef.current) return
+    if (reason !== 'CANCELAMENTO') reason = blockReasonRef.current ?? reason
+    if (!blockedRef.current || reason === 'CANCELAMENTO') {
+      blockReasonRef.current = reason
+      blockedRef.current = true
+      disposePhotos()
+      stop()
+      sairTelaCheia()
+      setBlockReason(reason)
+      setPhase('bloqueada')
+      setConteudo(null)
+      setConfirmation(null)
+      setLegalDocument(null)
+      setAnswers({})
+      setSaved({})
+      setError('')
+      setNotice('')
+    }
+    if (reason === 'CANCELAMENTO') {
+      closedRef.current = true
+      return
+    }
     const current = attemptRef.current
-    if (!current || closingRef.current || closedRef.current) return
-    reason = blockReasonRef.current ?? reason
-    blockReasonRef.current = reason
-    blockedRef.current = true
-    disposePhotos()
-    setBlockReason(reason)
-    setPhase('bloqueada')
-    setConteudo(null)
-    setError('')
+    if (!current || reason === 'ACESSO' || closingRef.current || !navigator.onLine) return
     closingRef.current = true
     try {
-      await encerrarTentativa(current.id, reason)
+      const encerramento = await encerrarTentativa(current.id, reason === 'CONEXAO' ? 'SAIDA' : reason, chaveExecucao)
+      if (closedRef.current) return
       closedRef.current = true
-      stop()
-      if (activeRef.current) onLeave(reason === 'SAIDA'
-          ? 'Você saiu da aba ou da janela da prova. A tentativa foi interrompida, sem retorno automático. Procure seu professor ou responsável para analisar o caso.'
-          : 'O prazo terminou. A tentativa foi encerrada.')
+      if (activeRef.current) onLeave(BLOCK_MESSAGES[encerramento.situacao === 'FINALIZADA' ? 'PRAZO' : reason])
     } catch (cause) {
-      if (activeRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível registrar o encerramento. Tente novamente.')
+      if (activeRef.current && !closedRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível registrar o encerramento. Tente novamente.')
     } finally {
       closingRef.current = false
     }
-  }, [onLeave, stop, disposePhotos])
+  }, [onLeave, stop, disposePhotos, sairTelaCheia, chaveExecucao])
+
+  useCancelamentoTentativa(blockReason === 'CANCELAMENTO' ? undefined : tentativa?.id, () => void block('CANCELAMENTO'))
+
+  function handleExecutionFailure(cause: unknown) {
+    if (!activeRef.current) return
+    if (cause instanceof ErroConexaoTentativa) void block('CONEXAO')
+    if (cause instanceof ErroAcessoTentativa) void block('ACESSO')
+  }
 
   useEffect(() => {
     if (phase !== 'em-andamento' || !tentativa || now < Date.parse(tentativa.limite_em)) return
     void block('PRAZO')
   }, [phase, tentativa, now, block])
 
-  useEffect(() => {
-    if (phase !== 'iniciando' && phase !== 'em-andamento') return
-    function leavePage() {
-      if (closedRef.current) return
-      if (!attemptRef.current) {
-        leftDuringStartRef.current = true
-        return
-      }
-      void block('SAIDA')
-    }
-    function visibilityChanged() {
-      if (document.visibilityState === 'hidden') leavePage()
-    }
-    window.addEventListener('blur', leavePage)
-    window.addEventListener('pagehide', leavePage)
-    document.addEventListener('visibilitychange', visibilityChanged)
-    return () => {
-      window.removeEventListener('blur', leavePage)
-      window.removeEventListener('pagehide', leavePage)
-      document.removeEventListener('visibilitychange', visibilityChanged)
-    }
-  }, [phase, block])
+  useEventosExecucao(
+    motivo => { if (startingRef.current && !blockedRef.current) void block(motivo) },
+    () => { if (blockReasonRef.current) void block(blockReasonRef.current) },
+    { saida: 'SAIDA', foco: prova ? 'ABA_OU_FOCO' : 'SAIDA', telaCheia: prova ? 'TELA_CHEIA' : undefined },
+  )
 
   useEffect(() => {
     // Mantém os documentos do rodapé acessíveis durante a tentativa,
@@ -241,28 +274,61 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
 
   async function begin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (startingRef.current || cameraStatus !== 'ready' || !allAcknowledged) return
-    startingRef.current = true
+    if (startingRef.current || preparandoTelaCheia.current || !podeIniciar) return
+    if (!navigator.onLine) {
+      setError('Conecte-se à internet para iniciar a prova.')
+      return
+    }
     setPhase('iniciando')
     setError('')
+    if (prova) {
+      preparandoTelaCheia.current = true
+      try {
+        if (!document.fullscreenEnabled || typeof document.documentElement.requestFullscreen !== 'function') {
+          throw new Error('Tela cheia indisponível.')
+        }
+        await document.documentElement.requestFullscreen()
+        if (document.fullscreenElement !== document.documentElement) throw new Error('Tela cheia indisponível.')
+        telaCheiaDaProva.current = true
+        if (!activeRef.current) {
+          sairTelaCheia()
+          return
+        }
+      } catch {
+        if (activeRef.current) {
+          setPhase('preparo')
+          setError('Permita a tela cheia para iniciar. Se o navegador não oferecer essa opção, use outro navegador compatível. Nenhuma tentativa foi iniciada.')
+        }
+        return
+      } finally {
+        preparandoTelaCheia.current = false
+      }
+    }
+    startingRef.current = true
     try {
-      const started = await iniciarTentativa(avaliacao.id)
-      if (!activeRef.current) return
+      const started = await iniciarTentativa(avaliacao.id, chaveExecucao, withPhotos)
       attemptRef.current = started
-      setTentativa(started)
-      setNow(Date.now())
-      if (leftDuringStartRef.current) {
-        void block('SAIDA')
+      if (blockReasonRef.current) {
+        void block(blockReasonRef.current)
         return
       }
+      if (!activeRef.current) return
+      setTentativa(started)
+      setNow(() => Date.now())
       setPhase('em-andamento')
       if (withPhotos) {
-        const ready = await photos.prepare(started.id)
+        const ready = await photos.prepare(started.id, chaveExecucao)
         if (!activeRef.current || blockedRef.current || !ready) return
       }
       void loadContent(started)
     } catch (cause) {
-      if (activeRef.current) {
+      handleExecutionFailure(cause)
+      if (activeRef.current && !blockedRef.current) {
+        if (!attemptRef.current) {
+          startingRef.current = false
+          sairTelaCheia()
+          stop()
+        }
         setPhase(attemptRef.current ? 'em-andamento' : 'falhou')
         setError(cause instanceof Error ? cause.message : 'Não foi possível confirmar o início.')
       }
@@ -274,9 +340,10 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     if (!current || blockedRef.current) return
     setError('')
     try {
-      const ready = await photos.prepare(current.id)
+      const ready = await photos.prepare(current.id, chaveExecucao)
       if (ready && activeRef.current && !blockedRef.current && !conteudo) await loadContent(current)
-    } catch {
+    } catch (cause) {
+      handleExecutionFailure(cause)
       if (activeRef.current && !blockedRef.current) setError('Não foi possível preparar o envio das fotos. Tente novamente nesta página.')
     }
   }
@@ -300,8 +367,9 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     updateResponse(payload.questao_id, { ...previous, pendente: payload })
     let result: RespostaTentativa
     try {
-      result = await salvarRespostaTentativa(payload)
+      result = await salvarRespostaTentativa(payload, chaveExecucao)
     } catch (cause) {
+      handleExecutionFailure(cause)
       if (activeRef.current && !blockedRef.current) {
         let failed: EstadoResposta = { ...previous, pendente: payload, falha: true }
         if (cause instanceof ErroSalvamentoResposta && cause.codigo === 'CONFLITO') {
@@ -345,13 +413,14 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     setError('')
     setNotice('')
     try {
-      const responses = await consultarRespostasTentativa(current.id)
+      const responses = await consultarRespostasTentativa(current.id, chaveExecucao)
       checkAvailable()
       const response = responses.find(item => item.questao_id === question.id)
       if (response) conferirQuestao(response, [question])
       updateResponse(question.id, { salva: response, conferida: true })
       setNotice(`Resposta da questão ${question.ordem} conferida. Sua resposta no formulário foi mantida.`)
     } catch (cause) {
+      handleExecutionFailure(cause)
       if (activeRef.current && !blockedRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível conferir a resposta.')
     } finally {
       savingRef.current = false
@@ -385,7 +454,6 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     const current = attemptRef.current
     if (!current || !conteudo || savingRef.current || blockedRef.current) return
     savingRef.current = true
-    let sendingEnd = false
     setBusy(true)
     setError('')
     setNotice('')
@@ -395,21 +463,22 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       }
       checkAvailable()
       const photosConfirmed = !withPhotos || await photos.flush()
-      const incidentsConfirmed = await cameraIncidents.retry()
       checkAvailable()
-      sendingEnd = true
-      closingRef.current = true
-      await encerrarTentativa(current.id, 'ENVIO')
+      const incidentsConfirmed = await ocorrencias.retry()
+      checkAvailable()
+      await encerrarTentativa(current.id, 'ENVIO', chaveExecucao)
+      if (closedRef.current) return
       closedRef.current = true
       photos.dispose()
       stop()
-      if (activeRef.current && !blockedRef.current) onLeave('Prova enviada. A tentativa foi encerrada.' +
+      sairTelaCheia()
+      if (activeRef.current) onLeave(`${prova ? 'Prova' : 'Atividade'} enviada. A tentativa foi encerrada.` +
         (!photosConfirmed ? ' Algumas fotos ficaram sem confirmação. Informe o professor.' : '') +
-        (!incidentsConfirmed ? ' Há ocorrências da câmera sem confirmação de registro. Informe o professor.' : ''))
+        (!incidentsConfirmed ? ' Há ocorrências sem confirmação de registro. Informe o professor.' : ''))
     } catch (cause) {
+      handleExecutionFailure(cause)
       if (activeRef.current && !blockedRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível confirmar o envio.')
     } finally {
-      if (sendingEnd) closingRef.current = false
       savingRef.current = false
       if (activeRef.current) setBusy(false)
     }
@@ -455,16 +524,16 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const remaining = tentativa ? Date.parse(tentativa.limite_em) - now : 0
   return <section className="provas-panel tentativa-aluno" aria-labelledby="tentativa-monitorada-title">
     <h1 id="tentativa-monitorada-title">{avaliacao.titulo}</h1>
-    <p className="turmas-note">{avaliacao.turma_nome} · Tentativa única, sem retorno automático.{withManagement && ' A reativação depende do professor responsável ou do ADM da sua organização.'}</p>
-    <p className="turmas-note">{withPhotos ? 'A câmera deve permanecer disponível. As fotos são enviadas para análise manual do responsável, com acesso restrito.'
-      : 'A câmera deve permanecer disponível. As fotos continuam apenas no teste local e não são enviadas nesta versão.'}</p>
-
-    <div className="provas-camera provas-camera-small">
-      <video ref={videoRef} autoPlay muted playsInline aria-label="Câmera durante a avaliação" />
-    </div>
-    <p role={cameraStatus === 'error' || cameraStatus === 'interrupted' ? 'alert' : 'status'}
-      className={cameraStatus === 'error' || cameraStatus === 'interrupted' ? 'alert error' : 'turmas-note'}>{cameraMessage}</p>
-    {phase === 'em-andamento' && <>
+    <p className="turmas-note">{avaliacao.turma_nome} · Tentativa única, sem retomada.</p>
+    {withPhotos && phase !== 'bloqueada' && <>
+      <p className="turmas-note">A câmera deve permanecer disponível. As fotos são enviadas para análise manual do responsável, com acesso restrito.</p>
+      <div className="provas-camera provas-camera-small">
+        <video ref={videoRef} autoPlay muted playsInline aria-label="Câmera durante a avaliação" />
+      </div>
+      <p role={cameraStatus === 'error' || cameraStatus === 'interrupted' ? 'alert' : 'status'}
+        className={cameraStatus === 'error' || cameraStatus === 'interrupted' ? 'alert error' : 'turmas-note'}>{cameraMessage}</p>
+    </>}
+    {prova && phase === 'em-andamento' && <>
       {cameraStatus !== 'ready' && <div className="provas-aviso">
         <p>{withPhotos && !photos.initialReady
           ? 'Reconecte a câmera para obter a foto inicial. O prazo continua correndo.'
@@ -472,21 +541,23 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
         <button type="button" className="turmas-refresh" disabled={busy || cameraStatus === 'requesting'}
           onClick={() => void start()}>Reconectar câmera</button>
       </div>}
-      {cameraIncidents.message && <p role="status">{cameraIncidents.message}</p>}
-      {cameraIncidents.pending > 0 && <button type="button" className="turmas-refresh"
-        disabled={busy || cameraIncidents.busy} onClick={() => void cameraIncidents.retry()}>Reenviar ocorrência</button>}
+      {ocorrencias.message && <p role="status">{ocorrencias.message}</p>}
+      {ocorrencias.pending > 0 && <button type="button" className="turmas-refresh"
+        disabled={busy || ocorrencias.busy} onClick={() => void ocorrencias.retry()}>Reenviar ocorrência</button>}
     </>}
 
     {phase === 'preparo' && <form className="turma-form avaliacao-form" onSubmit={begin} aria-label="Preparar tentativa">
-      <p>Ligue a câmera e confirme que sua imagem aparece antes de iniciar. O prazo começa após a confirmação do servidor.</p>
+      <p>{prova && 'Ligue a câmera e confirme que sua imagem aparece antes de iniciar. '}O prazo começa após a confirmação do servidor.</p>
       <div className="provas-aviso">
-        <p>{withPhotos ? PHOTO_NOTICE : EXAM_NOTICE_SUMMARY}</p>
+        {prova && <p>{MONITORING_NOTICE}</p>}
+        {withPhotos && <p>{PHOTO_NOTICE}</p>}
         <p className="provas-permanencia" id={`${noticeId}-permanencia`}>{DEPARTURE_WARNING}</p>
         <p>Leia os <a href="/termos" target="_blank" rel="noreferrer">Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noreferrer">Política de Privacidade</a>.</p>
         <label className="provas-aceite" htmlFor={noticeId}>
           <input id={noticeId} type="checkbox" checked={noticeAcknowledged} aria-describedby={`${noticeId}-permanencia`}
             onChange={event => setNoticeAcknowledged(event.target.checked)} />
-          <span>Li o aviso da prova ({EXAM_NOTICE_VERSION}), os Termos e a Política atualizados e entendi como a câmera e as respostas são usadas.</span>
+          <span>{prova ? `Li o aviso da prova (${PROVA_NOTICE_VERSION}), os Termos e a Política e estou ciente do monitoramento e do uso das respostas.`
+            : `Li o aviso da atividade (${EXAM_NOTICE_VERSION}), os Termos e a Política e estou ciente da tentativa única e do uso das respostas.`}</span>
         </label>
         {withPhotos && <label className="provas-aceite" htmlFor={`${noticeId}-fotos`}>
           <input id={`${noticeId}-fotos`} type="checkbox" checked={photosAcknowledged}
@@ -494,23 +565,23 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
           <span>Autorizo especificamente a captura e o envio de uma foto inicial e três durante esta demonstração voluntária, para análise manual pelo professor responsável ou ADM da minha organização, por até 90 dias por foto ({PHOTO_NOTICE_VERSION}). Posso cancelar antes de iniciar e solicitar revogação e exclusão pelo contato da Política.</span>
         </label>}
       </div>
-      <button type="button" className="turmas-refresh" onClick={() => void start()} disabled={cameraStatus === 'requesting'}>Testar câmera</button>{' '}
-      {cameraStatus === 'ready' && <button type="button" className="turmas-refresh" onClick={reportNoImage}>Minha imagem ficou preta</button>}
+      {withPhotos && <button type="button" className="turmas-refresh" onClick={() => void start()} disabled={cameraStatus === 'requesting'}>Testar câmera</button>}{' '}
+      {withPhotos && cameraStatus === 'ready' && <button type="button" className="turmas-refresh" onClick={reportNoImage}>Minha imagem ficou preta</button>}
       <p id={`${noticeId}-preparo`} className="provas-note" aria-live="polite">
-        {cameraStatus === 'ready'
-          ? allAcknowledged ? 'Tudo pronto para iniciar a prova.' : 'Câmera pronta. Confirme os avisos acima para habilitar o início.'
-          : allAcknowledged ? 'Aceite confirmado. Ligue a câmera para habilitar o início.' : 'Para iniciar, ligue a câmera e marque o aceite acima.'}
+        {prova && !withPhotos ? 'A coleta de fotos está indisponível neste ambiente. A prova poderá ser iniciada quando o serviço estiver disponível.'
+          : podeIniciar ? prova ? 'Ao confirmar, o navegador solicitará a tela cheia.' : 'Tudo pronto para iniciar a atividade.'
+          : 'Confirme os avisos acima para iniciar.'}
       </p>
       <div className="avaliacao-form-actions">
         <button type="submit" className="btn-primary" aria-describedby={`${noticeId}-preparo`}
-          disabled={cameraStatus !== 'ready' || !allAcknowledged}>Confirmar início</button>
+          disabled={!podeIniciar}>Confirmar início</button>
         <button type="button" className="turmas-refresh" ref={cancelButton} onClick={() => { stop(); onCancelar() }}>Cancelar</button>
       </div>
     </form>}
     {phase === 'iniciando' && <p role="status">Confirmando início da tentativa...</p>}
     {phase === 'falhou' && <button type="button" className="turmas-refresh" onClick={() => { stop(); onCancelar() }}>Voltar às avaliações</button>}
-    {tentativa && <p className="tentativa-prazo" role="timer">Tempo restante: {relogio(remaining)}</p>}
-    {error && <p className="alert error" role="alert">{error}</p>}
+    {phase === 'em-andamento' && tentativa && <p className="tentativa-prazo" role="timer">Tempo restante: {relogio(remaining)}</p>}
+    {phase !== 'bloqueada' && error && <p className="alert error" role="alert">{error}</p>}
     {notice && <p className="alert success" role="status">{notice}</p>}
     {withPhotos && phase === 'em-andamento' && <div className="provas-fotos-status">
       <p role="status">{photos.message || (photos.initialReady ? 'Foto inicial recebida. As próximas capturas acontecem durante a prova.' : 'Aguardando confirmação da foto inicial antes de mostrar as questões.')}</p>
@@ -522,10 +593,13 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     {withPhotos && photos.toast && phase === 'em-andamento' && <div className="provas-photo-toast" role="status">{photos.toast}</div>}
 
     {phase === 'bloqueada' && <div className="provas-cover" role="alert">
-      <h2>Prova bloqueada</h2>
-      <p>{blockReason === 'PRAZO' ? 'O tempo terminou.'
-        : 'Você saiu da aba ou da janela da prova. A tentativa foi interrompida, sem retorno automático. Procure seu professor ou responsável para analisar o caso.'} As questões não estão mais visíveis.</p>
-      {error && blockReason && <button type="button" className="turmas-refresh" onClick={() => void block(blockReason)}>Tentar registrar encerramento</button>}
+      <h2 ref={blockHeading} tabIndex={-1}>{blockReason === 'CANCELAMENTO' ? 'Avaliação cancelada' : `${prova ? 'Prova' : 'Atividade'} bloqueada`}</h2>
+      <p>{blockReason && BLOCK_MESSAGES[blockReason]}</p>
+      {error && <p>{error}</p>}
+      <div className="provas-actions">
+        {error && blockReason && <button type="button" className="turmas-refresh" onClick={() => void block(blockReason)}>Tentar registrar encerramento</button>}
+        <button type="button" className="turmas-refresh" onClick={onCancelar}>Voltar às avaliações</button>
+      </div>
     </div>}
 
     {phase === 'em-andamento' && (!withPhotos || photos.initialReady) && <>
@@ -574,15 +648,15 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
         </ol>
         <div className="avaliacao-form-actions">
           <button type="button" className="btn-primary" disabled={busy || Boolean(busyQuestion)} onClick={() => setConfirmation('ENVIO')}>
-            {busy ? 'Enviando...' : 'Enviar prova'}
+            {busy ? 'Enviando...' : `Enviar ${prova ? 'prova' : 'atividade'}`}
           </button>
           <button type="button" className="turmas-refresh" disabled={busy || Boolean(busyQuestion)} onClick={() => setConfirmation('SAIDA')}>Sair e encerrar</button>
-          <button type="button" className="turmas-refresh" disabled={busy || cameraStatus !== 'ready'} onClick={reportNoImage}>Minha imagem ficou preta</button>
+          {prova && <button type="button" className="turmas-refresh" disabled={busy || cameraStatus !== 'ready'} onClick={reportNoImage}>Minha imagem ficou preta</button>}
         </div>
       </>}
     </>}
     {legalDocument && <LegalModal documentType={legalDocument} onClose={() => setLegalDocument(null)} />}
-    {confirmation && phase === 'em-andamento' && <ConfirmarEncerramento action={confirmation}
+    {confirmation && phase === 'em-andamento' && <ConfirmarEncerramento action={confirmation} prova={prova}
       onCancel={() => setConfirmation(null)} onConfirm={() => {
         setConfirmation(null)
         if (confirmation === 'ENVIO') void finish()

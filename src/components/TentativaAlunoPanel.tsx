@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { AvaliacaoAluno } from '../services/avaliacaoValidation'
 import type { ConteudoTentativa, TentativaIniciada } from '../services/tentativaValidation'
-import { consultarConteudoTentativa, iniciarTentativa } from '../services/tentativas'
+import { consultarConteudoTentativa, encerrarTentativa, iniciarTentativa } from '../services/tentativas'
+import { ErroAcessoTentativa, ErroConexaoTentativa } from '../services/tentativaValidation'
+import { useEventosExecucao } from '../hooks/useEventosExecucao'
+import { AVISO_CANCELAMENTO, useCancelamentoTentativa } from '../hooks/useCancelamentoTentativa'
 import '../styles/turmas.css'
 
 export function TentativaAlunoPanel({ avaliacao, onCancelar }: { avaliacao: AvaliacaoAluno; onCancelar: () => void }) {
@@ -11,14 +14,66 @@ export function TentativaAlunoPanel({ avaliacao, onCancelar }: { avaliacao: Aval
   const [conteudo, setConteudo] = useState<ConteudoTentativa | null>(null)
   const [carregando, setCarregando] = useState(false)
   const [error, setError] = useState('')
+  const [interrompida, setInterrompida] = useState(false)
+  const [cancelada, setCancelada] = useState(false)
+  const [chaveExecucao] = useState(() => crypto.randomUUID())
   const [agora, setAgora] = useState(() => Date.now())
   const active = useRef(false)
   const inicioSolicitado = useRef(false)
+  const tentativaAtual = useRef<TentativaIniciada | null>(null)
+  const motivoInterrupcao = useRef<'SAIDA' | 'CONEXAO' | 'ACESSO' | null>(null)
+  const encerrando = useRef(false)
+  const encerrada = useRef(false)
   const consultando = useRef(false)
   const cancel = useRef<HTMLButtonElement>(null)
   const notice = useRef<HTMLParagraphElement>(null)
   const contentHeading = useRef<HTMLHeadingElement>(null)
   const expirada = tentativa !== null && agora >= Date.parse(tentativa.limite_em)
+
+  async function interromper(motivo: 'SAIDA' | 'CONEXAO' | 'ACESSO') {
+    if (!motivoInterrupcao.current) {
+      motivoInterrupcao.current = motivo
+      if (active.current) {
+        setInterrompida(true)
+        setConteudo(null)
+        setError(motivo === 'CONEXAO' ? 'A conexão foi interrompida. A tentativa não pode ser retomada.'
+          : 'A tentativa não pode ser retomada.')
+      }
+    }
+    if (motivoInterrupcao.current === 'ACESSO' || !tentativaAtual.current || encerrando.current ||
+        encerrada.current || !navigator.onLine) return
+    encerrando.current = true
+    try {
+      await encerrarTentativa(tentativaAtual.current.id, 'SAIDA', chaveExecucao)
+      encerrada.current = true
+    } catch {
+      if (active.current && !encerrada.current) setError('A tentativa não pode ser retomada. O encerramento não foi confirmado pelo servidor.')
+    } finally {
+      encerrando.current = false
+    }
+  }
+
+  function tratarFalha(cause: unknown) {
+    if (!active.current) return
+    if (cause instanceof ErroConexaoTentativa) void interromper('CONEXAO')
+    if (cause instanceof ErroAcessoTentativa) void interromper('ACESSO')
+  }
+
+  useEventosExecucao(
+    motivo => { if (inicioSolicitado.current && !motivoInterrupcao.current) void interromper(motivo) },
+    () => { if (motivoInterrupcao.current) void interromper(motivoInterrupcao.current) },
+    { saida: 'SAIDA', foco: 'SAIDA' },
+  )
+
+  useCancelamentoTentativa(cancelada ? undefined : tentativa?.id, () => {
+    encerrada.current = true
+    motivoInterrupcao.current = 'ACESSO'
+    setCancelada(true)
+    setInterrompida(true)
+    setCarregando(false)
+    setConteudo(null)
+    setError(AVISO_CANCELAMENTO)
+  })
 
   useEffect(() => {
     active.current = true
@@ -34,22 +89,23 @@ export function TentativaAlunoPanel({ avaliacao, onCancelar }: { avaliacao: Aval
   }, [tentativa])
 
   async function carregarConteudo(atual: TentativaIniciada) {
-    if (consultando.current || Date.now() >= Date.parse(atual.limite_em)) return
+    if (consultando.current || motivoInterrupcao.current || Date.now() >= Date.parse(atual.limite_em)) return
     consultando.current = true
     setCarregando(true)
     setError('')
     setConteudo(null)
     try {
-      const result = await consultarConteudoTentativa(atual.id)
+      const result = await consultarConteudoTentativa(atual.id, chaveExecucao)
       if (result.avaliacao_id !== atual.avaliacao_id || result.iniciada_em !== atual.iniciada_em || result.limite_em !== atual.limite_em) {
         throw new Error('Não foi possível conferir o conteúdo da tentativa.')
       }
-      if (active.current) {
+      if (active.current && !motivoInterrupcao.current) {
         setAgora(Date.now())
         setConteudo(result)
       }
     } catch (error) {
-      if (active.current) setError(error instanceof Error ? error.message : 'Não foi possível carregar o conteúdo da tentativa.')
+      tratarFalha(error)
+      if (active.current && !motivoInterrupcao.current) setError(error instanceof Error ? error.message : 'Não foi possível carregar o conteúdo da tentativa.')
     } finally {
       consultando.current = false
       if (active.current) setCarregando(false)
@@ -59,18 +115,28 @@ export function TentativaAlunoPanel({ avaliacao, onCancelar }: { avaliacao: Aval
   async function confirmarInicio(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (inicioSolicitado.current) return
+    if (!navigator.onLine) {
+      setError('Conecte-se à internet para iniciar a avaliação.')
+      return
+    }
     inicioSolicitado.current = true
     setInicio('enviando')
     setError('')
     try {
-      const result = await iniciarTentativa(avaliacao.id)
+      const result = await iniciarTentativa(avaliacao.id, chaveExecucao)
+      tentativaAtual.current = result
+      if (motivoInterrupcao.current) {
+        void interromper(motivoInterrupcao.current)
+        return
+      }
       if (!active.current) return
       setAgora(Date.now())
       setTentativa(result)
       setInicio('iniciada')
       void carregarConteudo(result)
     } catch (error) {
-      if (active.current) {
+      tratarFalha(error)
+      if (active.current && !motivoInterrupcao.current) {
         setInicio('falhou')
         setError(error instanceof Error ? error.message : 'Não foi possível confirmar o início da tentativa.')
       }
@@ -82,7 +148,7 @@ export function TentativaAlunoPanel({ avaliacao, onCancelar }: { avaliacao: Aval
       <h1 id="tentativa-title">{avaliacao.titulo}</h1>
       <p className="turmas-note">{avaliacao.turma_nome} · {avaliacao.tipo === 'PROVA' ? 'Prova' : 'Atividade'}</p>
       <p className="turmas-note">Respostas e envio ainda indisponíveis.</p>
-      {(inicio === 'confirmacao' || inicio === 'enviando') && (
+      {!interrompida && (inicio === 'confirmacao' || inicio === 'enviando') && (
         <form className="turma-form avaliacao-form" aria-label="Iniciar avaliação" onSubmit={confirmarInicio}>
           <fieldset disabled={inicio === 'enviando'}>
             <legend>Iniciar avaliação</legend>
@@ -103,11 +169,11 @@ export function TentativaAlunoPanel({ avaliacao, onCancelar }: { avaliacao: Aval
       {tentativa && <p className="tentativa-prazo">Prazo: <time dateTime={tentativa.limite_em}>
         {new Date(tentativa.limite_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
       </time></p>}
-      {expirada ? <p ref={notice} tabIndex={-1} role="status">Prazo da tentativa encerrado.</p> : <>
+      {expirada && !interrompida ? <p ref={notice} tabIndex={-1} role="status">Prazo da tentativa encerrado.</p> : <>
         {carregando && <p role="status">Carregando questões...</p>}
         {error && <p ref={notice} tabIndex={-1} className="alert error" role="alert">{error}</p>}
-        {inicio === 'falhou' && <button type="button" className="turmas-refresh" onClick={onCancelar}>Voltar às avaliações</button>}
-        {tentativa && error && !carregando && <button type="button" className="turmas-refresh"
+        {(inicio === 'falhou' || interrompida) && <button type="button" className="turmas-refresh" onClick={onCancelar}>Voltar às avaliações</button>}
+        {!interrompida && tentativa && error && !carregando && <button type="button" className="turmas-refresh"
           onClick={() => void carregarConteudo(tentativa)}>Tentar carregar questões</button>}
         {conteudo && !carregando && !error && <>
           <h2 ref={contentHeading} tabIndex={-1}>Questões</h2>

@@ -101,8 +101,11 @@ export function createAvaliacoesHandler(
         if (!turma.data) return jsonResponse(404, { message: 'Turma não encontrada ou acesso não autorizado.' })
         if (turma.data.id !== turmaId) return jsonResponse(503, { message: 'Não foi possível conferir a turma.' })
         const publicadas = situacao === 'PUBLICADA'
-        const { data, error } = await supabase.from('avaliacoes').select(AVALIACAO_FIELDS + (publicadas ? ',publicada_em' : ''))
-          .eq('turma_id', turmaId).eq('situacao', situacao)
+        const consulta = supabase.from('avaliacoes')
+          .select(AVALIACAO_FIELDS + (publicadas ? ',publicada_em,cancelada_em' : '')).eq('turma_id', turmaId)
+        const { data, error } = await (publicadas
+          ? consulta.in('situacao', ['PUBLICADA', 'CANCELADA'])
+          : consulta.eq('situacao', 'RASCUNHO'))
           .order(publicadas ? 'publicada_em' : 'criado_em', { ascending: false }).order('id', { ascending: false }).limit(50)
         if (error || !Array.isArray(data) || data.length > 50) {
           return jsonResponse(503, { message: 'Não foi possível consultar as avaliações.' })

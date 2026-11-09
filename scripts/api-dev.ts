@@ -11,6 +11,7 @@ import minhasAvaliacoesHandler from '../api/minhas-avaliacoes.ts'
 import iniciarTentativaHandler from '../api/iniciar-tentativa.ts'
 import conteudoTentativaHandler from '../api/conteudo-tentativa.ts'
 import salvarRespostaTentativaHandler from '../api/salvar-resposta-tentativa.ts'
+import encerrarTentativaHandler from '../api/encerrar-tentativa.ts'
 import fotosTentativaHandler from '../api/fotos-tentativa.ts'
 import limpezaFotosHandler from '../api/limpar-fotos-expiradas.ts'
 
@@ -62,6 +63,7 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
       : url.pathname === '/api/iniciar-tentativa' ? iniciarTentativaHandler
       : url.pathname === '/api/conteudo-tentativa' ? conteudoTentativaHandler
       : url.pathname === '/api/salvar-resposta-tentativa' ? salvarRespostaTentativaHandler
+      : url.pathname === '/api/encerrar-tentativa' ? encerrarTentativaHandler
       : url.pathname === '/api/fotos-tentativa' ? fotosTentativaHandler
       : url.pathname === '/api/limpar-fotos-expiradas' ? limpezaFotosHandler
       : url.pathname === '/api/questoes' ? questoesHandler

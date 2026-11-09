@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { UUID_PATTERN } from '../src/services/avaliacaoValidation.ts'
 import { lerDadosRespostaTentativa, lerRespostaTentativa } from '../src/services/respostaValidation.ts'
 import type { DadosRespostaTentativa } from '../src/services/respostaValidation.ts'
+import { EXECUCAO_HEADER, lerChaveExecucao } from '../src/services/tentativaValidation.ts'
 
 function jsonResponse(status: number, body: object, headers?: HeadersInit) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
@@ -16,6 +17,8 @@ export function createSalvarRespostaTentativaHandler(
       if (request.method !== 'POST') return jsonResponse(405, { message: 'Utilize POST.' }, { Allow: 'POST' })
       const token = request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1]
       if (!token) return jsonResponse(401, { message: 'Entre novamente para salvar a resposta.' })
+      const chaveExecucao = lerChaveExecucao(request.headers.get(EXECUCAO_HEADER))
+      if (!chaveExecucao) return jsonResponse(400, { message: 'Identificação da página da prova inválida.' })
       if (new URL(request.url).searchParams.size) return jsonResponse(400, { message: 'Não envie parâmetros na URL de salvamento.' })
       if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
         return jsonResponse(415, { message: 'Envie os dados no formato JSON.' })
@@ -52,13 +55,12 @@ export function createSalvarRespostaTentativaHandler(
           return jsonResponse(503, { message: 'Não foi possível conferir sua sessão.' })
         }
 
-        // A 034 confere dono, MFA, vínculo, prazo, tipo da questão e sequência da versão.
         const { data, error } = await supabase.rpc('salvar_resposta_tentativa', {
           p_tentativa_id: dados.tentativa_id, p_questao_id: dados.questao_id, p_versao: dados.versao,
-          p_alternativa_id: dados.alternativa_id, p_texto: dados.texto,
+          p_alternativa_id: dados.alternativa_id, p_texto: dados.texto, p_chave_execucao: chaveExecucao,
         }).retry(false)
         if (error) {
-          if (error.code === '42501') return jsonResponse(403, { message: 'Salvamento exige aluno ativo, organização ativa, sessão e MFA.' })
+          if (error.code === '42501') return jsonResponse(403, { message: 'A tentativa só pode ser acessada na sessão e na página em que começou.' })
           if (error.code === 'P0002') return jsonResponse(404, { message: 'Tentativa ou questão não encontrada, ou acesso não autorizado.' })
           if (error.code === '55000') return jsonResponse(409, { message: 'A tentativa está indisponível ou a versão da resposta está fora de sequência.' })
           if (['23502', '23514', '22P02', '22003', '22021', '22P05'].includes(error.code)) {

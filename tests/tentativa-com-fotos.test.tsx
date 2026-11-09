@@ -2,9 +2,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { useRef, useState } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { TentativaMonitoradaPanel } from '../src/components/TentativaMonitoradaPanel'
+import { instalarTelaCheia } from './helpers/telaCheia'
 import type { AvaliacaoAluno } from '../src/services/avaliacaoValidation'
 
 const services=vi.hoisted(()=>({start:vi.fn(),content:vi.fn(),answers:vi.fn(),save:vi.fn(),end:vi.fn(),plan:vi.fn(),send:vi.fn(),capture:vi.fn(),stop:vi.fn(),incident:vi.fn()}))
+vi.mock('../src/hooks/useCancelamentoTentativa', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/hooks/useCancelamentoTentativa')>(), useCancelamentoTentativa: vi.fn(),
+}))
 vi.mock('../src/lib/supabase', () => ({ supabase: {} }))
 vi.mock('../src/services/tentativas',()=>({iniciarTentativa:services.start,consultarConteudoTentativa:services.content,
   encerrarTentativa:services.end,registrarFalhaCamera:services.incident}))
@@ -27,7 +31,9 @@ const attempt={id:'30000000-0000-0000-0000-000000000001',avaliacao_id:assessment
 const question={id:'50000000-0000-0000-0000-000000000001',tipo:'OBJETIVA',enunciado:'Qual resposta foi salva?',ordem:1,pontuacao:1,
   alternativas:[{id:'60000000-0000-0000-0000-000000000001',ordem:1,texto:'Resposta A'},
     {id:'60000000-0000-0000-0000-000000000002',ordem:2,texto:'Resposta B'}]}
+let telaCheia: ReturnType<typeof instalarTelaCheia>
 beforeEach(()=>{
+  telaCheia = instalarTelaCheia()
   vi.resetAllMocks()
   Object.defineProperties(HTMLDialogElement.prototype,{
     showModal:{configurable:true,value(){this.setAttribute('open','')}},close:{configurable:true,value(){this.removeAttribute('open')}},
@@ -39,16 +45,16 @@ beforeEach(()=>{
   services.answers.mockResolvedValue([{id:'80000000-0000-0000-0000-000000000001',tentativa_id:attempt.id,
     questao_id:question.id,alternativa_id:question.alternativas[1].id,texto:null,versao:2,
     criado_em:'2026-11-08T12:00:00Z',atualizado_em:'2026-11-08T12:00:00Z'}])
-  services.plan.mockImplementation(async()=>({tentativa_id:attempt.id,ciclo:2,servidor_em:new Date().toISOString(),
+  services.plan.mockImplementation(async()=>({tentativa_id:attempt.id,ciclo:1,servidor_em:new Date().toISOString(),
     capturas:['INICIAL','PROVA_1','PROVA_2','PROVA_3'].map((momento,i)=>({id:`70000000-0000-0000-0000-00000000000${i+1}`,
       momento,agendada_em:new Date(Date.now()+i*600000).toISOString(),recebida_em:null}))}))
   services.capture.mockResolvedValue({moment:'INICIAL',blob:new Blob(['photo'],{type:'image/jpeg'}),width:640,height:480,capturedAt:new Date().toISOString()})
   services.send.mockResolvedValue(undefined)
   services.end.mockResolvedValue({id:attempt.id,situacao:'FINALIZADA',encerrada_em:'2026-11-08T12:00:00Z',falhas_camera:0})
 })
-afterEach(()=>{cleanup();vi.restoreAllMocks()})
+afterEach(()=>{cleanup();telaCheia.restaurar();vi.restoreAllMocks()})
 
-test('foto inicial é confirmada antes das questões e a retomada recupera a resposta salva',async()=>{
+test('foto inicial é confirmada antes das questões e a consulta carrega a resposta salva da mesma execução',async()=>{
   let confirmUpload:()=>void=()=>undefined
   services.send.mockImplementation(()=>new Promise<void>(resolve=>{confirmUpload=resolve}))
   const onLeave=vi.fn()
@@ -62,13 +68,13 @@ test('foto inicial é confirmada antes das questões e a retomada recupera a res
   expect(screen.queryByText(question.enunciado)).toBeNull()
   await act(async()=>{confirmUpload()})
   await screen.findByText(question.enunciado)
-  expect(services.answers).toHaveBeenCalledExactlyOnceWith(attempt.id)
+  expect(services.answers).toHaveBeenCalledExactlyOnceWith(attempt.id,services.start.mock.calls[0][1])
   expect((screen.getByRole('radio',{name:'Resposta B'}) as HTMLInputElement).checked).toBe(true)
   expect(screen.getByText('Resposta salva')).toBeTruthy()
   expect(services.start).toHaveBeenCalledTimes(1)
   fireEvent.click(screen.getByRole('button',{name:'Enviar prova'}))
   fireEvent.click(screen.getByRole('button',{name:'Enviar e encerrar'}))
-  await waitFor(()=>expect(services.end).toHaveBeenCalledExactlyOnceWith(attempt.id,'ENVIO'))
+  await waitFor(()=>expect(services.end).toHaveBeenCalledExactlyOnceWith(attempt.id,'ENVIO',services.start.mock.calls[0][1]))
   expect(services.capture).toHaveBeenCalledTimes(1)
   expect(services.save).not.toHaveBeenCalled()
 })
@@ -107,5 +113,5 @@ test('falha na foto inicial registra ocorrência e reconectar permite repetir a 
   expect(screen.getByText(question.enunciado)).toBeTruthy()
   fireEvent.click(screen.getByRole('button',{name:'Enviar prova'}))
   fireEvent.click(screen.getByRole('button',{name:'Enviar e encerrar'}))
-  await waitFor(()=>expect(services.end).toHaveBeenCalledWith(attempt.id,'ENVIO'))
+  await waitFor(()=>expect(services.end).toHaveBeenCalledWith(attempt.id,'ENVIO',services.start.mock.calls[0][1]))
 })

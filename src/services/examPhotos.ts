@@ -1,8 +1,9 @@
 import { lerDataComFuso, UUID_PATTERN } from './avaliacaoValidation'
 import type { PhotoMoment } from './photoEvidence'
+import { ErroAcessoTentativa, ErroConexaoTentativa, EXECUCAO_HEADER, lerChaveExecucao } from './tentativaValidation'
 
 export const PHOTO_NOTICE_VERSION = '2026-11-08-fotos-v1'
-export const PHOTO_NOTICE = 'Uma foto inicial e três fotos em momentos aleatórios da tentativa serão enviadas ao armazenamento privado. O professor responsável e o ADM da sua organização poderão consultá-las para análise manual. O prazo máximo é de 90 dias por foto, com exclusão automática. Não há gravação de vídeo ou áudio, comparação facial nem identificação automática de fraude. Se você enviar a prova antes dos horários sorteados, as fotos futuras não serão tiradas. Uma retomada autorizada exige novo aviso e novas capturas.'
+export const PHOTO_NOTICE = 'Uma foto inicial e três fotos em momentos aleatórios da tentativa serão enviadas ao armazenamento privado. O professor responsável e o ADM da sua organização poderão consultá-las para análise manual. O prazo máximo é de 90 dias por foto, com exclusão automática. Não há gravação de vídeo ou áudio, comparação facial nem identificação automática de fraude. Se a tentativa terminar antes dos horários sorteados, as fotos futuras não serão tiradas.'
 export type PhotoSlot = { id: string; momento: PhotoMoment; agendada_em: string; recebida_em: string | null }
 export type PhotoPlan = { tentativa_id: string; ciclo: number; servidor_em: string; capturas: PhotoSlot[] }
 export type ResponsiblePhoto = PhotoSlot & { ciclo: number; expira_em: string | null; situacao: 'PENDENTE' | 'ENVIANDO' | 'DISPONIVEL' | 'EXCLUIDA' }
@@ -20,10 +21,15 @@ function slot(value: unknown): PhotoSlot | null {
   return { id: value.id, momento: value.momento as PhotoMoment, agendada_em: scheduled, recebida_em: received }
 }
 
-export async function consultarPlanoFotos(tentativaId: string): Promise<PhotoPlan> {
+export async function consultarPlanoFotos(tentativaId: string, chaveExecucao: string): Promise<PhotoPlan> {
   if (!UUID_PATTERN.test(tentativaId)) throw new Error('Tentativa inválida.')
+  if (!lerChaveExecucao(chaveExecucao)) throw new Error('Identificação da página da prova inválida.')
   const { supabase } = await import('../lib/supabase')
-  const { data, error } = await supabase.rpc('consultar_plano_fotos', { p_tentativa_id: tentativaId })
+  const { data, error, status } = await supabase.rpc('consultar_plano_fotos', {
+    p_tentativa_id: tentativaId, p_chave_execucao: chaveExecucao,
+  }).abortSignal(AbortSignal.timeout(12000)).retry(false)
+  if (status === 0) throw new ErroConexaoTentativa('A conexão foi perdida ao consultar os horários das fotos.')
+  if (error?.code === '42501' || status === 401) throw new ErroAcessoTentativa('A tentativa não está disponível nesta sessão.')
   if (error || !record(data) || data.tentativa_id !== tentativaId || !Number.isSafeInteger(data.ciclo) ||
       (data.ciclo as number) < 1 || data.retencao_dias !== 90 || !Array.isArray(data.capturas) || data.capturas.length !== 4) {
     throw new Error('Não foi possível consultar os horários das fotos. Tente novamente nesta página.')
@@ -37,18 +43,29 @@ export async function consultarPlanoFotos(tentativaId: string): Promise<PhotoPla
 
 async function sessionToken() {
   const { supabase } = await import('../lib/supabase')
-  const { data, error } = await supabase.auth.getSession()
-  if (error || !data.session) throw new Error('Sua sessão terminou. Entre novamente.')
+  const { data, error } = await supabase.auth.getSession().catch(() => {
+    throw new ErroAcessoTentativa('Não foi possível conferir sua sessão.')
+  })
+  if (error || !data.session) throw new ErroAcessoTentativa('Sua sessão terminou. Entre novamente.')
   return data.session.access_token
 }
 
-export async function enviarFoto(captureId: string, uploadId: string, blob: Blob, signal: AbortSignal) {
+export async function enviarFoto(captureId: string, uploadId: string, blob: Blob, signal: AbortSignal, chaveExecucao: string) {
   if (!UUID_PATTERN.test(captureId) || !UUID_PATTERN.test(uploadId)) throw new Error('Captura inválida.')
+  if (!lerChaveExecucao(chaveExecucao)) throw new Error('Identificação da página da prova inválida.')
   const token = await sessionToken()
   const query = new URLSearchParams({ captura_id: captureId, upload_id: uploadId })
   const response = await fetch(`/api/fotos-tentativa?${query}`, { method: 'POST', cache: 'no-store', signal,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/jpeg' }, body: blob })
-  const result: unknown = await response.json()
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/jpeg', [EXECUCAO_HEADER]: chaveExecucao }, body: blob,
+  }).catch(() => { throw new ErroConexaoTentativa('A conexão foi perdida durante o envio da foto.') })
+  if ([401, 403, 410].includes(response.status)) throw new ErroAcessoTentativa('A tentativa não está disponível nesta sessão.')
+  let result: unknown
+  try { result = await response.json() } catch (cause) {
+    if (cause instanceof TypeError || cause instanceof DOMException) {
+      throw new ErroConexaoTentativa('A conexão foi perdida durante o envio da foto.')
+    }
+    throw cause
+  }
   if (!response.ok || !record(result) || result.id !== captureId || !lerDataComFuso(result.recebida_em) || !lerDataComFuso(result.expira_em)) {
     throw new Error('Foto ainda não confirmada. Confira a conexão e reenvie a captura pendente.')
   }

@@ -1,5 +1,7 @@
 # Preparação para a branch entrega0911
 
+Este roteiro descreve o pacote anterior à migração 038. Para a versão com tentativa vinculada à sessão e sem retomada, use [o fluxo atual e a homologação](tentativas-prova.md#homologação-da-migração-038).
+
 Destino definido pela equipe: **entrega0911**, já criada no GitHub. O código de referência utilizado nesta integração é `369ecb523b3b5ee88e5e8d8a4f36b57aa024d6e2`. Confira se o remoto avançou antes de aplicar as mudanças; o pacote não substitui uma revisão dos commits dos colegas. O nome `0911` foi a proposta inicial, substituída por `entrega0911`.
 
 Nenhuma branch, commit ou push é criado pelos arquivos desta entrega. A publicação do código também não aplica SQL, publica Edge Functions ou configura variáveis no Supabase.

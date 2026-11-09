@@ -3,21 +3,22 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import { prepararBancoAvaliacoes } from './helpers/bancoAvaliacoes.ts'
+import { prepararBancoCamera } from './helpers/bancoCamera.ts'
 import { createConteudoTentativaHandler } from '../api/conteudo-tentativa.ts'
+import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
 import type { ConteudoTentativa } from '../src/services/tentativaValidation.ts'
 
+const chaveExecucao = randomUUID()
 const env = { SUPABASE_URL: 'https://exemplo.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'public-test-key' }
 function request(query: string, method = 'GET') {
-  return new Request(`http://localhost/api/conteudo-tentativa${query}`, { method, headers: { Authorization: 'Bearer test-session' } })
+  return new Request(`http://localhost/api/conteudo-tentativa${query}`, { method, headers: { Authorization: 'Bearer test-session', 'X-ExamenTech-Execucao': chaveExecucao } })
 }
 
 test('API de conteúdo integrada às permissões e à ordem salva no PostgreSQL', async (t) => {
   const db = new PGlite()
   t.after(() => db.close())
-  const { professor, colega, aluno, admin, turmaId, queryAs } = await prepararBancoAvaliacoes(db)
-  for (const file of ['023_publicar_avaliacao.sql', '024_listar_minhas_avaliacoes.sql', '025_iniciar_tentativa.sql',
-    '026_ordem_tentativa.sql', '027_consultar_conteudo_tentativa.sql']) {
+  const { professor, colega, aluno, admin, turmaId, queryAs } = await prepararBancoCamera(db)
+  for (const file of ['037_camera_sem_interrupcao.sql', '038_tentativa_sessao.sql']) {
     await db.exec(await readFile(new URL(`../database/${file}`, import.meta.url), 'utf8'))
   }
   const avaliacao = (await queryAs<{ avaliacao: { id: string } }>(professor, `SELECT public.criar_avaliacao_rascunho(
@@ -30,7 +31,7 @@ test('API de conteúdo integrada às permissões e à ordem salva no PostgreSQL'
   }
   await queryAs(professor, 'SELECT public.publicar_avaliacao($1)', [avaliacao.id])
   const tentativa = (await queryAs<{ tentativa: { id: string; iniciada_em: string; limite_em: string } }>(aluno,
-    'SELECT public.iniciar_tentativa($1) AS tentativa', [avaliacao.id])).rows[0].tentativa
+    'SELECT public.iniciar_tentativa($1,$2,$3) AS tentativa', [avaliacao.id, EXAM_NOTICE_VERSION, chaveExecucao])).rows[0].tentativa
   function apiFor(usuario = aluno, aal = 'aal2') {
     const transport = t.mock.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init)
@@ -40,10 +41,10 @@ test('API de conteúdo integrada às permissões e à ordem salva no PostgreSQL'
       assert.equal(new URL(req.url).pathname, '/rest/v1/rpc/consultar_conteudo_tentativa')
       assert.equal(req.method, 'POST')
       const params: Record<string, unknown> = await req.json()
-      assert.deepEqual(params, { p_tentativa_id: tentativa.id })
+      assert.deepEqual(params, { p_tentativa_id: tentativa.id, p_chave_execucao: chaveExecucao })
       try {
         const result = await queryAs<{ conteudo: unknown }>(usuario,
-          'SELECT public.consultar_conteudo_tentativa($1) AS conteudo', [params.p_tentativa_id], aal)
+          'SELECT public.consultar_conteudo_tentativa($1,$2) AS conteudo', [params.p_tentativa_id, params.p_chave_execucao], aal)
         return Response.json(result.rows[0].conteudo)
       } catch (error) {
         return Response.json({ code: error instanceof Error && 'code' in error ? error.code : 'XX000', message: 'SEGREDO_INTERNO' }, { status: 400 })
@@ -60,7 +61,7 @@ test('API de conteúdo integrada às permissões e à ordem salva no PostgreSQL'
     assert.equal(response.headers.get('cache-control'), 'no-store')
     const body: { conteudo: ConteudoTentativa } = await response.json()
     const original = (await queryAs<{ conteudo: ConteudoTentativa }>(aluno,
-      'SELECT public.consultar_conteudo_tentativa($1) AS conteudo', [tentativa.id])).rows[0].conteudo
+      'SELECT public.consultar_conteudo_tentativa($1,$2) AS conteudo', [tentativa.id, chaveExecucao])).rows[0].conteudo
     assert.deepEqual(body, { conteudo: { ...original,
       iniciada_em: new Date(original.iniciada_em).toISOString(), limite_em: new Date(original.limite_em).toISOString() } })
     assert.equal(body.conteudo.questoes.length, 2)
@@ -72,13 +73,13 @@ test('API de conteúdo integrada às permissões e à ordem salva no PostgreSQL'
     assert.deepEqual((await db.query('SELECT * FROM public.eventos_seguranca ORDER BY id')).rows, antes)
   })
 
-  await t.test('professor, admin e aluno sem MFA recebem 403; outro aluno e matrícula inativa recebem 404', async () => {
+  await t.test('outra sessão ou MFA insuficiente recebem 403; matrícula inativa recebe 404', async () => {
     for (const usuario of [professor, admin]) assert.equal((await apiFor(usuario).handler.fetch(request(query))).status, 403)
     assert.equal((await apiFor(aluno, 'aal1').handler.fetch(request(query))).status, 403)
     await db.query("UPDATE public.perfis SET perfil='ALUNO' WHERE id=$1", [colega])
     await db.query("INSERT INTO public.turma_alunos(turma_id,aluno_id,situacao) VALUES ($1,$2,'ATIVA')", [turmaId, colega])
     const alheia = await apiFor(colega).handler.fetch(request(query))
-    assert.equal(alheia.status, 404)
+    assert.equal(alheia.status, 403)
     assert.deepEqual(Object.keys(await alheia.json()), ['message'])
     await db.query("UPDATE public.turma_alunos SET situacao='INATIVA' WHERE aluno_id=$1", [aluno])
     assert.equal((await apiFor().handler.fetch(request(query))).status, 404)

@@ -19,7 +19,11 @@ export type AvaliacaoRascunho = DadosAvaliacaoRascunho & {
 }
 
 export type PublicacaoAvaliacao = { id: string; situacao: 'PUBLICADA'; publicada_em: string }
-export type AvaliacaoPublicada = Omit<AvaliacaoRascunho, 'situacao'> & PublicacaoAvaliacao
+export type AvaliacaoPublicada = Omit<AvaliacaoRascunho, 'situacao'> & (PublicacaoAvaliacao | {
+  situacao: 'CANCELADA'
+  publicada_em: string
+  cancelada_em: string
+})
 export type AvaliacaoAluno = DadosAvaliacaoRascunho & PublicacaoAvaliacao & { turma_nome: string }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,8 +95,16 @@ export function lerPublicacaoAvaliacao(value: unknown): PublicacaoAvaliacao | nu
 
 export function lerAvaliacaoPublicada(value: unknown): AvaliacaoPublicada | null {
   const registro = lerRegistroAvaliacao(value)
+  if (!registro || !isRecord(value)) return null
+  if (value.situacao === 'CANCELADA') {
+    const publicadaEm = lerDataComFuso(value.publicada_em)
+    const canceladaEm = lerDataComFuso(value.cancelada_em)
+    return publicadaEm && canceladaEm && canceladaEm >= publicadaEm
+      ? { ...registro, situacao: 'CANCELADA', publicada_em: publicadaEm, cancelada_em: canceladaEm }
+      : null
+  }
   const publicacao = lerPublicacaoAvaliacao(value)
-  return registro && publicacao ? { ...registro, ...publicacao } : null
+  return publicacao ? { ...registro, ...publicacao } : null
 }
 
 export function lerMinhasAvaliacoes(value: unknown): AvaliacaoAluno[] | null {

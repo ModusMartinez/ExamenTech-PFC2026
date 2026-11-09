@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { UUID_PATTERN } from '../src/services/avaliacaoValidation.ts'
-import { lerTentativaIniciada } from '../src/services/tentativaValidation.ts'
-import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
+import { EXECUCAO_HEADER, lerChaveExecucao, lerTentativaIniciada } from '../src/services/tentativaValidation.ts'
+import { EXAM_NOTICE_VERSION, PROVA_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
 import { PHOTO_NOTICE_VERSION } from '../scripts/lib/photoStorage.ts'
 
 function jsonResponse(status: number, body: object, headers?: HeadersInit) {
@@ -17,23 +17,30 @@ export function createIniciarTentativaHandler(
       if (request.method !== 'POST') return jsonResponse(405, { message: 'Utilize POST.' }, { Allow: 'POST' })
       const token = request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1]
       if (!token) return jsonResponse(401, { message: 'Entre novamente para iniciar a tentativa.' })
+      const chaveExecucao = lerChaveExecucao(request.headers.get(EXECUCAO_HEADER))
+      if (!chaveExecucao) return jsonResponse(400, { message: 'Identificação da página da prova inválida.' })
       if (new URL(request.url).searchParams.size) return jsonResponse(400, { message: 'Não envie parâmetros na URL de início.' })
       if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
         return jsonResponse(415, { message: 'Envie os dados no formato JSON.' })
       }
       let avaliacaoId: string
+      let comFotos: boolean
       try {
         const body: unknown = await request.json()
-        const withPhotos = env.EXAM_PHOTOS_ENABLED === 'true'
-        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== (withPhotos ? 3 : 2) ||
+        if (!body || typeof body !== 'object' || Array.isArray(body)) return jsonResponse(400, { message: 'Dados da tentativa inválidos.' })
+        comFotos = 'fotos_aviso_versao' in body
+        if (Object.keys(body).length !== (comFotos ? 3 : 2) ||
             !('avaliacao_id' in body) || typeof body.avaliacao_id !== 'string' || !UUID_PATTERN.test(body.avaliacao_id) ||
-            !('aviso_versao' in body) || body.aviso_versao !== EXAM_NOTICE_VERSION ||
-            (withPhotos && (!('fotos_aviso_versao' in body) || body.fotos_aviso_versao !== PHOTO_NOTICE_VERSION))) {
+            !('aviso_versao' in body) || body.aviso_versao !== (comFotos ? PROVA_NOTICE_VERSION : EXAM_NOTICE_VERSION) ||
+            ('fotos_aviso_versao' in body && body.fotos_aviso_versao !== PHOTO_NOTICE_VERSION)) {
           return jsonResponse(400, { message: 'Confirme o aviso atual e informe o ID válido da avaliação.' })
         }
         avaliacaoId = body.avaliacao_id.toLowerCase()
       } catch {
         return jsonResponse(400, { message: 'JSON inválido.' })
+      }
+      if (comFotos && env.EXAM_PHOTOS_ENABLED !== 'true') {
+        return jsonResponse(503, { message: 'O serviço de fotografias está indisponível para iniciar a prova.' })
       }
 
       const url = env.SUPABASE_URL ?? env.VITE_SUPABASE_URL
@@ -57,10 +64,10 @@ export function createIniciarTentativaHandler(
           return jsonResponse(503, { message: 'Não foi possível conferir sua sessão.' })
         }
 
-        // Usa a sessão do aluno; a função confere perfil, MFA, matrícula, horário e unicidade.
-        const { data, error } = await supabase.rpc(env.EXAM_PHOTOS_ENABLED === 'true' ? 'iniciar_tentativa_com_fotos' : 'iniciar_tentativa', {
-          p_avaliacao_id: avaliacaoId, p_aviso_versao: EXAM_NOTICE_VERSION,
-          ...(env.EXAM_PHOTOS_ENABLED === 'true' ? { p_fotos_aviso_versao: PHOTO_NOTICE_VERSION } : {}),
+        // O banco usa o JWT do aluno para vincular a tentativa à sessão inicial.
+        const { data, error } = await supabase.rpc(comFotos ? 'iniciar_tentativa_com_fotos' : 'iniciar_tentativa', {
+          p_avaliacao_id: avaliacaoId, p_aviso_versao: comFotos ? PROVA_NOTICE_VERSION : EXAM_NOTICE_VERSION, p_chave_execucao: chaveExecucao,
+          ...(comFotos ? { p_fotos_aviso_versao: PHOTO_NOTICE_VERSION } : {}),
         }).retry(false)
         if (error) {
           if (error.code === '42501') return jsonResponse(403, { message: 'Início exige aluno ativo, organização ativa, sessão e MFA.' })

@@ -3,6 +3,9 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { MinhasAvaliacoesPanel } from '../src/components/MinhasAvaliacoesPanel'
 
 const mocks = vi.hoisted(() => ({ getSession: vi.fn(), fetch: vi.fn() }))
+vi.mock('../src/hooks/useCancelamentoTentativa', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/hooks/useCancelamentoTentativa')>(), useCancelamentoTentativa: vi.fn(),
+}))
 vi.mock('../src/lib/supabase', () => ({ supabase: { auth: { getSession: mocks.getSession } } }))
 
 const avaliacao = {
@@ -168,7 +171,7 @@ test('Minhas provas mantém cartões e simulação usando a lista nova, sem cons
   expect(aceite.checked).toBe(false)
   fireEvent.click(screen.getByText(/Li o aviso da prova/))
   expect(aceite.checked).toBe(true)
-  expect(screen.getByText('Aceite confirmado. Ligue a câmera para habilitar o início.')).toBeTruthy()
+  expect(screen.getByText('A coleta de fotos está indisponível neste ambiente. A prova poderá ser iniciada quando o serviço estiver disponível.')).toBeTruthy()
   expect(mocks.fetch).toHaveBeenCalledTimes(1)
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
   expect(screen.getByRole('heading', { name: 'Teste local da câmera durante a prova' })).toBeTruthy()

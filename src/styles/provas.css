@@ -180,10 +180,18 @@
 .provas-gestao { margin-top: 24px; border-top: 1px solid #b8cde3; padding-top: 16px; }
 .provas-tentativas-lista { list-style: none; padding: 0; }
 .provas-tentativas-lista > li { margin: 16px 0; padding: 16px; border: 1px solid #b8cde3; border-radius: 8px; }
+.correcao-tentativa { margin-top: 16px; border-top: 1px solid #b8cde3; padding-top: 16px; overflow-wrap: anywhere; }
+.correcao-tentativa h6 { margin: 0 0 12px; font-size: 1rem; color: var(--dark-blue); }
+.correcao-tentativa .questoes-lista > li + li { border-top: 1px solid #dce5ee; }
+.correcao-form { margin-top: 12px; }
+.correcao-form input { width: min(12rem, 100%); padding: 10px 12px; border: 1px solid #cbddec; border-radius: 7px; font: inherit; color: var(--text); }
+.resultados-publicacao { margin: 0 0 16px; overflow-wrap: anywhere; }
+.resultado-aluno h1 { overflow-wrap: anywhere; }
+.resultado-aluno h2 { font-size: 1.15rem; }
+.resultado-aluno .questoes-lista > li + li { border-top: 1px solid #dce5ee; }
 .provas-fotos-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; list-style: none; padding: 0; }
 .provas-foto-responsavel { padding: 12px; border: 1px solid #b8cde3; border-radius: 8px; }
 .provas-foto-responsavel img { display: block; width: 100%; max-width: 480px; height: auto; }
-.provas-gestao textarea { display: block; width: 100%; min-height: 100px; font: inherit; }
 
 .provas-confirmacao .provas-actions button {
   min-height: 44px;

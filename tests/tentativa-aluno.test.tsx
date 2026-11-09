@@ -5,13 +5,17 @@ import { MinhasAvaliacoesPanel } from '../src/components/MinhasAvaliacoesPanel'
 import { TentativaAlunoPanel } from '../src/components/TentativaAlunoPanel'
 import type { AvaliacaoAluno } from '../src/services/avaliacaoValidation'
 import type { ConteudoTentativa, TentativaIniciada } from '../src/services/tentativaValidation'
+import { EXECUCAO_HEADER } from '../src/services/tentativaValidation'
 
 const mocks = vi.hoisted(() => ({ getSession: vi.fn(), fetch: vi.fn() }))
+vi.mock('../src/hooks/useCancelamentoTentativa', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/hooks/useCancelamentoTentativa')>(), useCancelamentoTentativa: vi.fn(),
+}))
 vi.mock('../src/lib/supabase', () => ({ supabase: { auth: { getSession: mocks.getSession } } }))
 
 const avaliacao: AvaliacaoAluno = {
   id: '10000000-0000-0000-0000-000000000001', turma_id: '20000000-0000-0000-0000-000000000001',
-  turma_nome: 'Engenharia 8B', titulo: 'Prova de banco de dados', tipo: 'PROVA',
+  turma_nome: 'Engenharia 8B', titulo: 'Atividade de banco de dados', tipo: 'ATIVIDADE',
   inicio_em: '2026-11-09T19:00:00.000Z', fim_em: '2026-11-09T21:00:00.000Z', duracao_minutos: 60,
   situacao: 'PUBLICADA', publicada_em: '2026-11-05T12:00:00.000Z',
 }
@@ -21,7 +25,7 @@ const tentativa: TentativaIniciada = {
   iniciada_em: '2026-11-09T20:50:00.000Z', limite_em: avaliacao.fim_em,
 }
 const conteudo: ConteudoTentativa = {
-  tentativa_id: tentativa.id, avaliacao_id: avaliacao.id, titulo: avaliacao.titulo, tipo: 'PROVA',
+  tentativa_id: tentativa.id, avaliacao_id: avaliacao.id, titulo: avaliacao.titulo, tipo: 'ATIVIDADE',
   iniciada_em: tentativa.iniciada_em, limite_em: tentativa.limite_em,
   questoes: [
     { id: '50000000-0000-0000-0000-000000000002', tipo: 'OBJETIVA', ordem: 1, pontuacao: 1.5,
@@ -83,6 +87,28 @@ test('confirmação inicia uma vez e apresenta conteúdo na ordem salva, sem gab
   expect(mocks.fetch.mock.calls.map(([url]) => url)).toEqual([
     '/api/minhas-avaliacoes', '/api/iniciar-tentativa', `/api/conteudo-tentativa?tentativa_id=${tentativa.id}`,
   ])
+  const chaveExecucao = mocks.fetch.mock.calls[1][1].headers[EXECUCAO_HEADER]
+  expect(chaveExecucao).toMatch(/^[0-9a-f-]{36}$/)
+  expect(mocks.fetch.mock.calls[2][1].headers[EXECUCAO_HEADER]).toBe(chaveExecucao)
+})
+
+test('fechar a página invalida a consulta na execução alternativa', async () => {
+  mocks.fetch.mockImplementation(async (url: string) => {
+    if (url === '/api/iniciar-tentativa') return Response.json({ tentativa }, { status: 201 })
+    if (url.startsWith('/api/encerrar-tentativa?')) {
+      return Response.json({ encerramento: { id: tentativa.id, situacao: 'INTERROMPIDA',
+        encerrada_em: tentativa.iniciada_em, falhas_camera: 0 } })
+    }
+    return Response.json({ conteudo })
+  })
+  render(<TentativaAlunoPanel avaliacao={avaliacao} onCancelar={vi.fn()} />)
+  confirmar()
+  await screen.findByRole('heading', { name: 'Questões' })
+  fireEvent(window, new Event('pagehide'))
+  expect(screen.queryByRole('heading', { name: 'Questões' })).toBeNull()
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(3))
+  expect(mocks.fetch.mock.calls[2][0]).toBe(`/api/encerrar-tentativa?tentativa_id=${tentativa.id}`)
+  expect(mocks.fetch.mock.calls[2][1].headers[EXECUCAO_HEADER]).toBe(mocks.fetch.mock.calls[0][1].headers[EXECUCAO_HEADER])
 })
 
 test('cliques ou envios repetidos durante o início não duplicam o POST, inclusive em StrictMode', async () => {
@@ -148,9 +174,12 @@ test('prazo encerrado oculta questões sem enviar conclusão nem criar nova tent
   confirmar()
   await screen.findByRole('heading', { name: 'Questões' })
   vi.mocked(Date.now).mockReturnValue(Date.parse(tentativa.limite_em))
-  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Prazo da tentativa encerrado.'), { timeout: 2000 })
+  await waitFor(() => {
+    const aviso = screen.getByRole('status')
+    expect(aviso.textContent).toBe('Prazo da tentativa encerrado.')
+    expect(document.activeElement).toBe(aviso)
+  }, { timeout: 2000 })
   expect(screen.queryByRole('list', { name: 'Questões da tentativa' })).toBeNull()
-  expect(document.activeElement).toBe(screen.getByRole('status'))
   expect(mocks.fetch).toHaveBeenCalledTimes(2)
 })
 

@@ -108,10 +108,10 @@ Referências: [bloqueios no PostgreSQL](https://www.postgresql.org/docs/current/
 
 `src/services/respostasTentativa.ts` reúne a consulta e o salvamento com versão, reutilizando `respostaValidation.ts`. Sem query ou dependência adicional; a consulta exige a `033` e o salvamento exige a `034`.
 
-- `consultarRespostasTentativa(id)` chama a RPC de consulta existente. Confere IDs, versão, conteúdo e datas; recusa registros de outra tentativa, duplicados e respostas incompletas. Retorna somente os oito campos previstos. Erro de consulta não vira lista vazia.
-- `salvarRespostaTentativa(dados)` recebe tentativa, questão, versão, alternativa e texto. Usa a sessão atual e faz um POST em `/api/salvar-resposta-tentativa`, sem cache. Não consulta a versão mais recente para substituir a enviada nem repete a gravação automaticamente.
+- `consultarRespostasTentativa(id, chaveExecucao)` chama a RPC de consulta com a chave da página. Confere IDs, versão, conteúdo e datas; recusa registros de outra tentativa, duplicados e respostas incompletas. Retorna somente os oito campos previstos. Erro de consulta não vira lista vazia.
+- `salvarRespostaTentativa(dados, chaveExecucao)` recebe tentativa, questão, versão, alternativa e texto. Faz o POST em `/api/salvar-resposta-tentativa` com a sessão atual e a chave da página em cabeçalho. Não consulta a versão mais recente para substituir a enviada nem repete a gravação automaticamente.
 - A confirmação precisa ser HTTP 200 e corresponder à tentativa, questão, versão e conteúdo enviados. Preserva espaços e quebras de linha; texto vazio é confirmado como `null`, conforme a função SQL.
-- `ErroSalvamentoResposta.codigo` distingue `CONFLITO` (409), `RECUSADA` (entrada, sessão ou recusa explícita) e `NAO_CONFIRMADA` (rede, servidor ou confirmação inválida). Isso permite que a tela trate o conflito sem comparar mensagens de texto. Em confirmação perdida, manter o mesmo conteúdo e versão para eventual reenvio explícito.
+- A tela diferencia conflito de versão, recusa de entrada, confirmação inválida, perda de acesso e falha de transporte. Em falha de transporte ou de acesso à sessão, bloqueia a tentativa. Se o servidor respondeu sem confirmar a gravação, a mesma versão pode ser reenviada enquanto a execução permanece ativa.
 
 O `TentativaMonitoradaPanel` usa esse serviço. As funções antigas de consulta e salvamento foram retiradas de `tentativas.ts`; início, conteúdo e encerramento permanecem nesse arquivo.
 
@@ -128,9 +128,9 @@ O agendamento usa um temporizador e `useEffectEvent` do React já instalado para
 
 Respostas ainda não confirmadas ficam somente na memória da página. Sair ou recarregar pode perder esse conteúdo. O bloqueio da assinatura antiga no banco está na `035`, abaixo.
 
-A parte de salvamento automático está implementada. RF17–RF19 continuam parciais: falta validar o fluxo no Supabase configurado e alinhar a tentativa à sessão inicial e à regra de não retomada da ficha.
+A migração 038 vincula a tentativa à sessão inicial e à página e impede a retomada. Veja [o fluxo e o roteiro de homologação](tentativas-prova.md#homologação-da-migração-038). Os contratos antigos registrados nas seções de migração abaixo são históricos.
 
-Teste manual, com `033`–`035` aplicadas e `npm run dev:full`:
+Teste manual com as migrações até 038 aplicadas e `npm run dev:full`:
 
 1. Iniciar uma avaliação de teste com objetiva e dissertativa. Selecionar uma alternativa e esperar Resposta salva sem clicar em Salvar.
 2. Digitar uma dissertativa, aguardar uma pausa de 800 ms mais o tempo de resposta da API e conferir Resposta salva. Alterar e apagar o texto, conferindo cada salvamento.

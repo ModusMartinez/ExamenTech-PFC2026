@@ -3,10 +3,11 @@ import { StrictMode, useRef } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { useExamPhotos } from '../src/hooks/useExamPhotos'
 
-const services = vi.hoisted(() => ({ plan: vi.fn(), send: vi.fn(), capture: vi.fn(), cameraFailure: vi.fn() }))
+const services = vi.hoisted(() => ({ plan: vi.fn(), send: vi.fn(), capture: vi.fn(), cameraFailure: vi.fn(), executionFailure: vi.fn() }))
 vi.mock('../src/services/examPhotos', () => ({ consultarPlanoFotos: services.plan, enviarFoto: services.send }))
 vi.mock('../src/services/photoEvidence', () => ({ capturePhotoFrame: services.capture }))
 const attempt = '10000000-0000-0000-0000-000000000001'
+const chaveExecucao = '30000000-0000-4000-8000-000000000001'
 let initialize: () => Promise<boolean>
 let retry: () => Promise<boolean>
 let flush: () => Promise<boolean>
@@ -14,10 +15,10 @@ let dispose: () => void
 let prepare: () => Promise<boolean>
 function Harness() {
   const video = useRef<HTMLVideoElement>(null)
-  const photos = useExamPhotos(video, services.cameraFailure)
-  initialize = () => photos.initialize(attempt)
+  const photos = useExamPhotos(video, services.cameraFailure, services.executionFailure)
+  initialize = () => photos.initialize(attempt, chaveExecucao)
   retry = photos.retry; flush = photos.flush; dispose = photos.dispose
-  prepare = () => photos.prepare(attempt)
+  prepare = () => photos.prepare(attempt, chaveExecucao)
   return <><video ref={video} /><output aria-label="Pendentes">{photos.pending}</output>
     <output aria-label="Inicial pronta">{String(photos.initialReady)}</output>
     <p>{photos.message}</p>{photos.toast && <p role="status">{photos.toast}</p>}

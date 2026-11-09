@@ -6,6 +6,9 @@ import { createLimpezaFotosHandler } from '../api/limpar-fotos-expiradas.ts'
 import { createIniciarTentativaHandler } from '../api/iniciar-tentativa.ts'
 import { jpegDimensions, readPhotoBody } from '../scripts/lib/photoStorage.ts'
 
+import { EXAM_NOTICE_VERSION, PROVA_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
+
+const chaveExecucao = randomUUID()
 const capture = randomUUID(), attempt = randomUUID(), upload = randomUUID(), student = randomUUID(), assessment = randomUUID()
 const path = `${attempt}/1/${capture}.jpg`
 const env = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'test-public',
@@ -16,7 +19,7 @@ const dates = { recebida_em: new Date().toISOString(), expira_em: new Date(Date.
 
 function uploadRequest(bytes: Uint8Array=jpeg) {
   return new Request(`http://localhost/api/fotos-tentativa?captura_id=${capture}&upload_id=${upload}`, {
-    method:'POST',headers:{Authorization:'Bearer student-session','Content-Type':'image/jpeg'},body:new Uint8Array(bytes).buffer,
+    method:'POST',headers:{Authorization:'Bearer student-session','Content-Type':'image/jpeg','X-ExamenTech-Execucao': chaveExecucao},body:new Uint8Array(bytes).buffer,
   })
 }
 
@@ -36,6 +39,7 @@ function photoTransport(options: {denied?:boolean;duplicate?:boolean;different?:
       if(options.denied)return Response.json({code:'42501',message:'Detalhes privados'},{status:403})
       if(url.pathname.endsWith('reservar_envio_foto')) {
         const params=await request.json()
+        assert.equal(params.p_chave_execucao,chaveExecucao)
         assert.equal(params.p_sha256,createHash('sha256').update(jpeg).digest('hex'))
         assert.equal(params.p_tamanho,jpeg.length); assert.equal(params.p_largura,640); assert.equal(params.p_altura,480)
         return Response.json({id:capture,caminho:path,ja_recebida:false})
@@ -115,15 +119,18 @@ test('início com fotos exige aviso específico e usa a RPC que registra as capt
   const transport:typeof fetch=async(input,init)=>{
     const req=new Request(input,init),url=new URL(req.url)
     if(url.pathname==='/auth/v1/user')return Response.json({id:student})
+    if(url.pathname==='/rest/v1/rpc/iniciar_tentativa') {
+      return Response.json({code:'55000'}, {status:400})
+    }
     assert.equal(url.pathname,'/rest/v1/rpc/iniciar_tentativa_com_fotos')
-    assert.deepEqual(await req.json(),{p_avaliacao_id:assessment,p_aviso_versao:'2026-11-08-v3',p_fotos_aviso_versao:'2026-11-08-fotos-v1'})
+    assert.deepEqual(await req.json(),{p_avaliacao_id:assessment,p_aviso_versao:PROVA_NOTICE_VERSION,p_chave_execucao:chaveExecucao,p_fotos_aviso_versao:'2026-11-08-fotos-v1'})
     return Response.json({id:attempt,avaliacao_id:assessment,aluno_id:student,situacao:'EM_ANDAMENTO',
       iniciada_em:'2026-11-08T19:00:00Z',limite_em:'2026-11-08T20:00:00Z'})
   }
   const request=(photoNotice?:string)=>new Request('http://localhost/api/iniciar-tentativa', {method:'POST',
-    headers:{Authorization:'Bearer student-session','Content-Type':'application/json'},
-    body:JSON.stringify({avaliacao_id:assessment,aviso_versao:'2026-11-08-v3',...(photoNotice?{fotos_aviso_versao:photoNotice}:{})})})
-  assert.equal((await createIniciarTentativaHandler(env,transport).fetch(request())).status,400)
+    headers:{Authorization:'Bearer student-session','Content-Type':'application/json','X-ExamenTech-Execucao': chaveExecucao},
+    body:JSON.stringify({avaliacao_id:assessment,aviso_versao:photoNotice ? PROVA_NOTICE_VERSION : EXAM_NOTICE_VERSION,...(photoNotice?{fotos_aviso_versao:photoNotice}:{})})})
+  assert.equal((await createIniciarTentativaHandler(env,transport).fetch(request())).status,409)
   assert.equal((await createIniciarTentativaHandler(env,transport).fetch(request('2026-11-08-fotos-v1'))).status,201)
 })
 

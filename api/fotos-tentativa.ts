@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { UUID_PATTERN } from '../src/services/avaliacaoValidation.ts'
+import { EXECUCAO_HEADER, lerChaveExecucao } from '../src/services/tentativaValidation.ts'
 import { PHOTO_BUCKET, PHOTO_PATH, jpegDimensions, photoJson, readPhotoBody, storageClients } from '../scripts/lib/photoStorage.ts'
 
 export function createFotosTentativaHandler(env: Record<string, string | undefined> = process.env, transport: typeof fetch = fetch) {
@@ -11,8 +12,9 @@ export function createFotosTentativaHandler(env: Record<string, string | undefin
     const query = new URL(request.url).searchParams
     const id = query.get('captura_id')
     const uploadId = query.get('upload_id')
+    const chaveExecucao = lerChaveExecucao(request.headers.get(EXECUCAO_HEADER))
     if (!id || !UUID_PATTERN.test(id) || (request.method === 'GET' ? query.size !== 1
-      : query.size !== 2 || !uploadId || !UUID_PATTERN.test(uploadId))) {
+      : query.size !== 2 || !uploadId || !UUID_PATTERN.test(uploadId) || !chaveExecucao)) {
       return photoJson(400, { message: 'Identificação da captura inválida.' })
     }
     try {
@@ -44,7 +46,7 @@ export function createFotosTentativaHandler(env: Record<string, string | undefin
       const hash = createHash('sha256').update(bytes).digest('hex')
       const { data: reserve, error } = await user.rpc('reservar_envio_foto', {
         p_captura_id: id, p_upload_id: uploadId, p_sha256: hash,
-        p_tamanho: bytes.length, p_largura: width, p_altura: height,
+        p_tamanho: bytes.length, p_largura: width, p_altura: height, p_chave_execucao: chaveExecucao,
       }).retry(false)
       if (error) return photoJson(error.code === '42501' ? 403 : error.code === '55000' ? 409 : 503,
         { message: 'Não foi possível autorizar o envio desta captura.' })
