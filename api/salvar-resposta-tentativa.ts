@@ -52,7 +52,7 @@ export function createSalvarRespostaTentativaHandler(
           return jsonResponse(503, { message: 'Não foi possível conferir sua sessão.' })
         }
 
-        // A 028 confere dono, MFA, vínculo, prazo, tipo da questão e sequência da versão.
+        // A 034 confere dono, MFA, vínculo, prazo, tipo da questão e sequência da versão.
         const { data, error } = await supabase.rpc('salvar_resposta_tentativa', {
           p_tentativa_id: dados.tentativa_id, p_questao_id: dados.questao_id, p_versao: dados.versao,
           p_alternativa_id: dados.alternativa_id, p_texto: dados.texto,

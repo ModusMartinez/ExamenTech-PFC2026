@@ -25,7 +25,7 @@ export function lerDadosRespostaTentativa(value: unknown): DadosRespostaTentativ
       texto.includes('\u0000') || /[\uD800-\uDFFF]/u.test(texto))) return null
   if (alternativa !== null && texto !== null) return null
 
-  // Preservar espaços e texto vazio; a 028 valida o tipo da questão e converte vazio em NULL.
+  // Preservar espaços e texto vazio; a função SQL valida o tipo e converte vazio em NULL.
   return { tentativa_id: value.tentativa_id.toLowerCase(), questao_id: value.questao_id.toLowerCase(),
     versao: value.versao, alternativa_id: alternativa?.toLowerCase() ?? null, texto }
 }

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import { prepararBancoAvaliacoes } from './helpers/bancoAvaliacoes.ts'
+import { prepararBancoExecucao } from './helpers/bancoExecucao.ts'
 import { createSalvarRespostaTentativaHandler } from '../api/salvar-resposta-tentativa.ts'
 import type { RespostaTentativa } from '../src/services/respostaValidation.ts'
 
@@ -15,12 +15,11 @@ function request(body: unknown, method = 'POST', query = '') {
   })
 }
 
-test('API de respostas integrada à função 028 no PostgreSQL', async t => {
+test('API de respostas integrada à função 034 no banco da entrega0911', async t => {
   const db = new PGlite()
   t.after(() => db.close())
-  const { professor, colega, aluno, admin, turmaId, queryAs } = await prepararBancoAvaliacoes(db)
-  for (const file of ['023_publicar_avaliacao.sql', '024_listar_minhas_avaliacoes.sql', '025_iniciar_tentativa.sql',
-    '026_ordem_tentativa.sql', '027_consultar_conteudo_tentativa.sql', '028_salvar_resposta_tentativa.sql']) {
+  const { professor, colega, aluno, admin, turmaId, queryAs } = await prepararBancoExecucao(db)
+  for (const file of ['033_preparar_respostas_com_versao.sql', '034_salvar_resposta_com_versao.sql']) {
     await db.exec(await readFile(new URL(`../database/${file}`, import.meta.url), 'utf8'))
   }
   const avaliacao = (await queryAs<{ avaliacao: { id: string } }>(professor, `SELECT public.criar_avaliacao_rascunho(
@@ -35,7 +34,7 @@ test('API de respostas integrada à função 028 no PostgreSQL', async t => {
     "SELECT public.criar_alternativas_rascunho($1,ARRAY['Primeira','Segunda'],2) AS alternativas", [objetiva])).rows[0].alternativas
   await queryAs(professor, 'SELECT public.publicar_avaliacao($1)', [avaliacao])
   const tentativa = (await queryAs<{ tentativa: { id: string } }>(aluno,
-    'SELECT public.iniciar_tentativa($1) AS tentativa', [avaliacao])).rows[0].tentativa.id
+    'SELECT public.iniciar_tentativa($1,$2) AS tentativa', [avaliacao, '2026-11-06-v2'])).rows[0].tentativa.id
   const entrada = { tentativa_id: tentativa, questao_id: objetiva, versao: 1, alternativa_id: alternativas[0].id }
   function apiFor(usuario = aluno, aal = 'aal2', perderConfirmacao = false) {
     const transport = t.mock.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -63,7 +62,7 @@ test('API de respostas integrada à função 028 no PostgreSQL', async t => {
   }
   async function registros() {
     return {
-      respostas: (await db.query('SELECT * FROM public.respostas ORDER BY id')).rows,
+      respostas: (await db.query('SELECT * FROM public.respostas_tentativa ORDER BY id')).rows,
       eventos: (await db.query("SELECT * FROM public.eventos_seguranca WHERE evento='RESPOSTA_SALVA' ORDER BY id")).rows,
     }
   }

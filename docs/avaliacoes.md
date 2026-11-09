@@ -1,8 +1,8 @@
-# Avaliações (019–028)
+# Avaliações (019–034)
 
 Este documento detalha o contrato local até `028_salvar_resposta_tentativa.sql`, incluindo a API de respostas com controle de versão. A `entrega0911` acrescentou a tela de realização, encerramento, fotografias e reativação em `028_respostas_e_encerramento.sql`–`032`; consulte o [fluxo da entrega0911](tentativas-prova.md).
 
-**Integração em andamento:** a API local grava em `respostas`, enquanto a tela da entrega0911 chama a RPC sem versão e grava em `respostas_tentativa`. A união dos arquivos ainda não unifica esses dados. Não executar as duas queries `028` nem as seguintes no Supabase como parte deste merge; primeiro conciliar as estruturas com o que já foi aplicado em cada banco. Reativação de tentativas e interrupção por falha da câmera também precisam ser alinhadas à ficha do PFC.
+**Integração em andamento:** com `033` e `034`, a API com versão e a tela da entrega0911 gravam em `respostas_tentativa`. A tela ainda chama a RPC antiga, sem conferir a versão enviada pelo aluno. Não executar as duas queries `028` nem reaplicar as anteriores; seguir o diagnóstico do banco e as etapas abaixo. Reativação de tentativas e interrupção por falha da câmera também precisam ser alinhadas à ficha do PFC.
 
 Para conferir o banco, executar [diagnostico-banco-provas.sql](diagnostico-banco-provas.sql) no SQL Editor do projeto configurado no ambiente local, com o papel `postgres`. A consulta identifica as tabelas, colunas e assinaturas das funções dos dois modelos, sem ler respostas nem alterar registros. Guardar o resultado antes de preparar a unificação. A existência dos objetos não confirma que todas as migrations foram aplicadas nem que os dados das duas tabelas coincidem.
 
@@ -20,11 +20,28 @@ Aplicar somente `database/033_preparar_respostas_com_versao.sql` no banco diagno
 - A consulta mantém `salva_em` e acrescenta ID, tentativa, versão, data inicial e `atualizado_em` (igual a `salva_em`). A tela atual aceita os campos adicionais. Permissões, MFA e RLS continuam aplicados.
 - Reaplicar a `033` preserva os IDs, versões e datas já preenchidos. A query é transacional e não altera as regras de câmera, fotos, reativação ou encerramento.
 
-Este bloco prepara os dados. A API com `p_versao` ainda não funciona nesse banco; falta adaptar sua função SQL para esta tabela e conectar a tela. A chamada antiga não detecta uma versão desatualizada enviada pelo aluno. Não representa a proteção contra sobrescrita concluída.
+Este bloco prepara os dados. A API com `p_versao` exige também a `034`, descrita abaixo. A chamada antiga não detecta uma versão desatualizada enviada pelo aluno; a conexão da tela à API continua pendente.
 
 Teste local: `node --test tests/preparar-respostas-versao.test.ts`. Usa PGlite e sessões simuladas, sem acessar o Supabase remoto. Após aplicar a query, testar uma avaliação pela tela atual e conferir `id`, `versao`, `criado_em` e `salva_em` em `respostas_tentativa`: a segunda gravação deve aumentar a versão e manter ID/data inicial.
 
 Referência: [alteração de tabelas no PostgreSQL](https://www.postgresql.org/docs/current/ddl-alter.html).
+
+## 034 — Salvamento com versão na tabela existente
+
+Com a `033` aplicada, executar somente `database/034_salvar_resposta_com_versao.sql`. Não cria `public.respostas`, não copia registros e não altera os dados já salvos. Recusa banco sem a preparação da `033` ou com as duas tabelas de respostas.
+
+- Acrescenta a assinatura `salvar_resposta_tentativa(UUID, UUID, INTEGER, UUID, TEXT)` já chamada por `POST /api/salvar-resposta-tentativa`. Os cinco argumentos são obrigatórios para não disputar chamadas com a assinatura antiga de quatro argumentos; alternativa ou texto podem ser `NULL`.
+- A primeira gravação recebe versão 1; alterações usam a próxima versão. Para respostas anteriores, consultar a versão existente em `consultar_respostas_tentativa`. Repetir a versão atual com o mesmo conteúdo confirma sem alterar horário, versão ou auditoria. Versão antiga, salto ou mesma versão com outro conteúdo retornam `409` pela API.
+- Mantém as validações da implementação local: aluno ativo, organização, sessão/MFA, vínculo, questão/alternativa da tentativa, situação e prazo. O bloqueio da tentativa serializa gravação, encerramento e as duas assinaturas de salvamento. Reenvio também exige acesso e prazo válidos.
+- Usa o trigger da `033` para a sequência e mantém ID/data inicial. Retorna os oito campos que a API já valida, com `atualizado_em` igual a `salva_em`. A consulta e a API leem a mesma resposta, sem gabarito.
+- Permite limpar alternativa/texto e preserva espaços da dissertativa, até 10.000 caracteres. O evento `RESPOSTA_SALVA` continua identificando a tentativa, como no modelo da entrega; não registra o conteúdo. Falha na auditoria desfaz a resposta e o incremento da versão.
+- A RPC antiga mantém seu contrato e segue disponível neste bloco. Ela ainda pode substituir uma resposta sem verificar a versão do cliente. Conectar a tela à API e retirar o acesso à assinatura antiga são os próximos passos para concluir a proteção.
+
+Testes: `node --test tests/respostas-entrega.test.ts tests/salvar-resposta-tentativa-api.test.ts tests/fotos-sql.test.ts`. A API é exercitada com a função SQL real no PGlite; Auth/HTTP são simulados. Inclui aplicação sobre respostas existentes, reaplicação, versões, reenvio após perda da confirmação, permissões, prazo, encerramento, rollback de auditoria e compatibilidade com fotos. PGlite serializa transações; não substitui concorrência entre conexões reais nem validação do PostgREST remoto.
+
+Conferência após aplicar no Supabase: `SELECT to_regprocedure('public.salvar_resposta_tentativa(uuid,uuid,integer,uuid,text)');` deve retornar a assinatura. A query solicita atualização do cache de funções do PostgREST. O teste do fluxo completo pela tela será feito ao conectar o frontend à API; abrir o console ou mudar de foco durante a prova atual pode interromper a tentativa.
+
+Referências: [bloqueios no PostgreSQL](https://www.postgresql.org/docs/current/explicit-locking.html) e [funções no Supabase](https://supabase.com/docs/guides/database/functions).
 
 ## Dados e regras
 
@@ -1051,7 +1068,7 @@ Referências: [INSERT e ON CONFLICT no PostgreSQL](https://www.postgresql.org/do
 
 ## API de salvamento das respostas
 
-`POST /api/salvar-resposta-tentativa` → `auth.getUser` → `public.salvar_resposta_tentativa` da `028` → validação da confirmação. Rota registrada em `scripts/api-dev.ts`, no mesmo padrão das APIs de início e conteúdo. Sem query ou dependência nova.
+`POST /api/salvar-resposta-tentativa` → `auth.getUser` → `public.salvar_resposta_tentativa` da `034` → validação da confirmação. Rota registrada em `scripts/api-dev.ts`, no mesmo padrão das APIs de início e conteúdo. Contrato HTTP preservado; no banco da entrega0911, requer `033` e `034`, sem dependência nova.
 
 - Exige `Authorization: Bearer <access_token>` e `Content-Type: application/json`. Recebe `tentativa_id`, `questao_id`, `versao` e pelo menos um dos campos `alternativa_id` ou `texto`. Campos extras e parâmetros na URL são recusados. Para limpar, enviar conteúdo explicitamente `null`.
 - A versão deve ser inteira entre 1 e 2.147.483.647. Texto aceita até 10.000 caracteres Unicode, preservando espaços e quebras de linha. NUL, Unicode inválido e conteúdo misturando alternativa e texto são recusados antes de chamar o banco. O servidor local permite até 128 KiB nessa rota para comportar o texto com Unicode escapado; demais limites existentes são mantidos.
@@ -1059,9 +1076,11 @@ Referências: [INSERT e ON CONFLICT no PostgreSQL](https://www.postgresql.org/do
 - A RPC usa a chave pública e a sessão do aluno. Dono, perfil, organização, MFA, matrícula, prazo e sequência da versão continuam validados no banco. Não usa service role nem aceita aluno ou horários no corpo.
 - Sucesso: `200` com `{ resposta }`, tanto na criação como na alteração ou repetição confirmada. Confere tentativa, questão, versão, alternativa e texto; devolve somente os oito campos da resposta. Datas e IDs são normalizados, sem gabarito, nota ou colunas internas.
 - Erros: `400` para entrada/tipo de resposta inválidos; `401` sessão inválida; `403` perfil/MFA sem permissão; `404` tentativa/questão fora do acesso; `409` tentativa indisponível ou versão fora de sequência; `415` formato diferente de JSON; `405` método diferente de POST; `503` indisponibilidade ou confirmação inválida. Respostas sem cache e sem detalhes internos do banco.
-- Não repete a RPC automaticamente. Se a confirmação se perder, a resposta pode já estar gravada: repetir **o mesmo conteúdo e a mesma versão**, enquanto o acesso e o prazo forem válidos. A `028` confirma essa repetição sem duplicar registro ou auditoria. Não avançar a versão antes de confirmar.
+- Não repete a RPC automaticamente. Se a confirmação se perder, a resposta pode já estar gravada: repetir **o mesmo conteúdo e a mesma versão**, enquanto o acesso e o prazo forem válidos. A `034` confirma essa repetição sem duplicar registro ou auditoria. Não avançar a versão antes de confirmar.
 
-### Teste manual da API
+### Referência do teste manual anterior à tela monitorada
+
+O roteiro abaixo foi usado com o modelo local `028`. Na integração atual, usar a `034` e a tabela `respostas_tentativa`. A tela monitorada pode interromper a tentativa ao abrir o console ou trocar de foco; a validação deste bloco usa os testes automatizados acima. O roteiro integrado será atualizado com a conexão da tela à API.
 
 1. Com a `028` aplicada, executar `npm run dev:full`. Entrar como aluno com MFA e matrícula ativa e iniciar uma avaliação nova de teste dentro da janela.
 2. Na aba Network, obter o ID da tentativa, questão e alternativa da consulta de conteúdo. No console do navegador, substituir os IDs e executar:
