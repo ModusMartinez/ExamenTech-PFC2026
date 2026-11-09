@@ -87,6 +87,7 @@ export function TentativaAlunoPanel({ avaliacao, onCancelar }: { avaliacao: Aval
           <fieldset disabled={inicio === 'enviando'}>
             <legend>Iniciar avaliação</legend>
             <p className="turmas-note">Tentativa única, sem retomada. O tempo começa ao confirmar.</p>
+            <p className="turmas-note">Este fluxo ainda não permite responder ou enviar; use somente uma avaliação de teste.</p>
             <p className="turmas-note">Duração: {avaliacao.duracao_minutos} min. Encerramento: <time dateTime={avaliacao.fim_em}>
               {new Date(avaliacao.fim_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
             </time>.</p>

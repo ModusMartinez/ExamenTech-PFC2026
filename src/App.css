@@ -270,6 +270,13 @@ input {
   margin-left: 5px;
 }
 
+.recovery-link {
+  display: block;
+  margin: -4px 0 20px auto;
+  padding: 0;
+  text-align: right;
+}
+
 .btn-back {
   margin: 0 0 22px;
   padding: 0;
@@ -334,6 +341,37 @@ input {
   border-radius: 10px;
   background: white;
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.05);
+}
+
+.exam-publish-shortcut {
+  margin-top: 24px;
+  padding: 20px 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: white;
+}
+
+.exam-publish-shortcut h2 {
+  margin: 0 0 8px;
+  color: var(--dark-blue);
+}
+
+.exam-publish-shortcut p {
+  margin: 0;
+  color: var(--gray);
+}
+
+.exam-publish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.exam-publish-actions .btn-primary {
+  width: auto;
+  min-width: 180px;
+  padding: 0 16px;
 }
 
 .avatar {

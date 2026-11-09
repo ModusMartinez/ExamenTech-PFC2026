@@ -8,7 +8,7 @@ import { lerFormularioAvaliacao } from '../services/avaliacaoForm'
 import { CamposAvaliacao } from './CamposAvaliacao'
 import '../styles/turmas.css'
 
-export function NovaAvaliacaoPanel() {
+export function NovaAvaliacaoPanel({ onOpenDrafts }: { onOpenDrafts?: (turmaId: string) => void } = {}) {
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -16,6 +16,7 @@ export function NovaAvaliacaoPanel() {
   const [creating, setCreating] = useState(false)
   const [formError, setFormError] = useState({ campo: '', mensagem: '' })
   const [success, setSuccess] = useState('')
+  const [createdTurmaId, setCreatedTurmaId] = useState<string | null>(null)
   const submitting = useRef(false)
   const notice = useRef<HTMLParagraphElement>(null)
 
@@ -54,6 +55,7 @@ export function NovaAvaliacaoPanel() {
     }
     setFormError({ campo: '', mensagem: '' })
     setSuccess('')
+    setCreatedTurmaId(null)
     if (!turmas.some((turma) => turma.id === campo('turma_id'))) return invalid('turma_id', 'Selecione uma turma ativa.')
     const campos = lerFormularioAvaliacao(values)
     if (campos.erro) return invalid(campos.erro.campo, campos.erro.mensagem)
@@ -65,6 +67,7 @@ export function NovaAvaliacaoPanel() {
       const avaliacao = await criarAvaliacaoRascunho(dados)
       form.reset()
       setSuccess(`Avaliação “${avaliacao.titulo}” criada em rascunho.`)
+      if (dados.tipo === 'PROVA') setCreatedTurmaId(dados.turma_id)
     } catch (error) {
       setFormError({ campo: '', mensagem: error instanceof Error ? error.message : 'Não foi possível confirmar a criação.' })
     } finally {
@@ -85,6 +88,7 @@ export function NovaAvaliacaoPanel() {
       <header>
         <p className="overline">AVALIAÇÕES</p>
         <h1 id="avaliacao-title">Nova avaliação</h1>
+        <p>Selecione o tipo <strong>Prova</strong>. Depois de criar o rascunho, adicione as questões e publique pela turma.</p>
       </header>
       <button type="button" className="turmas-refresh" disabled={loading || creating}
         onClick={() => setRefresh((current) => current + 1)}>Atualizar turmas</button>
@@ -104,6 +108,8 @@ export function NovaAvaliacaoPanel() {
         </fieldset>
         {formError.mensagem && <p ref={notice} tabIndex={-1} id="avaliacao-form-error" className="alert error" role="alert">{formError.mensagem}</p>}
         {success && <p ref={notice} tabIndex={-1} className="alert success" role="status">{success}</p>}
+        {success && createdTurmaId && onOpenDrafts && <button type="button" className="turmas-refresh"
+          onClick={() => onOpenDrafts(createdTurmaId)}>Abrir rascunhos da turma para publicar</button>}
       </form>
     </section>
   )

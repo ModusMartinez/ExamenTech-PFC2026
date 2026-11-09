@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { consultarConteudoTentativa, iniciarTentativa } from '../src/services/tentativas'
 import type { ConteudoTentativa, TentativaIniciada } from '../src/services/tentativaValidation'
+import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments'
 
 const mocks = vi.hoisted(() => ({ getSession: vi.fn(), fetch: vi.fn() }))
 vi.mock('../src/lib/supabase', () => ({ supabase: { auth: { getSession: mocks.getSession } } }))
@@ -32,14 +33,14 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-test('início envia somente a avaliação com a sessão atual e confere a confirmação', async () => {
+test('início envia avaliação e versão do aviso com a sessão atual e confere a confirmação', async () => {
   mocks.fetch.mockResolvedValueOnce(Response.json({ tentativa: {
     ...tentativa, id: tentativa.id.toUpperCase(), iniciada_em: '2026-11-09T16:00:00-03:00', campo_interno: 'restrito',
   } }, { status: 201 }))
   expect(await iniciarTentativa(tentativa.avaliacao_id.toUpperCase())).toEqual(tentativa)
   expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/iniciar-tentativa', {
     method: 'POST', headers: { Authorization: 'Bearer sessao-simulada', 'Content-Type': 'application/json' },
-    cache: 'no-store', body: JSON.stringify({ avaliacao_id: tentativa.avaliacao_id }),
+    cache: 'no-store', body: JSON.stringify({ avaliacao_id: tentativa.avaliacao_id, aviso_versao: EXAM_NOTICE_VERSION }),
   })
 })
 

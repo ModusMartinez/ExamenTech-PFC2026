@@ -11,6 +11,8 @@ import minhasAvaliacoesHandler from '../api/minhas-avaliacoes.ts'
 import iniciarTentativaHandler from '../api/iniciar-tentativa.ts'
 import conteudoTentativaHandler from '../api/conteudo-tentativa.ts'
 import salvarRespostaTentativaHandler from '../api/salvar-resposta-tentativa.ts'
+import fotosTentativaHandler from '../api/fotos-tentativa.ts'
+import limpezaFotosHandler from '../api/limpar-fotos-expiradas.ts'
 
 const MAX_BODY_SIZE = 16 * 1024
 const port = Number(process.env.API_PORT ?? 8787)
@@ -60,6 +62,8 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
       : url.pathname === '/api/iniciar-tentativa' ? iniciarTentativaHandler
       : url.pathname === '/api/conteudo-tentativa' ? conteudoTentativaHandler
       : url.pathname === '/api/salvar-resposta-tentativa' ? salvarRespostaTentativaHandler
+      : url.pathname === '/api/fotos-tentativa' ? fotosTentativaHandler
+      : url.pathname === '/api/limpar-fotos-expiradas' ? limpezaFotosHandler
       : url.pathname === '/api/questoes' ? questoesHandler
       : url.pathname === '/api/alternativas' ? alternativasHandler
       : url.pathname === '/api/publicar-avaliacao' ? publicarAvaliacaoHandler : null
@@ -73,7 +77,8 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
     const method = incomingRequest.method ?? 'GET'
     const hasBody = !['GET', 'HEAD'].includes(method)
     // Até 10 mil caracteres no enunciado, nas alternativas ou na resposta, inclusive Unicode escapado.
-    const maxBodySize = ['/api/questoes', '/api/alternativas', '/api/salvar-resposta-tentativa'].includes(url.pathname) ? 128 * 1024 : MAX_BODY_SIZE
+    const maxBodySize = url.pathname === '/api/fotos-tentativa' ? 1024 * 1024
+      : ['/api/questoes', '/api/alternativas', '/api/salvar-resposta-tentativa'].includes(url.pathname) ? 128 * 1024 : MAX_BODY_SIZE
     const body = hasBody ? await readBody(incomingRequest, maxBodySize) : undefined
 
     const request = new Request(url, {

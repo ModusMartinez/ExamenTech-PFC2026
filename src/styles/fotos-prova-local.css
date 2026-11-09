@@ -1,0 +1,23 @@
+.fotos-local { max-width: 900px; margin: 0 auto 48px; color: var(--ink); }
+.fotos-local h1 { color: var(--navy); }
+.fotos-local > p { line-height: 1.5; }
+.fotos-local-preview {
+  max-width: 520px;
+  margin: 20px 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #0b1f33;
+}
+.fotos-local-preview video { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; }
+.fotos-local-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.fotos-local-actions .btn-primary { width: auto; margin: 0; }
+.fotos-local-actions .btn-outline { border-color: #aebfd4; background: #fff; color: var(--blue); font-weight: 600; }
+.fotos-local-actions .btn-outline:hover { background: #edf4fc; }
+.fotos-local-actions button:disabled { opacity: .55; cursor: not-allowed; }
+.fotos-local-clock, .fotos-local-count { font-weight: 700; color: var(--navy); }
+.fotos-local-gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; padding: 0; list-style: none; }
+.fotos-local-gallery li { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.fotos-local-gallery img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #0b1f33; }
+.fotos-local-gallery small { color: var(--muted); }
+.fotos-local-toast { position: fixed; right: 20px; bottom: 20px; max-width: 300px; padding: 12px 16px; border-radius: 8px; color: #fff; background: #164a78; box-shadow: 0 4px 16px #102a4340; }
+.fotos-local button:focus-visible { outline: 3px solid #69a4d3; outline-offset: 2px; }

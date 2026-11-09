@@ -16,21 +16,34 @@ import { LegalPage } from './components/LegalPage'
 import { TERMS_VERSION, PRIVACY_VERSION } from './content/legalDocuments'
 import type { LegalDocumentType } from './content/legalDocuments'
 import { supabase } from './lib/supabase'
-import { resolveAccess } from './services/access'
-import type { AccessState, AccessUser } from './services/access'
+import { resolveAccess, resolveRecoveryAccess } from './services/access'
+import type { AccessState, AccessUser, RecoveryAccessState } from './services/access'
 import {
   validateInvitationFields,
   validateLoginFields,
+  validateNewPassword,
+  validateRecoveryEmail,
   validateRegistrationFields,
 } from './services/authValidation'
 import './App.css'
 
 const TURNSTILE_TEST_SITE_KEY = '1x00000000000000000000AA'
 const invitationsEnabled = import.meta.env.VITE_INVITES_ENABLED === 'true'
+// O início depende da configuração conferida com a sequência canônica do banco.
+const monitoredExamsEnabled = import.meta.env.VITE_MONITORED_EXAMS_ENABLED === 'true'
 
 const turnstileSiteKey =
   import.meta.env.VITE_TURNSTILE_SITE_KEY ||
   (import.meta.env.DEV ? TURNSTILE_TEST_SITE_KEY : '')
+
+type AuthPage =
+  | 'login' | 'cadastro' | 'mfa-setup' | 'mfa-verify'
+  | 'request-password' | 'reset-password' | 'invalid-recovery'
+
+function isRecoveryRedirect() {
+  return new URLSearchParams(window.location.search).get('type') === 'recovery' ||
+    new URLSearchParams(window.location.hash.slice(1)).get('type') === 'recovery'
+}
 
 function App() {
   // São páginas públicas: a leitura não depende da sessão nem do MFA.
@@ -48,8 +61,11 @@ function App() {
 }
 
 function AccessApp() {
-  const [page, setPage] =
-    useState<'login' | 'cadastro' | 'mfa-setup' | 'mfa-verify'>('login')
+  const recoveryPendingRef = useRef(isRecoveryRedirect())
+  const recoveryConfirmedRef = useRef(false)
+  const [page, setPage] = useState<AuthPage>(
+    () => isRecoveryRedirect() ? 'reset-password' : 'login',
+  )
   const [loggedUser, setLoggedUser] = useState<AccessUser | null>(null)
   const [checkingSession, setCheckingSession] = useState(true)
   const [mfaFactorId, setMfaFactorId] = useState('')
@@ -64,6 +80,11 @@ function AccessApp() {
   const [showPassword, setShowPassword] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+  const [recoveryEmail, setRecoveryEmail] = useState('')
+  const [recoveryError, setRecoveryError] = useState('')
+  const [recoverySent, setRecoverySent] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [newPasswordConfirmation, setNewPasswordConfirmation] = useState('')
 
   const [name, setName] = useState('')
   const [registerEmail, setRegisterEmail] = useState('')
@@ -83,12 +104,14 @@ function AccessApp() {
   const registeringRef = useRef(false)
   const checkAccessRef = useRef<() => Promise<void>>(async () => {})
 
-  const applyAccess = useCallback(async (access: AccessState) => {
+  const applyAccess = useCallback(async (access: AccessState | RecoveryAccessState) => {
     // Nunca manter dados de outra conta visíveis durante uma nova verificação.
     setLoggedUser(null)
 
     if (access.kind === 'signed-out') {
-      setPage((current) => current === 'cadastro' ? 'cadastro' : 'login')
+      setPage((current) => recoveryPendingRef.current
+        ? 'invalid-recovery'
+        : current === 'cadastro' || current === 'request-password' ? current : 'login')
       return
     }
 
@@ -114,6 +137,12 @@ function AccessApp() {
       return
     }
 
+    if (access.kind === 'verified') {
+      setPage('reset-password')
+      setRecoveryError('')
+      return
+    }
+
     setLoggedUser(access.user)
     setLoginError('')
   }, [])
@@ -122,8 +151,12 @@ function AccessApp() {
     let active = true
     let latestCheck = 0
     let scheduledCheck: ReturnType<typeof setTimeout> | null = null
+    let recoveryTimeout: ReturnType<typeof setTimeout> | null = null
 
     async function checkAccess() {
+      // Um link na URL ainda não prova que o Supabase o aceitou. Aguarde o
+      // evento PASSWORD_RECOVERY antes de consultar ou alterar a conta.
+      if (recoveryPendingRef.current && !recoveryConfirmedRef.current) return
       if (scheduledCheck) {
         clearTimeout(scheduledCheck)
         scheduledCheck = null
@@ -133,12 +166,19 @@ function AccessApp() {
       setLoggedUser(null)
 
       try {
-        const access = await resolveAccess(supabase)
+        const access = recoveryPendingRef.current
+          ? await resolveRecoveryAccess(supabase)
+          : await resolveAccess(supabase)
         if (active && checkId === latestCheck) await applyAccess(access)
       } catch {
         if (active && checkId === latestCheck) {
-          setPage('login')
-          setLoginError('Não foi possível verificar sua sessão. Tente entrar novamente.')
+          if (recoveryPendingRef.current) {
+            setPage('invalid-recovery')
+            setRecoveryError('Não foi possível confirmar o link de recuperação. Solicite outro e-mail.')
+          } else {
+            setPage('login')
+            setLoginError('Não foi possível verificar sua sessão. Tente entrar novamente.')
+          }
         }
       } finally {
         if (active && checkId === latestCheck) setCheckingSession(false)
@@ -161,6 +201,15 @@ function AccessApp() {
     checkAccessRef.current = checkAccess
     void checkAccess()
 
+    if (recoveryPendingRef.current) {
+      recoveryTimeout = setTimeout(() => {
+        if (!active || recoveryConfirmedRef.current) return
+        setPage('invalid-recovery')
+        setCheckingSession(false)
+        setRecoveryError('Não foi possível confirmar o link de recuperação. Solicite outro e-mail.')
+      }, 10000)
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event) => {
         // O signUp pode emitir SIGNED_IN antes de devolver seu resultado.
@@ -168,13 +217,28 @@ function AccessApp() {
         if (registeringRef.current) return
 
         if (event === 'SIGNED_OUT') {
+          recoveryPendingRef.current = false
+          recoveryConfirmedRef.current = false
+          if (recoveryTimeout) clearTimeout(recoveryTimeout)
           latestCheck += 1
           if (scheduledCheck) clearTimeout(scheduledCheck)
           setLoggedUser(null)
-          setPage((current) => current === 'cadastro' ? 'cadastro' : 'login')
+          setPage((current) => current === 'cadastro' || current === 'request-password' ? current : 'login')
           setCheckingSession(false)
           return
         }
+
+        if (event === 'PASSWORD_RECOVERY') {
+          recoveryPendingRef.current = true
+          recoveryConfirmedRef.current = true
+          if (recoveryTimeout) clearTimeout(recoveryTimeout)
+          setRecoveryError('')
+          scheduleCheck()
+          return
+        }
+
+        // A alteração da senha emite USER_UPDATED antes da saída da sessão.
+        if (recoveryPendingRef.current && event === 'USER_UPDATED') return
 
         if (
           event === 'SIGNED_IN' ||
@@ -192,6 +256,7 @@ function AccessApp() {
       active = false
       latestCheck += 1
       if (scheduledCheck) clearTimeout(scheduledCheck)
+      if (recoveryTimeout) clearTimeout(recoveryTimeout)
       checkAccessRef.current = async () => {}
       subscription.unsubscribe()
     }
@@ -200,7 +265,7 @@ function AccessApp() {
   useEffect(() => {
     // Login e cadastro são telas públicas: voltar à janela não deve desmontar
     // o formulário nem o CAPTCHA. Sessões autenticadas continuam conferidas.
-    if (!loggedUser && page !== 'mfa-setup' && page !== 'mfa-verify') return
+    if (!loggedUser && page !== 'mfa-setup' && page !== 'mfa-verify' && page !== 'reset-password') return
 
     function checkOnFocus() {
       void checkAccessRef.current()
@@ -238,6 +303,105 @@ function AccessApp() {
   function resetRegisterTurnstile() {
     setRegisterTurnstileToken('')
     setRegisterTurnstileResetSignal((current) => current + 1)
+  }
+
+  function openPasswordRecovery() {
+    setRecoveryEmail(email)
+    setRecoveryError('')
+    setRecoverySent(false)
+    setLoginError('')
+    resetTurnstile()
+    setPage('request-password')
+  }
+
+  async function requestPasswordReset(event: FormEvent) {
+    event.preventDefault()
+    if (loading) return
+
+    setRecoveryError('')
+    const typedEmail = recoveryEmail.trim().toLowerCase()
+    const fieldError = validateRecoveryEmail(typedEmail)
+    if (fieldError) {
+      setRecoveryError(fieldError)
+      return
+    }
+    if (!turnstileToken) {
+      setRecoveryError('Conclua a verificação de segurança para continuar.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(typedEmail, {
+        redirectTo: window.location.origin,
+        captchaToken: turnstileToken,
+      })
+      if (error) {
+        setRecoveryError(error.code === 'captcha_failed'
+          ? 'A verificação de segurança falhou. Tente novamente.'
+          : error.status === 429
+            ? 'Muitas tentativas. Aguarde alguns minutos e tente novamente.'
+            : 'Não foi possível solicitar a recuperação agora. Tente novamente.')
+        return
+      }
+      setRecoverySent(true)
+    } catch {
+      setRecoveryError('Não foi possível solicitar a recuperação agora. Tente novamente.')
+    } finally {
+      resetTurnstile()
+      setLoading(false)
+    }
+  }
+
+  async function updatePassword(event: FormEvent) {
+    event.preventDefault()
+    if (loading) return
+
+    setRecoveryError('')
+    const fieldError = validateNewPassword(newPassword, newPasswordConfirmation)
+    if (fieldError) {
+      setRecoveryError(fieldError)
+      return
+    }
+
+    setLoading(true)
+    try {
+      if (!recoveryConfirmedRef.current) {
+        setRecoveryError('Solicite um novo link de recuperação para alterar a senha.')
+        return
+      }
+      const access = await resolveRecoveryAccess(supabase)
+      if (access.kind !== 'verified') {
+        setRecoveryError('Confirme novamente o código do Authenticator para alterar a senha.')
+        await checkAccessRef.current()
+        return
+      }
+
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) {
+        setRecoveryError(error.code === 'weak_password'
+          ? 'Escolha uma senha mais forte, com letras, números e símbolos.'
+          : 'Não foi possível alterar a senha. Tente novamente.')
+        return
+      }
+
+      setNewPassword('')
+      setNewPasswordConfirmation('')
+      setPassword('')
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' })
+      if (signOutError) {
+        setRecoveryError('Senha alterada, mas não foi possível sair da conta. Clique em “Sair da conta” e entre novamente.')
+        return
+      }
+      recoveryPendingRef.current = false
+      recoveryConfirmedRef.current = false
+      setPage('login')
+      setSuccessMessage('Senha alterada. Entre com a nova senha e confirme o Authenticator.')
+    } catch {
+      setRecoveryError('Não foi possível confirmar a sessão de recuperação. Tente novamente.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleLogin(event: FormEvent) {
@@ -559,6 +723,15 @@ function AccessApp() {
                   </div>
                 </div>
 
+                <button
+                  type="button"
+                  className="btn-link recovery-link"
+                  disabled={loading}
+                  onClick={openPasswordRecovery}
+                >
+                  Esqueci minha senha
+                </button>
+
                 <TurnstileWidget
                   siteKey={turnstileSiteKey}
                   action="login"
@@ -620,6 +793,120 @@ function AccessApp() {
                   Criar conta
                 </button>
               </div>
+            </>
+          ) : page === 'request-password' ? (
+            <>
+              <header className="form-header">
+                <button type="button" className="btn-back" disabled={loading} onClick={() => {
+                  setPage('login')
+                  setRecoveryError('')
+                  resetTurnstile()
+                }}>
+                  ← Voltar
+                </button>
+                <p className="overline">RECUPERAÇÃO DE ACESSO</p>
+                <h2>Redefinir senha</h2>
+                <p className="subtitle">Enviaremos um link para o e-mail da sua conta.</p>
+              </header>
+
+              <form noValidate onSubmit={requestPasswordReset}>
+                <div className="input-group">
+                  <label htmlFor="recovery-email">E-mail</label>
+                  <input
+                    id="recovery-email"
+                    type="email"
+                    autoComplete="email"
+                    disabled={loading}
+                    value={recoveryEmail}
+                    onChange={(event) => setRecoveryEmail(event.target.value)}
+                  />
+                </div>
+
+                <TurnstileWidget
+                  siteKey={turnstileSiteKey}
+                  action="login"
+                  resetSignal={turnstileResetSignal}
+                  onVerify={(token) => {
+                    setTurnstileToken(token)
+                    setRecoveryError('')
+                  }}
+                  onExpire={() => {
+                    setTurnstileToken('')
+                    setRecoveryError('A verificação expirou. Conclua-a novamente.')
+                  }}
+                  onError={(message) => {
+                    setTurnstileToken('')
+                    setRecoveryError(message)
+                  }}
+                />
+
+                {recoveryError && <div className="alert error" role="alert">{recoveryError}</div>}
+                {recoverySent && <div className="alert success" role="status">
+                  Se este e-mail estiver cadastrado, você receberá um link para redefinir a senha.
+                </div>}
+
+                <button type="submit" className="btn-primary" disabled={loading || !turnstileToken} aria-busy={loading}>
+                  {loading ? 'Enviando...' : 'Enviar link de recuperação'}
+                </button>
+              </form>
+            </>
+          ) : page === 'reset-password' ? (
+            <>
+              <header className="form-header">
+                <p className="overline">RECUPERAÇÃO DE ACESSO</p>
+                <h2>Crie uma nova senha</h2>
+                <p className="subtitle">O Authenticator foi confirmado. Defina a senha para entrar novamente.</p>
+              </header>
+
+              <form noValidate onSubmit={updatePassword}>
+                <div className="input-group">
+                  <label htmlFor="new-password">Nova senha</label>
+                  <input
+                    id="new-password"
+                    type="password"
+                    autoComplete="new-password"
+                    disabled={loading}
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="new-password-confirmation">Confirmar nova senha</label>
+                  <input
+                    id="new-password-confirmation"
+                    type="password"
+                    autoComplete="new-password"
+                    disabled={loading}
+                    value={newPasswordConfirmation}
+                    onChange={(event) => setNewPasswordConfirmation(event.target.value)}
+                  />
+                </div>
+                {recoveryError && <div className="alert error" role="alert">{recoveryError}</div>}
+                <button type="submit" className="btn-primary" disabled={loading} aria-busy={loading}>
+                  {loading ? 'Alterando senha...' : 'Salvar nova senha'}
+                </button>
+              </form>
+              <button type="button" className="btn-back mfa-cancel" disabled={loading} onClick={() => void handleLogout()}>
+                Sair da conta
+              </button>
+            </>
+          ) : page === 'invalid-recovery' ? (
+            <>
+              <header className="form-header">
+                <p className="overline">RECUPERAÇÃO DE ACESSO</p>
+                <h2>Link indisponível</h2>
+                <p className="subtitle">O link pode ter expirado ou já ter sido utilizado.</p>
+              </header>
+              {recoveryError && <div className="alert error" role="alert">{recoveryError}</div>}
+              <button type="button" className="btn-primary" onClick={() => {
+                recoveryPendingRef.current = false
+                recoveryConfirmedRef.current = false
+                setRecoveryError('')
+                setRecoverySent(false)
+                setPage('request-password')
+              }}>
+                Solicitar novo link
+              </button>
             </>
           ) : page === 'cadastro' ? (
             <>
@@ -833,7 +1120,10 @@ type DashboardProps = {
 
 function Dashboard({ user, onLogout }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
-  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'minhas-avaliacoes'>('inicio')
+  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'provas'>('inicio')
+  const [draftsTarget, setDraftsTarget] = useState<string | null>(null)
+  const [examActive, setExamActive] = useState(false)
+  const [examNotice, setExamNotice] = useState('')
   const nameParts = user.name.split(' ')
 
   const initials = nameParts
@@ -857,6 +1147,7 @@ function Dashboard({ user, onLogout }: DashboardProps) {
         <button
           type="button"
           className="btn-outline"
+          disabled={examActive}
           onClick={() => {
             setLogoutError('')
             void onLogout().catch(() => {
@@ -870,41 +1161,42 @@ function Dashboard({ user, onLogout }: DashboardProps) {
 
       <main className={showingAudit ? 'dashboard-content dashboard-content-audit' : 'dashboard-content'}>
         {logoutError && <div className="alert error" role="alert">{logoutError}</div>}
+        {dashboardView === 'inicio' && examNotice && <div className="alert error" role="alert">{examNotice}</div>}
         {(canViewTurmas || user.profile === 'Aluno') && (
           <nav className="dashboard-section-nav" aria-label="Seções do painel">
-            <button type="button" aria-pressed={dashboardView === 'inicio'} onClick={() => setDashboardView('inicio')}>
+            <button type="button" disabled={examActive} aria-pressed={dashboardView === 'inicio'} onClick={() => setDashboardView('inicio')}>
               Início
             </button>
             {canViewTurmas && (
-              <button type="button" aria-pressed={dashboardView === 'turmas'} onClick={() => setDashboardView('turmas')}>
+              <button type="button" disabled={examActive} aria-pressed={dashboardView === 'turmas'} onClick={() => { setDraftsTarget(null); setDashboardView('turmas') }}>
                 Turmas
               </button>
             )}
             {user.profile === 'Aluno' && (
               <>
-                <button type="button" aria-pressed={dashboardView === 'matricula'} onClick={() => setDashboardView('matricula')}>
+                <button type="button" disabled={examActive} aria-pressed={dashboardView === 'matricula'} onClick={() => setDashboardView('matricula')}>
                   Solicitar matrícula
                 </button>
-                <button type="button" aria-pressed={dashboardView === 'minhas-matriculas'} onClick={() => setDashboardView('minhas-matriculas')}>
+                <button type="button" disabled={examActive} aria-pressed={dashboardView === 'minhas-matriculas'} onClick={() => setDashboardView('minhas-matriculas')}>
                   Minhas matrículas
                 </button>
-                <button type="button" aria-pressed={dashboardView === 'minhas-avaliacoes'} onClick={() => setDashboardView('minhas-avaliacoes')}>
-                  Minhas avaliações
+                <button type="button" disabled={examActive} aria-pressed={dashboardView === 'provas'} onClick={() => setDashboardView('provas')}>
+                  Minhas provas
                 </button>
               </>
             )}
             {user.profile === 'Professor' && (
-              <button type="button" aria-pressed={dashboardView === 'nova-avaliacao'} onClick={() => setDashboardView('nova-avaliacao')}>
+              <button type="button" disabled={examActive} aria-pressed={dashboardView === 'nova-avaliacao'} onClick={() => setDashboardView('nova-avaliacao')}>
                 Nova avaliação
               </button>
             )}
             {canViewTurmas && (
-              <button type="button" aria-pressed={dashboardView === 'aprovacoes'} onClick={() => setDashboardView('aprovacoes')}>
+              <button type="button" disabled={examActive} aria-pressed={dashboardView === 'aprovacoes'} onClick={() => setDashboardView('aprovacoes')}>
                 Matrículas
               </button>
             )}
             {user.profile === 'Administrador' && (
-              <button type="button" aria-pressed={dashboardView === 'auditoria'} onClick={() => setDashboardView('auditoria')}>
+              <button type="button" disabled={examActive} aria-pressed={dashboardView === 'auditoria'} onClick={() => setDashboardView('auditoria')}>
                 Auditoria
               </button>
             )}
@@ -913,15 +1205,20 @@ function Dashboard({ user, onLogout }: DashboardProps) {
 
         {showingAudit ? <AuditPanel /> : dashboardView === 'turmas' &&
           (user.profile === 'Administrador' || user.profile === 'Professor') ? (
-          <TurmasPanel profile={user.profile} />
+          <TurmasPanel profile={user.profile} initialDraftsTurmaId={draftsTarget} />
         ) : dashboardView === 'nova-avaliacao' && user.profile === 'Professor' ? (
-          <NovaAvaliacaoPanel />
+          <NovaAvaliacaoPanel onOpenDrafts={(turmaId) => { setDraftsTarget(turmaId); setDashboardView('turmas') }} />
         ) : dashboardView === 'matricula' && user.profile === 'Aluno' ? (
           <SolicitarMatriculaPanel />
         ) : dashboardView === 'minhas-matriculas' && user.profile === 'Aluno' ? (
           <MinhasMatriculasPanel />
-        ) : dashboardView === 'minhas-avaliacoes' && user.profile === 'Aluno' ? (
-          <MinhasAvaliacoesPanel />
+        ) : dashboardView === 'provas' && user.profile === 'Aluno' ? (
+          <MinhasAvaliacoesPanel layout="cards" executionEnabled={monitoredExamsEnabled}
+            onActiveChange={setExamActive} onLeave={(message) => {
+            setExamNotice(message)
+            setExamActive(false)
+            setDashboardView('inicio')
+          }} />
         ) : dashboardView === 'aprovacoes' &&
           (user.profile === 'Administrador' || user.profile === 'Professor') ? (
           <MatriculasPanel profile={user.profile} />
@@ -944,6 +1241,18 @@ function Dashboard({ user, onLogout }: DashboardProps) {
             <p className="verification-receipt">
               Acesso confirmado com autenticação em duas etapas.
             </p>
+
+            {user.profile === 'Professor' && <section className="exam-publish-shortcut" aria-labelledby="exam-publish-title">
+              <h2 id="exam-publish-title">Criar e publicar uma prova</h2>
+              <p>Crie um rascunho do tipo Prova. Depois, abra os rascunhos da turma, adicione as questões e publique.</p>
+              <div className="exam-publish-actions">
+                <button type="button" className="btn-primary" onClick={() => setDashboardView('nova-avaliacao')}>Criar prova</button>
+                <button type="button" className="btn-primary" onClick={() => { setDraftsTarget(null); setDashboardView('turmas') }}>Ver rascunhos e publicar</button>
+              </div>
+            </section>}
+            {user.profile === 'Administrador' && <p className="security-note">
+              A criação e a publicação de provas são feitas pela conta do professor responsável pela turma.
+            </p>}
 
             {invitationsEnabled &&
               (user.profile === 'Administrador' || user.profile === 'Professor') && (

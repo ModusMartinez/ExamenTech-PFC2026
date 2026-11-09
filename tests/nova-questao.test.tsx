@@ -64,7 +64,7 @@ test.each([
   fireEvent.change(screen.getByLabelText('Tipo'), { target: { value: tipo } })
   fireEvent.submit(form)
   const success = await screen.findByText(`Questão 3 criada em “${item.titulo}”.`)
-  expect(document.activeElement).toBe(success)
+  await waitFor(() => expect(document.activeElement).toBe(success))
   expect(screen.queryByRole('form', { name: 'Nova questão em rascunho' })).toBeNull()
   expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/questoes', {
     method: 'POST', headers: { Authorization: 'Bearer sessao-simulada', 'Content-Type': 'application/json' },
@@ -142,7 +142,7 @@ test.each([400, 401, 403, 404, 409, 503])('erro %i preserva campos e foca a mens
   mocks.fetch.mockResolvedValueOnce(Response.json({ message: 'Criação recusada.' }, { status }))
   fireEvent.submit(form)
   const alert = await screen.findByRole('alert')
-  expect(document.activeElement).toBe(alert)
+  await waitFor(() => expect(document.activeElement).toBe(alert))
   expect(alert.textContent).toBe('Criação recusada.')
   expect((screen.getByLabelText('Enunciado') as HTMLTextAreaElement).value).toBe(dados.enunciado)
   expect((screen.getByLabelText('Pontuação') as HTMLInputElement).value).toBe('2,5')

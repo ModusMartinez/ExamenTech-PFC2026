@@ -124,7 +124,7 @@ test.each([400, 401, 403, 404, 409, 503])('erro HTTP %i preserva campos sem conf
   fireEvent.submit(form)
   const alert = await screen.findByRole('alert')
   expect(alert.textContent).toBe('Criação recusada.')
-  expect(document.activeElement).toBe(alert)
+  await waitFor(() => expect(document.activeElement).toBe(alert))
   expect((screen.getByLabelText('Título') as HTMLInputElement).value).toBe('  Primeira prova  ')
   expect(screen.queryByText(/criada em rascunho/)).toBeNull()
   expect(mocks.fetch).toHaveBeenCalledTimes(1)

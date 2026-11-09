@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { listarAvaliacoesPublicadas } from '../services/avaliacoes'
 import type { AvaliacaoPublicada } from '../services/avaliacaoValidation'
+import { examManagementEnabled } from '../services/examFeatures'
+import { TentativasResponsavelPanel } from './TentativasResponsavelPanel'
 
 export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao }: { turmaId: string; turmaNome: string; atualizacao: number }) {
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoPublicada[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
+  const [selected, setSelected] = useState<AvaliacaoPublicada | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => { heading.current?.focus() }, [])
   useEffect(() => {
@@ -44,6 +47,7 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao }: { turm
             <thead><tr>
               <th scope="col">Título</th><th scope="col">Tipo</th><th scope="col">Início</th>
               <th scope="col">Fim</th><th scope="col">Duração</th><th scope="col">Publicada em</th>
+              {examManagementEnabled() && <th scope="col">Tentativas</th>}
             </tr></thead>
             <tbody>{avaliacoes.map((avaliacao) => <tr key={avaliacao.id}>
               <th scope="row">{avaliacao.titulo}</th>
@@ -55,10 +59,14 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao }: { turm
               <td><time dateTime={avaliacao.publicada_em}>
                 {new Date(avaliacao.publicada_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
               </time></td>
+              {examManagementEnabled() && <td><button type="button" className="turmas-refresh"
+                aria-expanded={selected?.id === avaliacao.id} onClick={() => setSelected(value => value?.id === avaliacao.id ? null : avaliacao)}>
+                Gerenciar {avaliacao.titulo}</button></td>}
             </tr>)}</tbody>
           </table>
         </div>
       )}
+      {examManagementEnabled() && selected && <TentativasResponsavelPanel key={selected.id} avaliacaoId={selected.id} duracao={selected.duracao_minutos} />}
     </section>
   )
 }

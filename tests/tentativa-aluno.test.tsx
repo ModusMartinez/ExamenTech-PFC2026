@@ -107,7 +107,7 @@ test.each([409, 503])('falha HTTP %i no início recebe foco e não consulta cont
   render(<TentativaAlunoPanel avaliacao={avaliacao} onCancelar={cancelar} />)
   confirmar()
   const alert = await screen.findByRole('alert')
-  expect(document.activeElement).toBe(alert)
+  await waitFor(() => expect(document.activeElement).toBe(alert))
   expect(screen.queryByRole('button', { name: /Confirmar|Tentar carregar/ })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Voltar às avaliações' }))
   expect(cancelar).toHaveBeenCalledTimes(1)

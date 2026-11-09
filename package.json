@@ -10,8 +10,8 @@
     "dev:full": "node scripts/dev-full.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "node --test tests/*.test.ts && npm run test:ui",
-    "test:ui": "vitest run",
+    "test": "node --test --test-concurrency=1 tests/*.test.ts && npm run test:ui",
+    "test:ui": "vitest run --pool=vmThreads --no-file-parallelism",
     "preview": "vite preview"
   },
   "dependencies": {

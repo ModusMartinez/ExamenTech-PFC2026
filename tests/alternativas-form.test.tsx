@@ -76,7 +76,7 @@ test('professor cadastra e consulta o conjunto com gabarito, sem substituir alte
   preencher()
   fireEvent.submit(form)
   const success = await screen.findByText('Alternativas da questão 1 cadastradas.')
-  expect(document.activeElement).toBe(success)
+  await waitFor(() => expect(document.activeElement).toBe(success))
   expect(screen.queryByRole('form', { name: 'Cadastrar alternativas' })).toBeNull()
   expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/alternativas', {
     method: 'POST', headers: { Authorization: 'Bearer sessao-simulada', 'Content-Type': 'application/json' },
@@ -181,7 +181,7 @@ test.each([401, 403, 409, 503])('erro %i mantém textos e gabarito e não confir
   mocks.fetch.mockResolvedValueOnce(Response.json({ message: 'Cadastro recusado.' }, { status }))
   fireEvent.submit(form)
   const alert = await screen.findByRole('alert')
-  expect(document.activeElement).toBe(alert)
+  await waitFor(() => expect(document.activeElement).toBe(alert))
   expect(alert.textContent).toBe('Cadastro recusado.')
   expect((screen.getByLabelText('Alternativa 1') as HTMLTextAreaElement).value).toContain(dados.alternativas[0])
   expect((screen.getByLabelText('Alternativa correta') as HTMLSelectElement).value).toBe('2')
