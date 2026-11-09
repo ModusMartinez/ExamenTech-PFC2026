@@ -1,6 +1,6 @@
 //Dados para testar visualmente
 
-export type SituacaoUsuario = 'ativo' | 'pendente' | 'inativo'
+export type SituacaoUsuario = 'ativo' | 'inativo'
 export type PerfilUsuario = 'Administrador' | 'Professor' | 'Aluno'
 
 export interface UsuarioRecente {
@@ -24,7 +24,7 @@ export const dadosAdmin = {
     usuariosRecentes: [
         { id: '1', nome: 'Lucas Ferreira', email: 'lucas@sgpa.com', perfil: 'Aluno', situacao: 'ativo' },
         { id: '2', nome: 'Rafael Mendes', email: 'rafael@sgpa.com', perfil: 'Professor', situacao: 'ativo' },
-        { id: '3', nome: 'Ana Souza', email: 'ana@sgpa.com', perfil: 'Aluno', situacao: 'pendente' },
+        { id: '3', nome: 'Ana Souza', email: 'ana@sgpa.com', perfil: 'Aluno', situacao: 'ativo' },
         { id: '4', nome: 'Carlos Lima', email: 'carlos@sgpa.com', perfil: 'Aluno', situacao: 'inativo' },
     ] as UsuarioRecente[],
 }
