@@ -25,6 +25,7 @@ const eventNames: Record<string, string> = {
   MATRICULA_SOLICITADA: 'Matrícula solicitada',
   MATRICULA_APROVADA: 'Matrícula aprovada',
   MATRICULA_INATIVADA: 'Matrícula inativada',
+  CAMERA_FALHA: 'Falha da câmera',
 }
 
 function formatDate(value: string) {

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 import { prepararBancoAvaliacoes } from './helpers/bancoAvaliacoes.ts'
-import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
+const EXAM_NOTICE_VERSION = '2026-11-06-v2' // Aviso da migration histórica testada.
 
 test('respostas, envio e interrupção respeitam a tentativa única', async (t) => {
   const db = new PGlite()

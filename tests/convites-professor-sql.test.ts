@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import { PRIVACY_VERSION, TERMS_VERSION } from '../src/content/legalDocuments.ts'
+const TERMS_VERSION = '2026-11-06-v5' // Versões exigidas pela 029, exercitada neste teste.
+const PRIVACY_VERSION = '2026-11-06-v4'
 
 const adminId = '00000000-0000-4000-8000-000000000001'
 const teacherId = '00000000-0000-4000-8000-000000000002'

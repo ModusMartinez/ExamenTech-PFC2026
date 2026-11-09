@@ -1,10 +1,10 @@
-// A ativação acompanha 032. Os aceites anteriores permanecem com sua versão.
+// A atualização da câmera acompanha 037. Os aceites anteriores permanecem com sua versão.
 const env = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env
 const updatedDocuments = env?.VITE_EXAM_PHOTOS_ENABLED === 'true' || env?.VITE_EXAM_MANAGEMENT_ENABLED === 'true'
-export const TERMS_VERSION = updatedDocuments ? '2026-11-08-v6' : '2026-11-06-v5'
+export const TERMS_VERSION = updatedDocuments ? '2026-11-08-v7' : '2026-11-08-v8'
 export const PRIVACY_VERSION = updatedDocuments ? '2026-11-08-v5' : '2026-11-06-v4'
-export const EXAM_NOTICE_VERSION = '2026-11-06-v2'
-export const EXAM_NOTICE_SUMMARY = 'Use apenas provas de teste e dados fictícios nesta demonstração. A câmera precisa estar disponível durante a prova. Você tem uma única tentativa, sem retorno após sair ou perder a câmera. Respostas salvas e interrupções ficam no banco. Nesta versão, nenhuma foto, gravação ou áudio é enviado.'
+export const EXAM_NOTICE_VERSION = '2026-11-08-v3'
+export const EXAM_NOTICE_SUMMARY = 'Use apenas provas de teste e dados fictícios nesta demonstração. A câmera precisa estar disponível durante a prova. Você tem uma única tentativa, sem retorno automático após sair. A indisponibilidade da câmera é registrada e permite continuar respondendo. Respostas salvas e interrupções ficam no banco. Nesta versão, nenhuma foto, gravação ou áudio é enviado.'
 export const LEGAL_CONTACT_EMAIL = 'modusmartinezex@gmail.com'
 export const LEGAL_RESPONSIBLE =
   'Equipe responsável pelo ExamenTech: João Pedro Martinez Landeira, Kenny Nascimento Pires e André Kenzo Narawa Nishiguchi, integrantes do PFC de Engenharia de Software da Universidade de Mogi das Cruzes (UMC).'
@@ -50,8 +50,8 @@ const documentsWithoutPhotos: Record<LegalDocumentType, LegalDocument> = {
         title: '4. Provas de teste e câmera',
         paragraphs: [
           'O aluno com matrícula ativa pode iniciar uma única tentativa por prova publicada no período definido pelo professor. A câmera deve mostrar uma imagem antes de iniciar e permanecer disponível durante a tentativa. Esta versão não grava fotos, vídeo ou áudio, nem compara rostos. A câmera aberta, sozinha, não comprova a identidade de quem responde.',
-          'Se o navegador informar perda da câmera, as questões são ocultadas. Se a falha persistir, a única tentativa é interrompida e não pode ser retomada. Sair pelo botão Encerrar tentativa também impede o retorno. Fechar ou atualizar a aba não oferece novo acesso à prova. Uma imagem preta com a câmera tecnicamente ativa pode exigir que o aluno informe o problema; a detecção automática não cobre todos os dispositivos.',
-          'Antes de iniciar, o aluno recebe um aviso específico e confirma que tomou ciência da câmera, das respostas armazenadas, da tentativa única sem retorno e da Política de Privacidade. O sistema registra a versão do aviso e o horário. Respostas ainda não salvas podem se perder se a conexão ou a câmera falhar.',
+          'Se o navegador informar perda da câmera durante a prova, a falha é registrada e as questões continuam disponíveis, com salvamento e envio das respostas. O aluno pode tentar reconectar a câmera na mesma página. Sair pelo botão Encerrar tentativa também impede o retorno. Fechar ou atualizar a aba não oferece novo acesso à prova. Uma imagem preta com a câmera tecnicamente ativa pode exigir que o aluno informe o problema; a detecção automática não cobre todos os dispositivos.',
+          'Antes de iniciar, o aluno recebe um aviso específico e confirma que tomou ciência da câmera, das respostas armazenadas, da tentativa única sem retorno e da Política de Privacidade. O sistema registra a versão do aviso e o horário. Respostas ainda não salvas podem se perder se a conexão falhar ou a página for fechada antes da confirmação do salvamento.',
         ],
       },
       {
@@ -143,7 +143,7 @@ function updatedLegalDocuments(): Record<LegalDocumentType, LegalDocument> {
     if (section) section.paragraphs = paragraphs
   }
   replace('termos', '4. Provas de teste e câmera', [
-    'O aluno com matrícula ativa pode iniciar uma tentativa por prova publicada dentro da janela definida pelo professor. A câmera deve apresentar imagem antes do início e permanecer disponível. Sair da aba, da janela ou da página interrompe a tentativa, sem retorno automático. A perda persistente do sinal da câmera também interrompe a prova. Uma imagem preta com a câmera tecnicamente ativa pode exigir que o participante informe o problema; nem todo dispositivo permite detectar a falha automaticamente.',
+    'O aluno com matrícula ativa pode iniciar uma tentativa por prova publicada dentro da janela definida pelo professor. A câmera deve apresentar imagem antes do início e permanecer disponível. Sair da aba, da janela ou da página interrompe a tentativa, sem retorno automático. Durante a resolução das questões, a perda do sinal da câmera é registrada sem interromper a prova: as questões, o salvamento e o envio continuam disponíveis. A câmera pode ser reconectada na mesma página. Quando a coleta de fotos está habilitada, a foto inicial precisa ser confirmada antes de liberar as questões. Se essa captura falhar, é necessário recuperar a câmera e preparar a foto novamente; o prazo continua correndo. Uma imagem preta com a câmera tecnicamente ativa pode exigir que o participante informe o problema; nem todo dispositivo permite detectar a falha automaticamente.',
     'O professor responsável e o ADM da mesma organização podem analisar uma interrupção e autorizar excepcionalmente a retomada, com justificativa e tempo definido. A autorização, quem a concedeu e seu uso ficam registrados. As respostas salvas e a ordem das questões são mantidas. Provas já enviadas ou finalizadas pelo prazo não são reabertas por esse procedimento.',
     'Quando o aviso antes da prova informar que a coleta de fotografias está habilitada, será solicitada concordância específica para uma foto inicial e três fotos em momentos aleatórios da tentativa. Não há gravação de vídeo ou áudio nem comparação facial automática. O professor responsável e o ADM da organização podem analisar as imagens manualmente. As fotos não comprovam identidade ou fraude sozinhas. Uma retomada autorizada tem novo aviso e novo ciclo de capturas; um envio antecipado encerra as capturas futuras.',
     'Esta é uma demonstração voluntária, destinada a participantes adultos, sem aplicação de avaliações escolares oficiais. Sem concordar com as fotos, o participante pode cancelar a preparação e continuar usando o painel. A permissão da câmera no navegador não substitui o consentimento específico. Respostas não salvas e capturas cujo envio não foi confirmado podem se perder em uma falha; falha de rede no envio não é classificada como falha da câmera.',

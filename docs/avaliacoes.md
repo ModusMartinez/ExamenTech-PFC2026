@@ -1,8 +1,8 @@
-# Avaliações (019–036)
+# Avaliações (019–037)
 
 Este documento detalha o contrato local até `028_salvar_resposta_tentativa.sql`, incluindo a API de respostas com controle de versão. A `entrega0911` acrescentou a tela de realização, encerramento, fotografias e reativação em `028_respostas_e_encerramento.sql`–`032`; consulte o [fluxo da entrega0911](tentativas-prova.md).
 
-**Integração em andamento:** com `033` e `034`, a API com versão e a tela da entrega0911 gravam em `respostas_tentativa`. O painel chama a API com versão no salvamento individual e no envio final. A `035` retira o acesso da aplicação à assinatura antiga de quatro argumentos. Não executar as duas queries `028` nem reaplicar as anteriores; seguir o diagnóstico do banco e as etapas abaixo. Reativação de tentativas e interrupção por falha da câmera também precisam ser alinhadas à ficha do PFC.
+**Integração em andamento:** com `033` e `034`, a API com versão e a tela da entrega0911 gravam em `respostas_tentativa`. O painel chama a API com versão no salvamento individual e no envio final. A `035` retira o acesso da aplicação à assinatura antiga de quatro argumentos. Não executar as duas queries `028` nem reaplicar as anteriores; seguir o diagnóstico do banco e as etapas abaixo. A `036` registra falhas da câmera; a `037` e o painel atualizado mantêm a prova disponível nesse caso. Reativação e vínculo à sessão inicial ainda precisam ser alinhados à ficha do PFC.
 
 Para conferir o banco, executar [diagnostico-banco-provas.sql](diagnostico-banco-provas.sql) no SQL Editor do projeto configurado no ambiente local, com o papel `postgres`. A consulta identifica as tabelas, colunas e assinaturas das funções dos dois modelos, sem ler respostas nem alterar registros. Guardar o resultado antes de preparar a unificação. A existência dos objetos não confirma que todas as migrations foram aplicadas nem que os dados das duas tabelas coincidem.
 
@@ -12,7 +12,7 @@ RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de 
 
 ## 036 — Registro de falha da câmera
 
-A ficha do PFC, no grupo RF30–RF36, exige registrar a indisponibilidade da câmera sem interromper a tentativa. Aplicar `database/036_registrar_falha_camera.sql` após a `035`. Este bloco prepara o banco; a tela ainda usa o encerramento antigo por câmera. A troca da chamada, a continuidade das respostas e o aviso ao aluno ficam para o próximo bloco.
+A ficha do PFC, no grupo RF30–RF36, exige registrar a indisponibilidade da câmera sem interromper a tentativa. Aplicar `database/036_registrar_falha_camera.sql` após a `035`. O painel usa essa RPC para registrar a falha. A integração completa exige também a `037`, descrita abaixo.
 
 A RPC `registrar_falha_camera(p_tentativa_id UUID, p_solicitacao_id UUID)`:
 
@@ -20,7 +20,7 @@ A RPC `registrar_falha_camera(p_tentativa_id UUID, p_solicitacao_id UUID)`:
 - Registra `CAMERA_FALHA` em `eventos_seguranca`, com ação `falha_camera`, provedor `EXAMENTECH`, aluno da sessão, tentativa e horário do banco. `sucesso=false` indica a falha da câmera. Não recebe texto livre, imagem ou respostas.
 - O cliente gera um UUID por ocorrência e repete o mesmo UUID se perder a confirmação. Isso retorna a confirmação original sem criar outro evento. Uma nova ocorrência usa outro UUID. Reutilizar o identificador de outro evento ou tentativa é recusado.
 - Retorna somente `solicitacao_id`, `tentativa_id` e `registrado_em`. Autorização, situação e prazo são conferidos também no reenvio. Uma tentativa já encerrada não aceita a chamada.
-- Preserva situação, prazo, respostas, ordem e histórico. `falhas_camera` permanece como campo do encerramento antigo; as novas ocorrências ficam nos logs, sem usar esse campo como contador. A função antiga de encerramento continua disponível durante a integração da tela.
+- Preserva situação, prazo, respostas, ordem e histórico. `falhas_camera` permanece como campo do encerramento antigo; as novas ocorrências ficam nos logs, sem usar esse campo como contador. A `037` recusa o motivo `CAMERA` na função de encerramento.
 
 O registro representa uma falha informada pelo navegador/aluno; não comprova fraude ou a causa física da indisponibilidade. Falha ao gravar a auditoria retorna erro, sem confirmar uma ocorrência inexistente. A RPC não concede escrita direta na tabela nem permite ao aluno escolher a identidade registrada.
 
@@ -41,6 +41,35 @@ Esperado: `anon_liberado=false` e `autenticado_liberado=true` nas duas linhas. A
 Teste: `node --test tests/falha-camera-sql.test.ts`. Executa SQL real em PGlite, com sessões simuladas, sem acessar o Supabase. Cobre preservação de dados, reaplicação, repetição, colisão de identificadores, permissões, MFA, isolamento, prazo, falha da auditoria e continuidade do salvamento/envio. PGlite enfileira transações; concorrência entre conexões e a chamada via PostgREST ainda exigem validação integrada.
 
 Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions) e [INSERT / ON CONFLICT no PostgreSQL](https://www.postgresql.org/docs/current/sql-insert.html).
+
+## 037 — Continuidade da prova sem câmera
+
+Aplicar `database/037_camera_sem_interrupcao.sql` depois de `036`, com `031` e `032` já instaladas, junto desta versão do site e da API. A query exige essas estruturas e preserva os registros existentes. Não reaplicar migrations anteriores sobre ela.
+
+- O encerramento aceita apenas `ENVIO`, `PRAZO` e `SAIDA`. `CAMERA` é recusado tanto na entrada pública quanto na implementação privada. Tentativas antigas interrompidas por câmera permanecem no histórico.
+- O aviso da prova passa a `2026-11-08-v3`. Início sem fotos e início com fotos usam essa versão; o consentimento específico de fotos continua `2026-11-08-fotos-v1`.
+- Os Termos passam a `2026-11-08-v7` com fotos/gestão habilitadas (Política `2026-11-08-v5`), ou `2026-11-08-v8` sem essas funcionalidades (Política `2026-11-06-v4`). São versões distintas dos textos apresentados em cada configuração. A trigger confere o par correto nos novos cadastros e preserva os aceites anteriores.
+
+Fluxo no código: `useCameraSession` informa `interrupted` ou `error` → `useCameraIncidents` cria um UUID por episódio → `registrarFalhaCamera` chama a RPC da `036` com a sessão do Supabase → o banco grava `CAMERA_FALHA`. O serviço valida a confirmação e limita a requisição a oito segundos. Não acrescenta dependências. O hook concentra somente a fila e a confirmação das ocorrências, separadas do salvamento de respostas.
+
+A mesma falha contínua gera uma ocorrência. Depois de recuperar a câmera, uma nova falha usa outro UUID. Sem confirmação, **Reenviar ocorrência** usa o identificador original. A fila fica na memória da página; fechar a página pode perder registros ainda não confirmados. O envio final tenta concluir os registros pendentes, mas uma falha de auditoria não impede enviar a prova e é informada ao aluno.
+
+**Reconectar câmera** solicita novamente o dispositivo na mesma tentativa. Questões, respostas, versão e prazo são mantidos. Salvamento automático, salvamento manual e envio funcionam sem câmera. O cronômetro e a regra de saída/foco continuam aplicados. O painel de auditoria oferece o filtro **Falha da câmera**.
+
+Com fotos habilitadas, a foto inicial continua obrigatória no banco e na tela. Se ela falhar, o aluno reconecta e usa **Preparar envio das fotos**; o prazo continua correndo. Essa recuperação reutiliza o plano e os envios pendentes, sem duplicar timers ou uma foto já confirmada. Depois da foto inicial, falhas de captura não ocultam questões nem encerram a prova; os próximos horários permanecem agendados. Capturas que falharam não são inventadas ou substituídas por fotos de outro momento. Falha de upload permanece distinta de falha da câmera.
+
+Teste manual após aplicar a `037`:
+
+1. Executar `npm run dev:full`, iniciar uma avaliação fictícia e aguardar as questões (e a foto inicial, se habilitada).
+2. Responder e clicar em **Minha imagem ficou preta**, sem trocar de aba. As questões e o cronômetro continuam visíveis; aparece o estado da ocorrência e o botão **Reconectar câmera**.
+3. Alterar uma resposta, aguardar **Resposta salva**, reconectar e conferir que o texto permanece. Repetir com uma desconexão física, quando possível, mantendo a página em foco.
+4. Falhar a câmera novamente e enviar a prova sem reconectar. Conferir o encerramento por envio.
+5. Após sair da prova, conferir `CAMERA_FALHA` em `eventos_seguranca`, com `usuario_id` e `recurso_id` da tentativa. Não deve haver `TENTATIVA_INTERROMPIDA` causado por câmera. Conferir as respostas e `FINALIZADA` na tentativa.
+6. Com fotos habilitadas, testar falha na foto inicial: reconectar e preparar a mesma foto; as questões só aparecem após a confirmação.
+
+Validação local: `npm test`, `npm run lint` e `npm run build`. Suítes de banco, RPC, fila de ocorrências, câmera, fotos, respostas e início; testes históricos mantêm os avisos das migrations que exercitam. Navegador conferido em desktop e 390 px com câmera/serviços simulados. Esses testes não validam as permissões físicas do dispositivo nem aplicam queries no Supabase remoto. A parte de continuidade por câmera está implementada; isso não conclui os demais requisitos de execução segura.
+
+Referências: [tempo limite da chamada Supabase](https://supabase.com/docs/reference/javascript/using-modifiers-abortsignal) e [fim do fluxo da câmera](https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrack/ended_event).
 
 ## 033 — Preparação das respostas da entrega0911
 
@@ -93,7 +122,7 @@ O `TentativaMonitoradaPanel` usa esse serviço. As funções antigas de consulta
 - A alternativa é enviada ao selecionar; a dissertativa, após 800 ms sem digitar naquela questão. Editar outra questão não reinicia esse prazo. Carregar respostas existentes não gera novas gravações.
 - Envios são sequenciais. Os campos continuam editáveis durante o salvamento; o texto mais recente fica no formulário e usa a próxima versão após a confirmação anterior. Os botões de gravação e encerramento aguardam a requisição atual. Não há aviso de sucesso para um conteúdo que ainda está pendente.
 - Em falha ou conflito, o envio automático daquela questão pausa, mesmo que o aluno continue editando. Salvar/Reenviar ou o envio final são ações explícitas de nova tentativa. Conferir a resposta do servidor não autoriza uma substituição automática. Outras questões podem continuar sendo salvas.
-- Enviar prova salva as alterações restantes sem aguardar os 800 ms. Falha impede o encerramento por envio. A confirmação do encerramento pausa o temporizador; cancelar volta ao agendamento. Saída, prazo, câmera indisponível e desmontagem do painel impedem novos envios automáticos. As regras atuais de encerramento continuam aplicadas.
+- Enviar prova salva as alterações restantes sem aguardar os 800 ms. Falha impede o encerramento por envio. A confirmação do encerramento pausa o temporizador; cancelar volta ao agendamento. Saída, prazo e desmontagem do painel impedem novos envios automáticos. A indisponibilidade da câmera não impede salvar ou enviar respostas. As regras atuais de encerramento continuam aplicadas.
 
 O agendamento usa um temporizador e `useEffectEvent` do React já instalado para chamar o salvamento com o estado atual. Não acrescenta biblioteca nem muda o contrato da API. Os botões Salvar/Reenviar continuam disponíveis para confirmação manual.
 

@@ -92,8 +92,28 @@ function erroTentativa(code: string | undefined, fallback: string): Error {
   return new Error(fallback)
 }
 
-export async function encerrarTentativa(tentativaId: string, motivo: 'ENVIO' | 'PRAZO' | 'CAMERA' | 'SAIDA'): Promise<EncerramentoTentativa> {
+export async function registrarFalhaCamera(tentativaId: string, solicitacaoId: string) {
+  if (!UUID_PATTERN.test(tentativaId) || !UUID_PATTERN.test(solicitacaoId)) throw new Error('Ocorrência inválida.')
+  const failure = 'Não foi possível confirmar o registro da falha da câmera. Tente reenviar a ocorrência.'
+  let result
+  try {
+    result = await supabase.rpc('registrar_falha_camera', {
+      p_tentativa_id: tentativaId.toLowerCase(), p_solicitacao_id: solicitacaoId.toLowerCase(),
+    }).abortSignal(AbortSignal.timeout(8000)).retry(false)
+  } catch {
+    throw new Error(failure)
+  }
+  if (result.error) throw erroTentativa(result.error.code, failure)
+  const value: unknown = result.data
+  if (!isRecord(value) || value.tentativa_id !== tentativaId.toLowerCase() ||
+      value.solicitacao_id !== solicitacaoId.toLowerCase() || !lerDataComFuso(value.registrado_em)) {
+    throw new Error(failure)
+  }
+}
+
+export async function encerrarTentativa(tentativaId: string, motivo: 'ENVIO' | 'PRAZO' | 'SAIDA'): Promise<EncerramentoTentativa> {
   if (!UUID_PATTERN.test(tentativaId)) throw new Error('Tentativa inválida.')
+  if (!['ENVIO', 'PRAZO', 'SAIDA'].includes(motivo)) throw new Error('Motivo de encerramento inválido.')
   const { data: session, error: sessionError } = await supabase.auth.getSession()
   if (sessionError || !session.session) throw new Error('Sua sessão terminou. Entre novamente.')
   const { data, error } = await supabase.rpc('encerrar_tentativa', {

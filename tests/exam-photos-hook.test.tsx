@@ -11,11 +11,13 @@ let initialize: () => Promise<boolean>
 let retry: () => Promise<boolean>
 let flush: () => Promise<boolean>
 let dispose: () => void
+let prepare: () => Promise<boolean>
 function Harness() {
   const video = useRef<HTMLVideoElement>(null)
   const photos = useExamPhotos(video, services.cameraFailure)
   initialize = () => photos.initialize(attempt)
   retry = photos.retry; flush = photos.flush; dispose = photos.dispose
+  prepare = () => photos.prepare(attempt)
   return <><video ref={video} /><output aria-label="Pendentes">{photos.pending}</output>
     <output aria-label="Inicial pronta">{String(photos.initialReady)}</output>
     <p>{photos.message}</p>{photos.toast && <p role="status">{photos.toast}</p>}
@@ -99,4 +101,43 @@ test('resposta atrasada do plano após desmontar não abre capturas nem envia ar
   await act(async () => { resolvePlan(originalPlan); expect(await initialization!).toBe(false) })
   expect(services.capture).not.toHaveBeenCalled()
   expect(services.send).not.toHaveBeenCalled()
+})
+
+test('recuperação da captura inicial não duplica plano, timers ou uma foto já confirmada', async () => {
+  services.capture.mockRejectedValueOnce(new Error('Sem imagem'))
+  render(<Harness />)
+  await act(async () => { expect(await prepare()).toBe(false) })
+  await act(async () => { expect(await prepare()).toBe(true) })
+  await act(async () => { expect(await prepare()).toBe(true) })
+  expect(services.plan).toHaveBeenCalledTimes(1)
+  expect(services.capture).toHaveBeenCalledTimes(2)
+  expect(services.send).toHaveBeenCalledTimes(1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
+  expect(services.capture.mock.calls.map(call=>call[1])).toEqual(['INICIAL','INICIAL','PROVA_1','PROVA_2','PROVA_3'])
+  await act(async () => { expect(await flush()).toBe(true) })
+})
+
+test('captura posterior indisponível registra falha e mantém as próximas fotos agendadas', async () => {
+  render(<Harness />)
+  await act(async () => { await prepare() })
+  services.capture.mockRejectedValueOnce(new Error('Sem imagem'))
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+  expect(services.cameraFailure).toHaveBeenCalledTimes(1)
+  await act(async () => { await vi.advanceTimersByTimeAsync(20000) })
+  expect(services.capture).toHaveBeenCalledTimes(4)
+  expect(services.send).toHaveBeenCalledTimes(3)
+  expect(screen.getByLabelText('Inicial pronta').textContent).toBe('true')
+  await act(async () => { expect(await flush()).toBe(false) })
+})
+
+test('cliques durante a foto inicial compartilham a preparação e o mesmo envio', async () => {
+  let confirmar!: () => void
+  services.send.mockReturnValueOnce(new Promise<void>(resolve => { confirmar = resolve }))
+  render(<Harness />)
+  let first!: Promise<boolean>
+  await act(async () => { first = prepare(); expect(prepare()).toBe(first) })
+  expect(services.plan).toHaveBeenCalledTimes(1)
+  expect(services.capture).toHaveBeenCalledTimes(1)
+  await act(async () => { confirmar(); expect(await first).toBe(true) })
+  expect(services.send).toHaveBeenCalledTimes(1)
 })

@@ -5,7 +5,7 @@ import { consultarPlanoFotos, enviarFoto } from '../services/examPhotos'
 import type { PhotoPlan, PhotoSlot } from '../services/examPhotos'
 
 type Pending = { slot: PhotoSlot; blob: Blob | null; uploadId: string; sending?: Promise<boolean> }
-type Session = { active: boolean; plan: PhotoPlan; offset: number; captured: Set<string>; pending: Map<string, Pending>;
+type Session = { active: boolean; plan: PhotoPlan; offset: number; captured: Set<string>; failed: Set<string>; pending: Map<string, Pending>;
   timers: number[]; abort: AbortController }
 
 export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptureFailure: () => void) {
@@ -17,6 +17,8 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
   const [initialReady, setInitialReady] = useState(false)
   const [message, setMessage] = useState('')
   const [toast, setToast] = useState('')
+  const preparation = useRef<Promise<boolean> | null>(null)
+  const [preparing, setPreparing] = useState(false)
   useEffect(() => { callback.current = onCaptureFailure }, [onCaptureFailure])
 
   const dispose = useCallback(() => {
@@ -73,6 +75,7 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
       if (!video.current) throw new Error('NO_VIDEO')
       const photo = await capturePhotoFrame(video.current, slot.momento)
       if (!current.active) return false
+      current.failed.delete(slot.id)
       const item = { slot, blob: photo.blob, uploadId: crypto.randomUUID() }
       current.pending.set(slot.id, item)
       setPending(current.pending.size)
@@ -81,6 +84,8 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
       return await send(current, item)
     } catch {
       if (current.active) {
+        current.captured.delete(slot.id)
+        current.failed.add(slot.id)
         setMessage('Não foi possível obter uma imagem da câmera.')
         callback.current()
       }
@@ -98,9 +103,12 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
     const plan = await consultarPlanoFotos(tentativaId)
     if (!mounted.current || generation.current !== currentGeneration) return false
     const current: Session = { active: true, plan, offset: Date.parse(plan.servidor_em) - Date.now(),
-      captured: new Set(), pending: new Map(), timers: [], abort: new AbortController() }
+      captured: new Set(plan.capturas.filter(slot => slot.recebida_em).map(slot => slot.id)),
+      failed: new Set(), pending: new Map(), timers: [], abort: new AbortController() }
     session.current = current
+    setInitialReady(Boolean(plan.capturas[0].recebida_em))
     for (const slot of plan.capturas.slice(1)) {
+      if (slot.recebida_em) continue
       current.timers.push(window.setTimeout(() => { void capture(current, slot) },
         Math.max(0, Date.parse(slot.agendada_em) - (Date.now() + current.offset))))
     }
@@ -114,15 +122,32 @@ export function useExamPhotos(video: RefObject<HTMLVideoElement | null>, onCaptu
     return results.every(Boolean)
   }
 
+  function prepare(tentativaId: string): Promise<boolean> {
+    if (preparation.current) return preparation.current
+    setPreparing(true)
+    const request = (async () => {
+      const current = session.current
+      if (!current?.active || current.plan.tentativa_id !== tentativaId) return initialize(tentativaId)
+      await retry()
+      // Reconectar não consulta outro plano nem duplica os horários já agendados.
+      return capture(current, current.plan.capturas[0])
+    })()
+    preparation.current = request.finally(() => {
+      preparation.current = null
+      if (mounted.current) setPreparing(false)
+    })
+    return preparation.current
+  }
+
   async function flush() {
     const current = session.current
     if (!current?.active) return true
     // A prova pode terminar antes dos horários sorteados; não aguarda fotos futuras.
-    return Promise.race([retry(), new Promise<boolean>(resolve => {
+    return Promise.race([retry().then(confirmed => confirmed && current.failed.size === 0), new Promise<boolean>(resolve => {
       const timer = window.setTimeout(() => { current.abort.signal.removeEventListener('abort', done); resolve(false) }, 8000)
       function done() { window.clearTimeout(timer); resolve(false) }
       current.abort.signal.addEventListener('abort', done, { once: true })
     })])
   }
-  return { initialize, retry, flush, dispose, pending, initialReady, message, toast }
+  return { initialize, prepare, preparing, retry, flush, dispose, pending, initialReady, message, toast }
 }

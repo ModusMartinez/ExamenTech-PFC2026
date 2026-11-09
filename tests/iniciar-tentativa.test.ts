@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import { prepararBancoAvaliacoes } from './helpers/bancoAvaliacoes.ts'
+import { prepararBancoCamera } from './helpers/bancoCamera.ts'
 import { createIniciarTentativaHandler } from '../api/iniciar-tentativa.ts'
 import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
 
@@ -17,13 +17,11 @@ function request(body: unknown, method = 'POST', query = '') {
   })
 }
 
-test('API de início integrada às regras, ao aviso e ao sorteio das queries 025-028', async (t) => {
+test('API de início integrada às regras, ao aviso e ao sorteio das queries até 037', async (t) => {
   const db = new PGlite()
   t.after(() => db.close())
-  const { org, professor, aluno, admin, sessions, queryAs, turmaId, avaliacaoId } = await prepararBancoAvaliacoes(db)
-  for (const file of ['023_publicar_avaliacao.sql', '024_listar_minhas_avaliacoes.sql', '025_iniciar_tentativa.sql', '026_ordem_tentativa.sql', '027_consultar_conteudo_tentativa.sql', '028_respostas_e_encerramento.sql']) {
-    await db.exec(await readFile(new URL(`../database/${file}`, import.meta.url), 'utf8'))
-  }
+  const { org, professor, aluno, admin, sessions, queryAs, turmaId, avaliacaoId } = await prepararBancoCamera(db)
+  await db.exec(await readFile(new URL('../database/037_camera_sem_interrupcao.sql', import.meta.url), 'utf8'))
   async function publicar() {
     const id = (await queryAs<{ avaliacao: { id: string } }>(professor, `SELECT public.criar_avaliacao_rascunho(
       $1,'Prova para início','PROVA',now()-interval '5 minutes',now()+interval '2 hours',60

@@ -11,11 +11,13 @@ O fluxo atual usa as avaliações da equipe: 023 publica, 024 lista, 025 inicia,
 5. As três fotos posteriores não retiram o foco nem bloqueiam as questões. Um aviso no canto inferior direito informa a captura. Falha de envio permite reenviar o mesmo arquivo temporário e identificador, sem criar uma nova foto. É diferente de falha da câmera.
 6. O aluno salva respostas objetivas ou dissertativas. Enviar encerra a tentativa e cancela fotos futuras. Ao vencer o prazo, o estado passa a finalizado; prova finalizada não recebe reativação por esse fluxo.
 
-O aviso base permanece `2026-11-06-v2`, e o consentimento específico das fotos é `2026-11-08-fotos-v1`. Cada ciclo com fotos registra as versões dos documentos e o aceite. Não há fotos no localStorage/IndexedDB; capturas pendentes ficam na memória até envio ou saída.
+Com a `037`, o aviso base é `2026-11-08-v3`, e o consentimento específico das fotos é `2026-11-08-fotos-v1`. Cada ciclo com fotos registra as versões dos documentos e o aceite. Não há fotos no localStorage/IndexedDB; capturas pendentes ficam na memória até envio ou saída.
 
 ## Câmera e permanência
 
-Perder o sinal esconde as questões. Uma interrupção temporária pode voltar dentro de três segundos; se persistir, ou se a faixa de vídeo terminar, a tentativa é interrompida. **Minha imagem ficou preta** permite comunicar uma falha que o navegador não sinalizou. Nem toda câmera virtual ou driver permite detectar uma imagem inútil automaticamente.
+Com `036` e `037`, perder o sinal registra `CAMERA_FALHA` sem ocultar questões ou interromper a tentativa. O aluno pode continuar respondendo, salvar e enviar, ou usar **Reconectar câmera**. Uma falha contínua usa o mesmo identificador; reenvio após perda da confirmação não duplica o log. Se o registro falhar, a tela informa a pendência e oferece **Reenviar ocorrência**. **Minha imagem ficou preta** permite comunicar uma falha que o navegador não sinalizou. Nem toda câmera virtual ou driver permite detectar uma imagem inútil automaticamente.
+
+A foto inicial continua obrigatória quando a coleta está habilitada: se a captura falhar, reconectar e usar **Preparar envio das fotos** na mesma tentativa. O cronômetro continua correndo. Depois da confirmação inicial, falhas nas capturas seguintes não bloqueiam a prova, e os próximos horários são mantidos. Veja o [contrato e roteiro da câmera](avaliacoes.md#037--continuidade-da-prova-sem-câmera).
 
 Sair pelo botão, trocar de aba, ocultar a página ou tirar o foco da janela interrompe sem retorno automático. A tela não identifica qual aplicativo ou área de trabalho foi aberto. Os documentos e as confirmações abrem dentro da página: consultar a Política ou cancelar o envio não deve encerrar a prova.
 

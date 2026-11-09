@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import { EXAM_NOTICE_VERSION } from '../src/content/legalDocuments.ts'
+const EXAM_NOTICE_VERSION = '2026-11-06-v2' // Aviso da migration histórica testada.
 import { prepararBancoAvaliacoes } from './helpers/bancoAvaliacoes.ts'
 
 test('a ponte preserva histórico do protótipo e habilita a tentativa única nova', async (t) => {

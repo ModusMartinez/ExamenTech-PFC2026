@@ -116,13 +116,13 @@ test('início com fotos exige aviso específico e usa a RPC que registra as capt
     const req=new Request(input,init),url=new URL(req.url)
     if(url.pathname==='/auth/v1/user')return Response.json({id:student})
     assert.equal(url.pathname,'/rest/v1/rpc/iniciar_tentativa_com_fotos')
-    assert.deepEqual(await req.json(),{p_avaliacao_id:assessment,p_aviso_versao:'2026-11-06-v2',p_fotos_aviso_versao:'2026-11-08-fotos-v1'})
+    assert.deepEqual(await req.json(),{p_avaliacao_id:assessment,p_aviso_versao:'2026-11-08-v3',p_fotos_aviso_versao:'2026-11-08-fotos-v1'})
     return Response.json({id:attempt,avaliacao_id:assessment,aluno_id:student,situacao:'EM_ANDAMENTO',
       iniciada_em:'2026-11-08T19:00:00Z',limite_em:'2026-11-08T20:00:00Z'})
   }
   const request=(photoNotice?:string)=>new Request('http://localhost/api/iniciar-tentativa', {method:'POST',
     headers:{Authorization:'Bearer student-session','Content-Type':'application/json'},
-    body:JSON.stringify({avaliacao_id:assessment,aviso_versao:'2026-11-06-v2',...(photoNotice?{fotos_aviso_versao:photoNotice}:{})})})
+    body:JSON.stringify({avaliacao_id:assessment,aviso_versao:'2026-11-08-v3',...(photoNotice?{fotos_aviso_versao:photoNotice}:{})})})
   assert.equal((await createIniciarTentativaHandler(env,transport).fetch(request())).status,400)
   assert.equal((await createIniciarTentativaHandler(env,transport).fetch(request('2026-11-08-fotos-v1'))).status,201)
 })

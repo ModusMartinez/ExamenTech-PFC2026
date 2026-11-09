@@ -141,7 +141,7 @@ test('erro ao iniciar continua visível depois da atualização da lista', async
   expect(track.stop).toHaveBeenCalled()
 })
 
-test('simulação local oculta a questão quando a câmera é desconectada sem iniciar tentativa real', async () => {
+test('simulação local mantém a questão quando a câmera é desconectada sem iniciar tentativa real', async () => {
   const { stream, track } = cameraStream()
   getUserMedia.mockResolvedValue(stream)
   render(<ProvasAlunoPanel onLeave={vi.fn()} onActiveChange={vi.fn()} />)
@@ -150,9 +150,9 @@ test('simulação local oculta a questão quando a câmera é desconectada sem i
   fireEvent.click(screen.getByRole('button', { name: 'Iniciar teste local' }))
   expect(screen.getByText('Quanto é 2 + 2?')).toBeTruthy()
   await act(async () => { track.onended?.() })
-  expect(screen.queryByText('Quanto é 2 + 2?')).toBeNull()
-  expect(screen.getByText('Questão oculta')).toBeTruthy()
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Ligar câmera para simulação' })).toBeNull())
+  expect(screen.getByText('Quanto é 2 + 2?')).toBeTruthy()
+  expect(screen.getByText(/A questão continua disponível/)).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Reconectar câmera' })).toBeTruthy()
   await waitFor(() => expect(track.stop).toHaveBeenCalled())
   expect(services.iniciarTentativa).not.toHaveBeenCalled()
 })
