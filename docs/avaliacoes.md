@@ -1,4 +1,4 @@
-# Avaliações (019–035)
+# Avaliações (019–036)
 
 Este documento detalha o contrato local até `028_salvar_resposta_tentativa.sql`, incluindo a API de respostas com controle de versão. A `entrega0911` acrescentou a tela de realização, encerramento, fotografias e reativação em `028_respostas_e_encerramento.sql`–`032`; consulte o [fluxo da entrega0911](tentativas-prova.md).
 
@@ -9,6 +9,38 @@ Para conferir o banco, executar [diagnostico-banco-provas.sql](diagnostico-banco
 O diagnóstico informado na integração confirmou `respostas_tentativa`, consulta, encerramento, reativação e fotos, sem a tabela `respostas` nem a RPC com versão. Para esse banco, a tabela mantida será `respostas_tentativa`. Não executar `028_salvar_resposta_tentativa.sql`; seu contrato abaixo permanece como referência da implementação local anterior.
 
 RF12–RF19 da `Documentacao/FICHA_PFC.docx`: criação, consulta e edição de rascunhos no banco e na API, com formulários para o professor e listagem por turma para professor/admin. Questões têm criação e consulta pela API, formulário de cadastro e listagem por avaliação. Alternativas e gabarito têm banco, API, formulário e consulta por questão objetiva. Publicação tem banco, API, confirmação na interface e listagem das publicadas por turma. Tentativas têm início e consulta no banco/API, confirmação no painel do aluno e exibição do conteúdo na ordem sorteada persistida, sem gabarito. Respostas têm banco, função e API com versão conectada ao painel da entrega0911. O painel salva automaticamente alternativas e dissertativas, com confirmação e reenvio explícito em falhas. As seções abaixo descrevem o contrato local; não representam os RF12–RF19 completos.
+
+## 036 — Registro de falha da câmera
+
+A ficha do PFC, no grupo RF30–RF36, exige registrar a indisponibilidade da câmera sem interromper a tentativa. Aplicar `database/036_registrar_falha_camera.sql` após a `035`. Este bloco prepara o banco; a tela ainda usa o encerramento antigo por câmera. A troca da chamada, a continuidade das respostas e o aviso ao aluno ficam para o próximo bloco.
+
+A RPC `registrar_falha_camera(p_tentativa_id UUID, p_solicitacao_id UUID)`:
+
+- Reutiliza `tentativa_do_aluno`: aluno dono, perfil e organização ativos, sessão válida, MFA, matrícula ativa, turma ativa e avaliação publicada. Aceita somente tentativa em andamento e dentro do prazo.
+- Registra `CAMERA_FALHA` em `eventos_seguranca`, com ação `falha_camera`, provedor `EXAMENTECH`, aluno da sessão, tentativa e horário do banco. `sucesso=false` indica a falha da câmera. Não recebe texto livre, imagem ou respostas.
+- O cliente gera um UUID por ocorrência e repete o mesmo UUID se perder a confirmação. Isso retorna a confirmação original sem criar outro evento. Uma nova ocorrência usa outro UUID. Reutilizar o identificador de outro evento ou tentativa é recusado.
+- Retorna somente `solicitacao_id`, `tentativa_id` e `registrado_em`. Autorização, situação e prazo são conferidos também no reenvio. Uma tentativa já encerrada não aceita a chamada.
+- Preserva situação, prazo, respostas, ordem e histórico. `falhas_camera` permanece como campo do encerramento antigo; as novas ocorrências ficam nos logs, sem usar esse campo como contador. A função antiga de encerramento continua disponível durante a integração da tela.
+
+O registro representa uma falha informada pelo navegador/aluno; não comprova fraude ou a causa física da indisponibilidade. Falha ao gravar a auditoria retorna erro, sem confirmar uma ocorrência inexistente. A RPC não concede escrita direta na tabela nem permite ao aluno escolher a identidade registrada.
+
+Após aplicar, conferir as duas assinaturas e suas permissões no SQL Editor:
+
+```sql
+SELECT assinatura,
+    has_function_privilege('anon', assinatura, 'EXECUTE') AS anon_liberado,
+    has_function_privilege('authenticated', assinatura, 'EXECUTE') AS autenticado_liberado
+FROM (VALUES
+    ('public.registrar_falha_camera(uuid,uuid)'),
+    ('examentech_private.registrar_falha_camera(uuid,uuid)')
+) AS funcoes(assinatura);
+```
+
+Esperado: `anon_liberado=false` e `autenticado_liberado=true` nas duas linhas. A identidade e o acesso são validados dentro da função. O SQL Editor sem sessão de aluno não executa a operação; não é necessário criar ocorrências fictícias no banco real para conferir a instalação.
+
+Teste: `node --test tests/falha-camera-sql.test.ts`. Executa SQL real em PGlite, com sessões simuladas, sem acessar o Supabase. Cobre preservação de dados, reaplicação, repetição, colisão de identificadores, permissões, MFA, isolamento, prazo, falha da auditoria e continuidade do salvamento/envio. PGlite enfileira transações; concorrência entre conexões e a chamada via PostgREST ainda exigem validação integrada.
+
+Referências: [funções e permissões no Supabase](https://supabase.com/docs/guides/database/functions) e [INSERT / ON CONFLICT no PostgreSQL](https://www.postgresql.org/docs/current/sql-insert.html).
 
 ## 033 — Preparação das respostas da entrega0911
 
