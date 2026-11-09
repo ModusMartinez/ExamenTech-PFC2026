@@ -15,11 +15,11 @@ function request(body: unknown, method = 'POST', query = '') {
   })
 }
 
-test('API de respostas integrada à função 034 no banco da entrega0911', async t => {
+test('API de respostas integrada à função 034, com a assinatura antiga bloqueada pela 035', async t => {
   const db = new PGlite()
   t.after(() => db.close())
   const { professor, colega, aluno, admin, turmaId, queryAs } = await prepararBancoExecucao(db)
-  for (const file of ['033_preparar_respostas_com_versao.sql', '034_salvar_resposta_com_versao.sql']) {
+  for (const file of ['033_preparar_respostas_com_versao.sql', '034_salvar_resposta_com_versao.sql', '035_bloquear_resposta_sem_versao.sql']) {
     await db.exec(await readFile(new URL(`../database/${file}`, import.meta.url), 'utf8'))
   }
   const avaliacao = (await queryAs<{ avaliacao: { id: string } }>(professor, `SELECT public.criar_avaliacao_rascunho(

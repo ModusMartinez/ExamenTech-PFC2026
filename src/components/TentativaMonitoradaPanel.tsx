@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useCameraSession } from '../hooks/useCameraSession'
 import type { AvaliacaoAluno } from '../services/avaliacaoValidation'
@@ -30,6 +30,7 @@ type EstadoResposta = {
   pendente?: DadosRespostaTentativa
   conflito?: boolean
   conferida?: boolean
+  falha?: boolean
 }
 
 function valorResposta(resposta?: RespostaTentativa) {
@@ -111,6 +112,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const answerRef = useRef(answers)
   const savedRef = useRef(saved)
   const savingRef = useRef(false)
+  const saveAtRef = useRef<Record<string, number>>({})
   const cameraRef = useRef(cameraStatus)
   const cancelButton = useRef<HTMLButtonElement>(null)
   const withPhotos = photosEnabled()
@@ -297,7 +299,9 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   }
 
   function checkAvailable() {
-    if (!activeRef.current || blockedRef.current || closedRef.current || cameraRef.current !== 'ready') {
+    const current = attemptRef.current
+    if (!activeRef.current || !current || blockedRef.current || closedRef.current ||
+        cameraRef.current !== 'ready' || Date.now() >= Date.parse(current.limite_em)) {
       throw new Error('A tentativa ou a câmera está indisponível.')
     }
   }
@@ -310,10 +314,16 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     try {
       result = await salvarRespostaTentativa(payload)
     } catch (cause) {
-      if (activeRef.current && !blockedRef.current && cause instanceof ErroSalvamentoResposta) {
-        if (cause.codigo === 'CONFLITO') updateResponse(payload.questao_id, { salva: previous.salva, conflito: true })
+      if (activeRef.current && !blockedRef.current) {
+        let failed: EstadoResposta = { ...previous, pendente: payload, falha: true }
+        if (cause instanceof ErroSalvamentoResposta && cause.codigo === 'CONFLITO') {
+          failed = { salva: previous.salva, conflito: true, falha: true }
+        }
         // Uma recusa na repetição não esclarece o resultado do primeiro envio.
-        if (cause.codigo === 'RECUSADA') updateResponse(payload.questao_id, previous)
+        if (cause instanceof ErroSalvamentoResposta && cause.codigo === 'RECUSADA') {
+          failed = { ...previous, falha: true }
+        }
+        updateResponse(payload.questao_id, failed)
       }
       throw cause
     }
@@ -361,16 +371,20 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     }
   }
 
-  async function saveQuestion(question: QuestaoTentativa) {
+  async function saveQuestion(question: QuestaoTentativa, automatic = false) {
     if (savingRef.current || blockedRef.current || cameraRef.current !== 'ready') return
     savingRef.current = true
     setBusyQuestion(question.id)
-    setError('')
-    setNotice('')
+    if (!automatic) {
+      setError('')
+      setNotice('')
+    }
     try {
       await saveAnswer(question)
       checkAvailable()
-      setNotice(`Resposta da questão ${question.ordem} salva.`)
+      if (!automatic && (answerRef.current[question.id] ?? '') === valorResposta(savedRef.current[question.id]?.salva)) {
+        setNotice(`Resposta da questão ${question.ordem} salva.`)
+      }
     } catch (cause) {
       if (activeRef.current && !blockedRef.current) setError(cause instanceof Error ? cause.message : 'Não foi possível salvar a resposta.')
     } finally {
@@ -417,6 +431,37 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     if (!current || blockedRef.current || savingRef.current) return
     await block('SAIDA')
   }
+
+  const handleAnswerChange = useCallback((question: QuestaoTentativa, value: string) => {
+    if (busy || blockedRef.current || closedRef.current) return
+    const next = { ...answerRef.current, [question.id]: value }
+    answerRef.current = next
+    saveAtRef.current[question.id] = Date.now() + (question.tipo === 'DISSERTATIVA' ? 800 : 0)
+    setAnswers(next)
+    setNotice('')
+  }, [busy])
+
+  const saveAutomatically = useEffectEvent((question: QuestaoTentativa) => {
+    void saveQuestion(question, true)
+  })
+
+  useEffect(() => {
+    if (phase !== 'em-andamento' || !conteudo || busy || busyQuestion || confirmation || cameraStatus !== 'ready') return
+    let nextQuestion: QuestaoTentativa | undefined
+    let nextTime = Infinity
+    for (const question of conteudo.questoes) {
+      const state = saved[question.id]
+      if (state?.falha || state?.pendente || state?.conflito || state?.conferida ||
+          (answers[question.id] ?? '') === valorResposta(state?.salva)) continue
+      const time = saveAtRef.current[question.id] ?? Date.now()
+      if (time < nextTime) { nextQuestion = question; nextTime = time }
+    }
+    if (!nextQuestion) return
+    const question = nextQuestion
+    // Um envio por vez. Editar outra questão não reinicia o prazo da primeira.
+    const timer = window.setTimeout(() => saveAutomatically(question), Math.max(0, nextTime - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [answers, saved, conteudo, phase, busy, busyQuestion, confirmation, cameraStatus])
 
   const remaining = tentativa ? Date.parse(tentativa.limite_em) - now : 0
   return <section className="provas-panel tentativa-aluno" aria-labelledby="tentativa-monitorada-title">
@@ -500,16 +545,18 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
               <legend>Resposta da questão {question.ordem}</legend>
               {question.alternativas.map(option => <label key={option.id} className="provas-alternative">
                 <input type="radio" name={`questao-${question.id}`} value={option.id}
-                  checked={answers[question.id] === option.id} disabled={busy || Boolean(busyQuestion)}
-                  onChange={() => { setAnswers(current => ({ ...current, [question.id]: option.id })); setNotice('') }} />
+                  checked={answers[question.id] === option.id} disabled={busy}
+                  onChange={() => handleAnswerChange(question, option.id)} />
                 {option.texto}
               </label>)}
             </fieldset> : <label className="provas-discursiva">Resposta da questão {question.ordem}
-              <textarea value={answers[question.id] ?? ''} maxLength={10000} disabled={busy || Boolean(busyQuestion)}
-                onChange={event => { setAnswers(current => ({ ...current, [question.id]: event.target.value })); setNotice('') }} />
+              <textarea value={answers[question.id] ?? ''} maxLength={10000} disabled={busy}
+                onChange={event => handleAnswerChange(question, event.target.value)} />
             </label>}
             {saved[question.id]?.conflito && <p className="alert error" role="alert">O salvamento foi recusado. Confira a resposta salva antes de reenviar.</p>}
             {saved[question.id]?.pendente && !busyQuestion && !busy && <p role="status">Salvamento sem confirmação. O reenvio confirma a resposta anterior antes de salvar alterações.</p>}
+            {saved[question.id]?.falha && !saved[question.id]?.pendente && !saved[question.id]?.conflito &&
+              <p role="status">Salvamento automático pausado. Tente salvar novamente.</p>}
             {saved[question.id]?.conferida && <div className="provas-aviso">
               <strong>Resposta no servidor</strong>
               <p className="questao-enunciado">{question.tipo === 'OBJETIVA'
@@ -518,7 +565,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
             </div>}
             {saved[question.id]?.conflito && <button type="button" className="turmas-refresh"
               disabled={busy || Boolean(busyQuestion)} onClick={() => void reviewResponse(question)}>Conferir resposta salva</button>}
-            <button type="button" className="turmas-refresh" disabled={busy || Boolean(busyQuestion) || saved[question.id]?.conflito ||
+            <button type="button" className="turmas-refresh" aria-live="polite" disabled={busy || Boolean(busyQuestion) || saved[question.id]?.conflito ||
               (!saved[question.id]?.pendente && (answers[question.id] ?? '') === valorResposta(saved[question.id]?.salva))}
               onClick={() => void saveQuestion(question)}>
               {busyQuestion === question.id ? 'Aguarde...' : saved[question.id]?.pendente ? 'Reenviar resposta'

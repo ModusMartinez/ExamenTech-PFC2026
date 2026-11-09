@@ -79,6 +79,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.restoreAllMocks()
   if (originalMediaDevices) Object.defineProperty(navigator, 'mediaDevices', originalMediaDevices)
   else Reflect.deleteProperty(navigator, 'mediaDevices')
@@ -464,4 +465,184 @@ test('falha na segunda questão preserva texto e não regrava a primeira ao repe
   await waitFor(() => expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO'))
   expect(services.salvarRespostaTentativa.mock.calls.map(([dados]) => dados.questao_id)).toEqual([questao.id, segunda.id, segunda.id])
   expect(services.salvarRespostaTentativa.mock.calls[2][0]).toEqual(services.salvarRespostaTentativa.mock.calls[1][0])
+})
+
+async function avancar(milliseconds: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds) })
+}
+
+function simularTempo() {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+}
+
+test('selecionar alternativa salva automaticamente na próxima versão; carregamento não regrava respostas', async () => {
+  services.consultarRespostasTentativa.mockResolvedValue([respostaSalva({ versao: 4 })])
+  await iniciarProva()
+  simularTempo()
+  await avancar(1000)
+  expect(services.salvarRespostaTentativa).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('radio', { name: '5' }))
+  await avancar(0)
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith({
+    tentativa_id: tentativa.id, questao_id: questao.id, versao: 5, alternativa_id: questao.alternativas[1].id, texto: null,
+  })
+  expect(screen.getByRole('button', { name: 'Resposta salva' })).toBeTruthy()
+  await avancar(5000)
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
+})
+
+test('dissertativa espera 800 ms sem digitar, preserva espaços e salva a limpeza do campo', async () => {
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [{ ...questao, tipo: 'DISSERTATIVA', alternativas: [] }] })
+  await iniciarProva()
+  simularTempo()
+  const campo = screen.getByRole('textbox')
+  fireEvent.change(campo, { target: { value: 'Primeira parte' } })
+  await avancar(799)
+  expect(services.salvarRespostaTentativa).not.toHaveBeenCalled()
+  fireEvent.change(campo, { target: { value: '  Resposta completa\n' } })
+  await avancar(799)
+  expect(services.salvarRespostaTentativa).not.toHaveBeenCalled()
+  await avancar(1)
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ versao: 1, texto: '  Resposta completa\n', alternativa_id: null }))
+  fireEvent.change(campo, { target: { value: '' } })
+  await avancar(800)
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 2, texto: null }))
+})
+
+test('digitação continua durante a requisição e a confirmação antiga não substitui o texto mais recente', async () => {
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [{ ...questao, tipo: 'DISSERTATIVA', alternativas: [] }] })
+  let confirmar!: (resposta: RespostaTentativa) => void
+  services.salvarRespostaTentativa.mockReturnValueOnce(new Promise(resolve => { confirmar = resolve }))
+  await iniciarProva()
+  simularTempo()
+  const campo = screen.getByRole('textbox') as HTMLTextAreaElement
+  campo.focus()
+  fireEvent.change(campo, { target: { value: 'Primeiro texto' } })
+  await avancar(800)
+  expect(campo.disabled).toBe(false)
+  expect(document.activeElement).toBe(campo)
+  fireEvent.change(campo, { target: { value: 'Texto mais recente' } })
+  await avancar(800)
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
+  await act(async () => confirmar(respostaSalva({ alternativa_id: null, texto: 'Primeiro texto' })))
+  expect(campo.value).toBe('Texto mais recente')
+  expect(screen.queryByText('Resposta salva')).toBeNull()
+  await avancar(0)
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ versao: 2, texto: 'Texto mais recente' }))
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(2)
+  expect(document.activeElement).toBe(campo)
+})
+
+test('editar outra questão não adia o salvamento da primeira', async () => {
+  const primeira = { ...questao, tipo: 'DISSERTATIVA', alternativas: [] }
+  const segunda = { ...primeira, id: '50000000-0000-0000-0000-000000000002', ordem: 2, enunciado: 'Explique o resultado.' }
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [primeira, segunda] })
+  await iniciarProva()
+  simularTempo()
+  fireEvent.change(screen.getByRole('textbox', { name: 'Resposta da questão 1' }), { target: { value: 'Primeira' } })
+  await avancar(700)
+  fireEvent.change(screen.getByRole('textbox', { name: 'Resposta da questão 2' }), { target: { value: 'Segunda' } })
+  await avancar(100)
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ questao_id: primeira.id, texto: 'Primeira' }))
+  await avancar(700)
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ questao_id: segunda.id, texto: 'Segunda', versao: 1 }))
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(2)
+})
+
+test.each(['NAO_CONFIRMADA', 'RECUSADA', 'CONFLITO'] as const)('falha automática %s pausa os envios da questão até ação explícita', async codigo => {
+  services.salvarRespostaTentativa.mockRejectedValueOnce(new ErroSalvamentoResposta('Falha simulada.', codigo))
+  await iniciarProva()
+  simularTempo()
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  await avancar(0)
+  expect(screen.getByText('Falha simulada.')).toBeTruthy()
+  fireEvent.click(screen.getByRole('radio', { name: '5' }))
+  await avancar(5000)
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
+  if (codigo === 'CONFLITO') {
+    services.consultarRespostasTentativa.mockResolvedValue([respostaSalva({ versao: 7 })])
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Conferir resposta salva' })) })
+    await avancar(5000)
+    expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
+  }
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: codigo === 'NAO_CONFIRMADA' ? 'Reenviar resposta' : 'Salvar resposta' })) })
+  if (codigo === 'NAO_CONFIRMADA') expect(services.salvarRespostaTentativa.mock.calls[1][0]).toEqual(services.salvarRespostaTentativa.mock.calls[0][0])
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({
+    alternativa_id: questao.alternativas[1].id, versao: codigo === 'CONFLITO' ? 8 : codigo === 'NAO_CONFIRMADA' ? 2 : 1,
+  }))
+  expect((screen.getByRole('radio', { name: '5' }) as HTMLInputElement).checked).toBe(true)
+})
+
+test('envio final salva imediatamente o texto que ainda aguardava o temporizador', async () => {
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [{ ...questao, tipo: 'DISSERTATIVA', alternativas: [] }] })
+  await iniciarProva()
+  simularTempo()
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Texto para enviar' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Enviar e encerrar' })) })
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ versao: 1, texto: 'Texto para enviar' }))
+  expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO')
+  await avancar(5000)
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledTimes(1)
+})
+
+test('envio aguarda a requisição automática em andamento e depois inclui a alteração mais recente', async () => {
+  let confirmar!: (resposta: RespostaTentativa) => void
+  services.salvarRespostaTentativa.mockReturnValueOnce(new Promise(resolve => { confirmar = resolve }))
+  await iniciarProva()
+  simularTempo()
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  await avancar(0)
+  expect((screen.getByRole('button', { name: 'Enviar prova' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('radio', { name: '5' }))
+  await act(async () => confirmar(respostaSalva()))
+  fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Enviar e encerrar' })) })
+  expect(services.salvarRespostaTentativa.mock.calls.map(([dados]) => dados.versao)).toEqual([1, 2])
+  expect(services.salvarRespostaTentativa).toHaveBeenLastCalledWith(expect.objectContaining({ alternativa_id: questao.alternativas[1].id }))
+  expect(services.encerrarTentativa).toHaveBeenCalledExactlyOnceWith(tentativa.id, 'ENVIO')
+})
+
+test.each(['saída', 'câmera', 'desmontagem', 'prazo'])('%s impede o salvamento automático agendado', async motivo => {
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [{ ...questao, tipo: 'DISSERTATIVA', alternativas: [] }] })
+  const { track, unmount } = await iniciarProva()
+  simularTempo()
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Ainda não enviada' } })
+  if (motivo === 'saída') fireEvent(window, new Event('blur'))
+  if (motivo === 'câmera') await act(async () => { track.onended?.() })
+  if (motivo === 'desmontagem') unmount()
+  if (motivo === 'prazo') vi.setSystemTime(new Date(tentativa.limite_em))
+  await avancar(1000)
+  expect(services.salvarRespostaTentativa).not.toHaveBeenCalled()
+})
+
+test('confirmação de encerramento pausa o temporizador e cancelar permite salvar a resposta', async () => {
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [{ ...questao, tipo: 'DISSERTATIVA', alternativas: [] }] })
+  await iniciarProva()
+  simularTempo()
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Texto ainda não enviado' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
+  await avancar(1000)
+  expect(services.salvarRespostaTentativa).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Continuar na prova' }))
+  await avancar(0)
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ texto: 'Texto ainda não enviado' }))
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+})
+
+test('falha em uma questão não impede outra de salvar e não apaga o aviso de erro', async () => {
+  const segunda = { ...questao, id: '50000000-0000-0000-0000-000000000002', tipo: 'DISSERTATIVA', ordem: 2, enunciado: 'Explique o resultado.', alternativas: [] }
+  services.consultarConteudoTentativa.mockResolvedValue({ ...conteudo, questoes: [questao, segunda] })
+  services.salvarRespostaTentativa.mockRejectedValueOnce(new ErroSalvamentoResposta('Falha na primeira questão.', 'NAO_CONFIRMADA'))
+  await iniciarProva()
+  simularTempo()
+  fireEvent.click(screen.getByRole('radio', { name: '4' }))
+  await avancar(0)
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Resposta da segunda' } })
+  await avancar(800)
+  expect(services.salvarRespostaTentativa.mock.calls.map(([dados]) => dados.questao_id)).toEqual([questao.id, segunda.id])
+  expect(screen.getByText('Falha na primeira questão.')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Reenviar resposta' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Resposta salva' })).toBeTruthy()
 })
