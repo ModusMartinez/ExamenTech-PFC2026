@@ -12,6 +12,7 @@ import { MinhasAvaliacoesPanel } from './components/MinhasAvaliacoesPanel'
 import { TurnstileWidget } from './components/TurnstileWidget'
 import { LegalModal } from './components/LegalModal'
 import { LegalFooter } from './components/LegalFooter'
+import { DashboardOverview } from './components/DashboardOverview'
 import { LegalPage } from './components/LegalPage'
 import { TERMS_VERSION, PRIVACY_VERSION } from './content/legalDocuments'
 import type { LegalDocumentType } from './content/legalDocuments'
@@ -1120,7 +1121,7 @@ type DashboardProps = {
 
 function Dashboard({ user, onLogout }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
-  const [dashboardView, setDashboardView] = useState<'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'provas'>('inicio')
+  const [dashboardView, setDashboardView] = useState<'dashboard' | 'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'provas'>('dashboard')
   const [draftsTarget, setDraftsTarget] = useState<string | null>(null)
   const [examActive, setExamActive] = useState(false)
   const [examNotice, setExamNotice] = useState('')
@@ -1200,10 +1201,13 @@ function Dashboard({ user, onLogout }: DashboardProps) {
                 Auditoria
               </button>
             )}
+            <button type="button" disabled={examActive} aria-pressed={dashboardView === 'dashboard'} onClick={() => setDashboardView('dashboard')}>
+              Dashboard
+            </button>
           </nav>
         )}
 
-        {showingAudit ? <AuditPanel /> : dashboardView === 'turmas' &&
+        {dashboardView === 'dashboard' ? <DashboardOverview /> : showingAudit ? <AuditPanel /> : dashboardView === 'turmas' &&
           (user.profile === 'Administrador' || user.profile === 'Professor') ? (
           <TurmasPanel profile={user.profile} initialDraftsTurmaId={draftsTarget} />
         ) : dashboardView === 'nova-avaliacao' && user.profile === 'Professor' ? (
