@@ -20,7 +20,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['api/**/*.ts', 'scripts/**/*.{ts,mjs}', 'tests/**/*.{ts,tsx}'],
+    files: ['api/**/*.ts', 'scripts/**/*.{ts,mjs}', 'tests/**/*.{ts,tsx}', 'supabase/functions/**/*.ts'],
     extends: [js.configs.recommended, tseslint.configs.recommended],
     languageOptions: {
       globals: globals.node,

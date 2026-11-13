@@ -31,7 +31,7 @@ test('auditoria consulta somente campos necessários e limita aos 50 mais recent
   render(<AuditPanel />)
   await screen.findByText('LOGIN_SUCESSO')
   expect(mocks.from).toHaveBeenCalledWith('eventos_seguranca')
-  expect(mocks.select).toHaveBeenCalledWith('id,criado_em,evento,provedor,acao,sucesso,usuario_id,codigos_erro')
+  expect(mocks.select).toHaveBeenCalledWith('id,criado_em,evento,provedor,acao,sucesso,usuario_id,recurso_id,codigos_erro')
   expect(mocks.limit).toHaveBeenCalledWith(50)
   expect(mocks.order).toHaveBeenNthCalledWith(1, 'criado_em', { ascending: false })
   expect(mocks.order).toHaveBeenNthCalledWith(2, 'id', { ascending: false })
@@ -66,6 +66,21 @@ test('atualizar busca novamente e mostra o estado vazio sem manter eventos antig
   await screen.findByText('Nenhum evento encontrado para este filtro.')
   expect(mocks.result).toHaveBeenCalledTimes(2)
   expect(screen.queryByRole('table')).toBeNull()
+})
+
+test.each([
+  ['MATRICULA_SOLICITADA', 'Matrícula solicitada', 'solicitar_matricula'],
+  ['MATRICULA_APROVADA', 'Matrícula aprovada', 'aprovar_matricula'],
+  ['MATRICULA_INATIVADA', 'Matrícula inativada', 'inativar_matricula'],
+])('%s tem filtro, nome legível e referência ao vínculo', async (evento, nome, acao) => {
+  render(<AuditPanel />)
+  await screen.findByText('LOGIN_SUCESSO')
+  mocks.result.mockResolvedValue({ data: [{ ...row, evento, acao, recurso_id: 'matricula-teste' }], error: null })
+  fireEvent.change(screen.getByLabelText('Tipo de evento'), { target: { value: evento } })
+  await screen.findByText(evento)
+  expect(mocks.eq).toHaveBeenCalledWith('evento', evento)
+  expect(screen.getByRole('option', { name: nome })).toBeTruthy()
+  expect(screen.getByText('matricula-teste')).toBeTruthy()
 })
 
 test('carregamento impede cliques repetidos e informa o andamento', async () => {

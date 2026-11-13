@@ -10,9 +10,11 @@
     "dev:full": "node scripts/dev-full.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "node --test tests/*.test.ts && npm run test:ui",
-    "test:ui": "vitest run",
-    "preview": "vite preview"
+    "test": "npm run test:unit && npm run test:integration",
+    "test:ui": "vitest run --pool=vmThreads --no-file-parallelism",
+    "preview": "vite preview",
+    "test:unit": "node --test \"tests/*.unit.test.ts\"",
+    "test:integration": "node --test --test-concurrency=1 \"tests/!(*.unit).test.ts\" && npm run test:ui"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

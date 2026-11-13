@@ -10,6 +10,7 @@ type SecurityEvent = {
   acao: string
   sucesso: boolean
   usuario_id: string | null
+  recurso_id?: string | null
   codigos_erro: string[]
 }
 
@@ -20,6 +21,11 @@ const eventNames: Record<string, string> = {
   TURNSTILE_VALIDADO: 'Turnstile validado',
   TURNSTILE_REJEITADO: 'Turnstile rejeitado',
   TURNSTILE_INDISPONIVEL: 'Turnstile indisponível',
+  TURMA_CRIADA: 'Turma criada',
+  MATRICULA_SOLICITADA: 'Matrícula solicitada',
+  MATRICULA_APROVADA: 'Matrícula aprovada',
+  MATRICULA_INATIVADA: 'Matrícula inativada',
+  CAMERA_FALHA: 'Falha da câmera',
 }
 
 function formatDate(value: string) {
@@ -46,7 +52,7 @@ export function AuditPanel() {
         // A RLS permite leitura somente para ADMIN ativo com MFA.
         // Nenhuma chave secreta ou função de escrita é usada nesta tela.
         let query = supabase.from('eventos_seguranca')
-          .select('id,criado_em,evento,provedor,acao,sucesso,usuario_id,codigos_erro')
+          .select('id,criado_em,evento,provedor,acao,sucesso,usuario_id,recurso_id,codigos_erro')
           .order('criado_em', { ascending: false })
           .order('id', { ascending: false })
           .limit(50)
@@ -126,7 +132,9 @@ export function AuditPanel() {
                       {event.sucesso ? 'Sucesso' : 'Falha / negado'}
                     </span></td>
                     <td>{event.usuario_id ? <code>{event.usuario_id}</code> : 'Sem usuário associado'}</td>
-                    <td>{event.provedor}<small>{event.acao}</small></td>
+                    <td>{event.provedor}<small>{event.acao}</small>
+                      {event.recurso_id && <small>Registro: <code>{event.recurso_id}</code></small>}
+                    </td>
                     <td>{event.codigos_erro.length ? event.codigos_erro.join(', ') : '—'}</td>
                   </tr>
                 ))}

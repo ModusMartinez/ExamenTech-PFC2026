@@ -1,0 +1,8 @@
+# Texto consistente entre Windows e outros ambientes; imagens permanecem binárias.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.pdf binary
+*.docx binary
