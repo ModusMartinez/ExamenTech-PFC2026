@@ -10,17 +10,23 @@ export function DashboardOverview() {
   const [refresh, setRefresh] = useState(0)
   useEffect(() => {
     let active = true
-    setLoading(true); setError('')
     carregarDashboard().then(data => { if (active) setMetrics(data) })
       .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : 'Falha ao carregar dashboard.') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [refresh])
+
+  function reloadDashboard() {
+    setLoading(true)
+    setError('')
+    setRefresh(value => value + 1)
+  }
+
   if (loading) return <section className="dashboard-overview" aria-busy="true"><p role="status">Carregando indicadores...</p></section>
-  if (error || !metrics) return <section className="dashboard-overview"><div className="alert error" role="alert">{error || 'Não foi possível carregar o dashboard.'}</div><button type="button" className="dashboard-refresh" onClick={() => setRefresh(value => value + 1)}>Tentar novamente</button></section>
+  if (error || !metrics) return <section className="dashboard-overview"><div className="alert error" role="alert">{error || 'Não foi possível carregar o dashboard.'}</div><button type="button" className="dashboard-refresh" onClick={reloadDashboard}>Tentar novamente</button></section>
   const charts = [metrics.chart, ...(metrics.additionalCharts ?? [])]
   return <section className="dashboard-overview" aria-label={`Dashboard de ${metrics.profile}`}>
-    <div className="overview-heading"><div><p className="overview-kicker">DASHBOARD · {metrics.profile.toUpperCase()}</p><h2>Indicadores acadêmicos</h2></div><button type="button" className="dashboard-refresh" onClick={() => setRefresh(value => value + 1)}>Atualizar</button></div>
+    <div className="overview-heading"><div><p className="overview-kicker">DASHBOARD · {metrics.profile.toUpperCase()}</p><h2>Indicadores acadêmicos</h2></div><button type="button" className="dashboard-refresh" onClick={reloadDashboard}>Atualizar</button></div>
     <div className="overview-indicators">{metrics.cards.map(card => <article className="overview-indicator-card" key={card.label}><p>{card.label}</p><strong>{card.value.toLocaleString('pt-BR')}</strong></article>)}</div>
     {charts.map(chart => {
       const maximum = Math.max(...chart.items.map(item => item.value), 1)

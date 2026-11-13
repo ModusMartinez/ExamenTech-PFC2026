@@ -393,12 +393,12 @@ test('voltar à janela ainda verifica uma sessão autenticada e nega perfil bloq
     kind: 'ready', user: { name: 'Aluno Teste', email, profile: 'Aluno' },
   })
   render(<App />)
-  await screen.findByRole('heading', { name: 'Olá, Aluno.' })
+  await screen.findByRole('button', { name: 'Sair' })
   mocks.resolveAccess.mockResolvedValue({ kind: 'denied', message: 'Perfil bloqueado.' })
   await runEvent(() => fireEvent.focus(globalThis.window))
   expect(screen.getByText('Perfil bloqueado.')).toBeTruthy()
   expect(screen.getByRole('heading', { name: 'Boas-vindas' })).toBeTruthy()
-  expect(screen.queryByRole('heading', { name: 'Olá, Aluno.' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Sair' })).toBeNull()
 })
 
 test('cadastro compartilhado não permite escolher nem enviar o perfil da conta', async () => {
@@ -416,7 +416,7 @@ for (const profile of ['Professor', 'Aluno', 'Administrador']) {
   test(`painel ${profile}: navegação respeita o perfil e mantém os links legais`, async () => {
     mocks.resolveAccess.mockResolvedValue({ kind: 'ready', user: { name: 'Conta Teste', email, profile } })
     render(<App />)
-    await screen.findByRole('heading', { name: 'Olá, Conta.' })
+    await screen.findByRole('button', { name: 'Sair' })
     expect(screen.getByRole('contentinfo').querySelectorAll('a')).toHaveLength(2)
     expect(screen.getByRole('link', { name: 'Política de Privacidade (abre em nova aba)' }).getAttribute('href')).toBe('/privacidade')
     if (profile === 'Professor') {
@@ -517,7 +517,7 @@ test('link de recuperação passa por MFA e permite definir a nova senha sem abr
   expect(mocks.resolveAccess).toHaveBeenCalledTimes(1)
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar MFA simulado' }))
   await screen.findByRole('heading', { name: 'Crie uma nova senha' })
-  expect(screen.queryByRole('heading', { name: 'Olá, Aluno.' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Sair' })).toBeNull()
 
   fireEvent.change(screen.getByLabelText('Nova senha'), { target: { value: 'NovaSenha123!' } })
   fireEvent.change(screen.getByLabelText('Confirmar nova senha'), { target: { value: 'NovaSenha123!' } })
@@ -541,7 +541,7 @@ test('retorno inicial de recuperação não abre o painel antes do evento do Sup
   await runEvent(() => authCallback('PASSWORD_RECOVERY', session))
   await screen.findByText('Etapa MFA: verify')
   expect(mocks.resolveAccess).not.toHaveBeenCalled()
-  expect(screen.queryByRole('heading', { name: 'Olá, Aluno.' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Sair' })).toBeNull()
 })
 
 for (const [kind, mode] of [['setup-totp', 'setup'], ['verify-totp', 'verify']]) {
