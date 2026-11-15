@@ -4,11 +4,26 @@ import {
   validateInvitationFields,
   validateLoginFields,
   validateRegistrationFields,
+  validateRgm,
+  normalizeRgm,
 } from '../src/services/authValidation.ts'
 
 const email = 'aluno@exemplo.com'
 const organizationCode = 'AbCdEfGhIjKlMnOpQrS_1'
 const invitationCode = 'a'.repeat(64)
+
+test('RGM preserva zeros iniciais e normaliza caixa e espaços externos', () => {
+  assert.equal(normalizeRgm('  00ab-12.3/4_5  '), '00AB-12.3/4_5')
+  assert.equal(validateRgm('  00ab-12.3/4_5  '), null)
+  assert.equal(validateRgm(''), null) // O convite decide se o RGM é obrigatório.
+})
+
+for (const invalid of ['12 34', '<script>', '1\n2', 'A'.repeat(51), 'á123']) {
+  test(`RGM rejeita entrada inválida ${JSON.stringify(invalid)}`, () => {
+    assert.ok(validateRgm(invalid))
+    assert.ok(validateRegistrationFields('Aluno', email, 'senha123', 'senha123', invalid))
+  })
+}
 
 test('login aceita e-mail válido com espaços externos e senha preenchida', () => {
   const result = validateLoginFields(` ${email} `, 'senha123')
@@ -101,7 +116,7 @@ test('convite rejeita código da organização com 20 caracteres em vez de 21', 
 
   const result = validateInvitationFields(shortOrganizationCode, invitationCode)
 
-  assert.equal(result, 'Um dos códigos informados é inválido.')
+  assert.equal(result, 'O código da organização precisa ter 21 caracteres. Foram informados 20.')
 })
 
 test('convite rejeita código individual com caracteres não hexadecimais', () => {
@@ -109,5 +124,18 @@ test('convite rejeita código individual com caracteres não hexadecimais', () =
 
   const result = validateInvitationFields(organizationCode, invalidInvitationCode)
 
-  assert.equal(result, 'Um dos códigos informados é inválido.')
+  assert.equal(result, 'O convite individual contém caracteres inválidos. Copie somente o código gerado para o seu e-mail, sem aspas ou espaços no meio.')
+})
+
+test('convite informa o campo e o tamanho de um código incompleto, sem expor o valor', () => {
+  assert.equal(validateInvitationFields(organizationCode, invitationCode.slice(0, -1)),
+    'O convite individual precisa ter 64 caracteres. Foram informados 63.')
+  assert.equal(validateInvitationFields(invitationCode, organizationCode),
+    'O código da organização precisa ter 21 caracteres. Foram informados 64.')
+})
+
+test('organização rejeita caractere inválido mesmo com tamanho correto e aceita espaços externos', () => {
+  assert.equal(validateInvitationFields('@' + 'A'.repeat(20), invitationCode),
+    'O código da organização contém caracteres inválidos. Copie somente o código, sem aspas ou espaços no meio.')
+  assert.equal(validateInvitationFields(`  ${organizationCode}  `, `  ${invitationCode}  `), null)
 })

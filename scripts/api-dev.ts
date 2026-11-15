@@ -14,6 +14,7 @@ import salvarRespostaTentativaHandler from '../api/salvar-resposta-tentativa.ts'
 import encerrarTentativaHandler from '../api/encerrar-tentativa.ts'
 import fotosTentativaHandler from '../api/fotos-tentativa.ts'
 import limpezaFotosHandler from '../api/limpar-fotos-expiradas.ts'
+import redefinirMfaHandler from '../api/redefinir-mfa.ts'
 
 const MAX_BODY_SIZE = 16 * 1024
 const port = Number(process.env.API_PORT ?? 8787)
@@ -58,6 +59,7 @@ const server = createServer(async (incomingRequest, outgoingResponse) => {
     const handler = url.pathname === '/api/validar-turnstile' ? turnstileHandler
       : url.pathname === '/api/turmas' ? turmasHandler
       : url.pathname === '/api/matriculas' ? matriculasHandler
+      : url.pathname === '/api/redefinir-mfa' ? redefinirMfaHandler
       : url.pathname === '/api/avaliacoes' ? avaliacoesHandler
       : url.pathname === '/api/minhas-avaliacoes' ? minhasAvaliacoesHandler
       : url.pathname === '/api/iniciar-tentativa' ? iniciarTentativaHandler

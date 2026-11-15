@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   resetPasswordForEmail: vi.fn(),
   updateUser: vi.fn(),
   onAuthStateChange: vi.fn(),
+  consultarIngressoAluno: vi.fn(),
 }))
 
 vi.mock('../src/lib/supabase', () => ({
@@ -33,6 +34,8 @@ vi.mock('../src/services/access', () => ({
   resolveAccess: mocks.resolveAccess,
   resolveRecoveryAccess: mocks.resolveRecoveryAccess,
 }))
+vi.mock('../src/services/ingressoAluno', () => ({ consultarIngressoAluno: mocks.consultarIngressoAluno }))
+vi.mock('../src/components/DashboardOverview', () => ({ DashboardOverview: () => <h2>Indicadores acadêmicos</h2> }))
 vi.mock('../src/components/InvitationPanel', () => ({ InvitationPanel: () => null }))
 vi.mock('../src/components/AuditPanel', () => ({ AuditPanel: () => <p>Consulta de auditoria</p> }))
 vi.mock('../src/components/NovaAvaliacaoPanel', () => ({ NovaAvaliacaoPanel: () => <p>Cadastro de rascunho</p> }))
@@ -81,6 +84,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Rede não permitida neste teste.') }))
   mocks.resolveAccess.mockResolvedValue({ kind: 'signed-out' })
   mocks.resolveRecoveryAccess.mockResolvedValue({ kind: 'verified' })
+  mocks.consultarIngressoAluno.mockResolvedValue({ fase: 'LIBERADO', acesso_liberado: true, matriculas_pendentes: 0 })
   mocks.rpc.mockResolvedValue({ data: { ticket: 'ticket-simulado' }, error: null })
   mocks.signUp.mockResolvedValue({ data: { user: session.user, session: null }, error: null })
   mocks.resetPasswordForEmail.mockResolvedValue({ data: {}, error: null })
@@ -120,6 +124,7 @@ async function fillRegistration() {
   await openRegistration()
   for (const [label, value] of [
     ['Nome completo', 'Aluno de teste'],
+    ['RGM', ' 00ab-123 '],
     ['E-mail', email],
     ['Senha', 'SenhaDeTeste123!'],
     ['Confirmar senha', 'SenhaDeTeste123!'],
@@ -284,6 +289,21 @@ test('SIGNED_OUT não fecha um formulário de cadastro que já estava aberto', a
   expect(screen.getByLabelText('Nome completo').getAttribute('value')).toBe('Aluno de teste')
 })
 
+for (const [field, value, message] of [
+  ['Código da organização', 'A'.repeat(20), 'O código da organização precisa ter 21 caracteres. Foram informados 20.'],
+  ['Convite individual', 'b'.repeat(63), 'O convite individual precisa ter 64 caracteres. Foram informados 63.'],
+]) {
+  test(`cadastro identifica ${field} incompleto antes de pedir ticket, sem exibir o código`, async () => {
+    await fillRegistration()
+    fireEvent.change(screen.getByLabelText(field), { target: { value } })
+    fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
+    await screen.findByText(message)
+    expect(mocks.rpc).not.toHaveBeenCalled()
+    expect(mocks.signUp).not.toHaveBeenCalled()
+    expect(screen.getByLabelText(field).getAttribute('value')).toBe(value)
+  })
+}
+
 test('erro de convite permanece visível após renovar o CAPTCHA e voltar à janela', async () => {
   mocks.rpc.mockResolvedValue({ data: null, error: { code: '22023' } })
   await fillRegistration()
@@ -325,8 +345,9 @@ test('sucesso volta ao login com confirmação e limpa o formulário de cadastro
   await screen.findByText('Solicitação recebida. Confira seu e-mail para confirmar o cadastro.')
   expect(screen.getByRole('heading', { name: 'Boas-vindas' })).toBeTruthy()
   expect(screen.getByLabelText('E-mail').getAttribute('value')).toBe(email)
-  expect(mocks.rpc).toHaveBeenCalledWith('preparar_cadastro', {
+  expect(mocks.rpc).toHaveBeenCalledWith('preparar_cadastro_com_rgm', {
     p_email: email, p_codigo_organizacao: 'A'.repeat(21), p_codigo_convite: 'b'.repeat(64),
+    p_rgm: '00AB-123',
   })
   expect(mocks.signUp).toHaveBeenCalledWith(expect.objectContaining({
     email,
@@ -342,7 +363,31 @@ test('sucesso volta ao login com confirmação e limpa o formulário de cadastro
   acceptTerms()
   expect(screen.getByLabelText('E-mail').getAttribute('value')).toBe('')
   expect(screen.getByLabelText('Senha').getAttribute('value')).toBe('')
+  expect(screen.getByLabelText('RGM').getAttribute('value')).toBe('')
 })
+
+test('RGM inválido impede pedir ticket e criar conta', async () => {
+  await fillRegistration()
+  fireEvent.change(screen.getByLabelText('RGM'), { target: { value: '12 34' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
+  expect(screen.getByRole('alert').textContent).toContain('RGM')
+  expect(mocks.rpc).not.toHaveBeenCalled()
+  expect(mocks.signUp).not.toHaveBeenCalled()
+})
+
+for (const [code, message] of [
+  ['P2010', 'Informe o RGM para concluir o cadastro de aluno.'],
+  ['P2011', 'O RGM informado é inválido. Confira o registro fornecido pela instituição.'],
+  ['P2012', 'Este RGM já está cadastrado. Confira com o responsável pela instituição.'],
+]) {
+  test(`cadastro mostra falha de RGM ${code} sem iniciar Auth`, async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code } })
+    await fillRegistration()
+    fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
+    await screen.findByText(message)
+    expect(mocks.signUp).not.toHaveBeenCalled()
+  })
+}
 
 test('SIGNED_IN durante o cadastro não abre MFA antes de terminar a solicitação', async () => {
   let finishSignup!: () => void
@@ -393,6 +438,8 @@ test('voltar à janela ainda verifica uma sessão autenticada e nega perfil bloq
     kind: 'ready', user: { name: 'Aluno Teste', email, profile: 'Aluno' },
   })
   render(<App />)
+  await screen.findByRole('heading', { name: 'Indicadores acadêmicos' })
+  fireEvent.click(screen.getByRole('button', { name: 'Início' }))
   await screen.findByRole('heading', { name: 'Olá, Aluno.' })
   mocks.resolveAccess.mockResolvedValue({ kind: 'denied', message: 'Perfil bloqueado.' })
   await runEvent(() => fireEvent.focus(globalThis.window))
@@ -416,6 +463,8 @@ for (const profile of ['Professor', 'Aluno', 'Administrador']) {
   test(`painel ${profile}: navegação respeita o perfil e mantém os links legais`, async () => {
     mocks.resolveAccess.mockResolvedValue({ kind: 'ready', user: { name: 'Conta Teste', email, profile } })
     render(<App />)
+    await screen.findByRole('heading', { name: 'Indicadores acadêmicos' })
+    fireEvent.click(screen.getByRole('button', { name: 'Início' }))
     await screen.findByRole('heading', { name: 'Olá, Conta.' })
     expect(screen.getByRole('contentinfo').querySelectorAll('a')).toHaveLength(2)
     expect(screen.getByRole('link', { name: 'Política de Privacidade (abre em nova aba)' }).getAttribute('href')).toBe('/privacidade')
@@ -450,17 +499,32 @@ for (const profile of ['Professor', 'Aluno', 'Administrador']) {
       fireEvent.click(screen.getByRole('button', { name: 'Início' }))
     }
     if (profile === 'Administrador') {
+      expect(screen.getByRole('button', { name: 'Redefinir 2FA', exact: true })).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: 'Auditoria' }))
       expect(screen.getByText('Consulta de auditoria')).toBeTruthy()
       expect(screen.getByRole('link', { name: 'Termos de Uso (abre em nova aba)' })).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: 'Início' }))
       expect(screen.getByRole('heading', { name: 'Olá, Conta.' })).toBeTruthy()
     } else {
+      expect(screen.queryByRole('button', { name: 'Redefinir 2FA', exact: true })).toBeNull()
       expect(screen.queryByRole('button', { name: 'Auditoria' })).toBeNull()
       expect(screen.queryByText('Consulta de auditoria')).toBeNull()
     }
   })
 }
+
+test('aluno aguardando a primeira turma acessa matrícula e documentos, sem abrir painel acadêmico', async () => {
+  mocks.resolveAccess.mockResolvedValue({
+    kind: 'ready', user: { name: 'Aluno Teste', email, profile: 'Aluno' },
+  })
+  mocks.consultarIngressoAluno.mockResolvedValue({ fase: 'PENDENTE', acesso_liberado: false, matriculas_pendentes: 1 })
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Ingresso na primeira turma' })
+  await screen.findByRole('button', { name: 'Minhas matrículas' })
+  expect(screen.queryByRole('button', { name: 'Minhas provas' })).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Indicadores acadêmicos' })).toBeNull()
+  expect(screen.getByRole('link', { name: 'Política de Privacidade (abre em nova aba)' })).toBeTruthy()
+})
 
 test('rodapé fica disponível durante a verificação de sessão', () => {
   mocks.resolveAccess.mockReturnValue(new Promise(() => {}))

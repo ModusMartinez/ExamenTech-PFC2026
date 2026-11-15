@@ -13,6 +13,8 @@ import { TurnstileWidget } from './components/TurnstileWidget'
 import { LegalModal } from './components/LegalModal'
 import { LegalFooter } from './components/LegalFooter'
 import { DashboardOverview } from './components/DashboardOverview'
+import { IngressoAlunoGate } from './components/IngressoAlunoGate'
+import { AdminMfaPanel } from './components/AdminMfaPanel'
 import { LegalPage } from './components/LegalPage'
 import { TERMS_VERSION, PRIVACY_VERSION } from './content/legalDocuments'
 import type { LegalDocumentType } from './content/legalDocuments'
@@ -25,6 +27,7 @@ import {
   validateNewPassword,
   validateRecoveryEmail,
   validateRegistrationFields,
+  normalizeRgm,
 } from './services/authValidation'
 import './App.css'
 
@@ -89,6 +92,7 @@ function AccessApp() {
 
   const [name, setName] = useState('')
   const [registerEmail, setRegisterEmail] = useState('')
+  const [registerRgm, setRegisterRgm] = useState('')
   const [registerPassword, setRegisterPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [organizationCode, setOrganizationCode] = useState('')
@@ -482,6 +486,7 @@ function AccessApp() {
       newEmail,
       registerPassword,
       confirmPassword,
+      registerRgm,
     )
 
     if (fieldError) {
@@ -527,18 +532,25 @@ function AccessApp() {
         // O banco troca os códigos por um ticket temporário. A verificação
         // definitiva acontece no gatilho do Auth durante o cadastro.
         const { data: ticketData, error: ticketError } = await supabase.rpc(
-          'preparar_cadastro',
+          'preparar_cadastro_com_rgm',
           {
             p_email: newEmail,
             p_codigo_organizacao: organizationCode.trim(),
             p_codigo_convite: invitationCode.trim(),
+            p_rgm: normalizeRgm(registerRgm),
           },
         )
         const ticket = (ticketData as { ticket?: unknown } | null)?.ticket
 
         if (ticketError || typeof ticket !== 'string' || !ticket) {
           setRegisterError(
-            ticketError?.code === 'P2001'
+            ticketError?.code === 'P2010'
+              ? 'Informe o RGM para concluir o cadastro de aluno.'
+              : ticketError?.code === 'P2011'
+                ? 'O RGM informado é inválido. Confira o registro fornecido pela instituição.'
+                : ticketError?.code === 'P2012'
+                  ? 'Este RGM já está cadastrado. Confira com o responsável pela instituição.'
+                  : ticketError?.code === 'P2001'
               ? 'Muitas tentativas. Aguarde alguns minutos antes de tentar novamente.'
               : ticketError?.code === 'PGRST202' ||
                   ticketError?.code === '42883' ||
@@ -585,6 +597,7 @@ function AccessApp() {
       setPassword('')
       setName('')
       setRegisterEmail('')
+      setRegisterRgm('')
       setRegisterPassword('')
       setConfirmPassword('')
       setOrganizationCode('')
@@ -633,12 +646,15 @@ function AccessApp() {
   }
 
   if (loggedUser) {
-    return (
+    const dashboard = (
       <Dashboard
         user={loggedUser}
         onLogout={handleLogout}
       />
     )
+    return loggedUser.profile === 'Aluno'
+      ? <IngressoAlunoGate onLogout={handleLogout}>{dashboard}</IngressoAlunoGate>
+      : dashboard
   }
 
   return (
@@ -972,6 +988,23 @@ function AccessApp() {
                 </div>
 
                 <div className="input-group">
+                  <label htmlFor="register-rgm">RGM</label>
+                  <input
+                    id="register-rgm"
+                    type="text"
+                    disabled={loading}
+                    value={registerRgm}
+                    onChange={(event) => setRegisterRgm(event.target.value)}
+                    autoComplete="off"
+                    maxLength={50}
+                    aria-describedby="register-rgm-help"
+                  />
+                  <p id="register-rgm-help" className="form-note">
+                    Registro acadêmico obrigatório para aluno. Professores podem deixar este campo vazio.
+                  </p>
+                </div>
+
+                <div className="input-group">
                   <label htmlFor="register-password">
                     Senha
                   </label>
@@ -1018,10 +1051,14 @@ function AccessApp() {
                         autoCorrect="off"
                         spellCheck={false}
                         maxLength={128}
+                        aria-describedby="organization-code-help"
                         disabled={loading}
                         value={organizationCode}
                         onChange={(event) => setOrganizationCode(event.target.value)}
                       />
+                      <p id="organization-code-help" className="form-note">
+                        São 21 caracteres. Preserve as letras maiúsculas e minúsculas do código da organização.
+                      </p>
                     </div>
 
                     <div className="input-group">
@@ -1034,10 +1071,14 @@ function AccessApp() {
                         autoCorrect="off"
                         spellCheck={false}
                         maxLength={128}
+                        aria-describedby="invitation-code-help"
                         disabled={loading}
                         value={invitationCode}
                         onChange={(event) => setInvitationCode(event.target.value)}
                       />
+                      <p id="invitation-code-help" className="form-note">
+                        Copie os 64 caracteres do convite gerado para este e-mail. O código de ingresso da turma será usado depois do cadastro.
+                      </p>
                     </div>
 
                     <p className="security-note">
@@ -1121,7 +1162,7 @@ type DashboardProps = {
 
 function Dashboard({ user, onLogout }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
-  const [dashboardView, setDashboardView] = useState<'dashboard' | 'inicio' | 'auditoria' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'provas'>('dashboard')
+  const [dashboardView, setDashboardView] = useState<'dashboard' | 'inicio' | 'auditoria' | 'mfa' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'provas'>('dashboard')
   const [draftsTarget, setDraftsTarget] = useState<string | null>(null)
   const [examActive, setExamActive] = useState(false)
   const [examNotice, setExamNotice] = useState('')
@@ -1197,6 +1238,11 @@ function Dashboard({ user, onLogout }: DashboardProps) {
               </button>
             )}
             {user.profile === 'Administrador' && (
+              <button type="button" aria-pressed={dashboardView === 'mfa'} onClick={() => setDashboardView('mfa')}>
+                Redefinir 2FA
+              </button>
+            )}
+            {user.profile === 'Administrador' && (
               <button type="button" disabled={examActive} aria-pressed={dashboardView === 'auditoria'} onClick={() => setDashboardView('auditoria')}>
                 Auditoria
               </button>
@@ -1207,7 +1253,7 @@ function Dashboard({ user, onLogout }: DashboardProps) {
           </nav>
         )}
 
-        {dashboardView === 'dashboard' ? <DashboardOverview /> : showingAudit ? <AuditPanel /> : dashboardView === 'turmas' &&
+        {dashboardView === 'dashboard' ? <DashboardOverview /> : showingAudit ? <AuditPanel /> : dashboardView === 'mfa' && user.profile === 'Administrador' ? <AdminMfaPanel /> : dashboardView === 'turmas' &&
           (user.profile === 'Administrador' || user.profile === 'Professor') ? (
           <TurmasPanel profile={user.profile} initialDraftsTurmaId={draftsTarget} />
         ) : dashboardView === 'nova-avaliacao' && user.profile === 'Professor' ? (
