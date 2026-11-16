@@ -34,6 +34,18 @@ test('039 corrige tentativas finalizadas e protege a nota e a revisão das disse
   await encerrar(antiga, 'ENVIO')
   await db.exec(await migracao('039_correcao_tentativa'))
   assert.equal((await consultar(antiga)).nota, 0)
+  for (const nome of ['040_finalizacao_e_resultados', '050_dashboard_periodo',
+    '051_dashboard_ocorrencias_e_agenda', '053_dashboard_correcoes_professor']) {
+    await db.exec(await migracao(nome))
+  }
+  const indicadores = async (pessoa = professor, inicio: string | null = null, fim: string | null = null) =>
+    (await queryAs<{ dashboard: { indicadores_correcoes?: { rotulo: string; valor: number }[] } }>(
+      pessoa, 'SELECT public.consultar_indicadores_dashboard_periodo($1, $2) AS dashboard', [inicio, fim]
+    )).rows[0].dashboard.indicadores_correcoes
+  const totais = (pendentes: number, concluidas: number) => [
+    { rotulo: 'Correções pendentes', valor: pendentes },
+    { rotulo: 'Correções concluídas', valor: concluidas },
+  ]
 
   const { id: avaliacao } = (await queryAs<{ id: string }>(professor, `SELECT public.criar_avaliacao_rascunho(
     $1,'Prova para correção','PROVA',now()-interval '1 minute',now()+interval '1 hour',20
@@ -61,6 +73,7 @@ test('039 corrige tentativas finalizadas e protege a nota e a revisão das disse
 
   await t.test('apenas tentativa finalizada tem correção, sem vazar nota ou gabarito ao aluno', async () => {
     await assert.rejects(consultar(id), { code: '55000' })
+    assert.deepEqual(await indicadores(), totais(0, 1))
     const resultado = await queryAs(aluno, 'SELECT public.consultar_conteudo_tentativa($1,$2)', [id, chave])
     assert.doesNotMatch(JSON.stringify(resultado.rows), /gabarito|correta"\s*:/i)
     await encerrar(id, 'ENVIO')
@@ -72,6 +85,15 @@ test('039 corrige tentativas finalizadas e protege a nota e a revisão das disse
     assert.equal(pendente.pontos_totais, 12)
     assert.equal(pendente.nota, null)
     assert.equal(pendente.pendentes, 1)
+    assert.deepEqual(await indicadores(), totais(1, 1))
+    assert.deepEqual(await indicadores(colega), totais(0, 0))
+    assert.equal(await indicadores(aluno), undefined)
+    assert.equal(await indicadores(admin), undefined)
+    const { dia } = (await db.query<{ dia: string }>(
+      "SELECT (encerrada_em AT TIME ZONE 'America/Sao_Paulo')::date::text AS dia FROM public.tentativas WHERE id=$1", [id]
+    )).rows[0]
+    assert.deepEqual(await indicadores(professor, dia, dia), totais(1, 1))
+    assert.deepEqual(await indicadores(professor, null, '2000-01-01'), totais(0, 0))
     for (const pessoa of [aluno, colega, admin]) {
       await assert.rejects(consultar(id, pessoa), { code: '42501' })
       await assert.rejects(corrigir(id, questoes[3], 1, null, 0, pessoa), { code: '42501' })
@@ -88,6 +110,7 @@ test('039 corrige tentativas finalizadas e protege a nota e a revisão das disse
     await assert.rejects(corrigir(id, questoes[3], 3.25, 'x'.repeat(2001), 0), { code: '23514' })
     const nota = await corrigir(id, questoes[3], 3.25, ' Boa justificativa ', 0)
     assert.equal(nota.pendentes, 0)
+    assert.deepEqual(await indicadores(), totais(0, 2))
     assert.equal(nota.pontos_obtidos, 5.75)
     assert.equal(nota.nota, 4.79)
     assert.equal(nota.questoes[3].comentario, 'Boa justificativa')

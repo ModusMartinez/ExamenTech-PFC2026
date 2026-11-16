@@ -63,6 +63,12 @@ export async function carregarDashboard(periodo: { inicio: string | null; fim: s
   }
   if (profile === 'Professor') {
     if (!Array.isArray(result.grafico_ocorrencias)) throw new Error('A distribuição de ocorrências está inválida. Confirme se a migração 051 foi aplicada.')
+    if (result.indicadores_correcoes !== undefined) {
+      if (!Array.isArray(result.indicadores_correcoes) || result.indicadores_correcoes.length !== 2) {
+        throw new Error('Os indicadores de correção estão inválidos.')
+      }
+      cards.push(...result.indicadores_correcoes.map(parseCount))
+    }
     additionalCharts.push({ title: 'Ocorrências registradas por tipo', items: result.grafico_ocorrencias.map(parseCount), kind: 'pie' })
   }
   let nextExam: DashboardMetrics['nextExam']
