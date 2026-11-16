@@ -2,6 +2,11 @@
 
 Base: ZIP da branch `entrega0911`, com dashboard e migrações até 044. Esta atualização prepara código e SQL locais; a aplicação das migrações e a publicação são realizadas separadamente pela equipe.
 
+## Diagramas de identidade e acesso
+
+- **Cadastro por convite com RGM** ([PNG](diagramas/identidade-acesso/cadastro-por-convite.png), [BPMN](diagramas/identidade-acesso/cadastro-por-convite.bpmn)).
+- **Login com MFA e liberação após a primeira matrícula aprovada** ([PNG](diagramas/identidade-acesso/login-e-controle-de-acesso.png), [BPMN](diagramas/identidade-acesso/login-e-controle-de-acesso.bpmn)).
+
 ## Cadastro e RGM
 
 O convite continua determinando organização e perfil; o formulário não permite escolher privilégios. Para alunos novos, o RGM é obrigatório. Professores não recebem RGM discente. Contas anteriores sem RGM permanecem válidas.

@@ -129,14 +129,36 @@ O CAPTCHA de login/cadastro é enviado ao Supabase Auth em `captchaToken`; confi
 
 `main` guarda a documentação principal; `desenv` reúne o desenvolvimento. As branches `entrega1409` e `entrega2809` representam entregas anteriores. A integração de novembro será revisada na branch `entrega0911`. O [fluxograma atual](docs/fluxo-prova-monitorada.md) descreve sessão, câmera e fotografias dessa etapa.
 
+### BPMN atualizados — Entrega de 16/11
+
+Os diagramas de identidade e acesso representam as regras de RGM e primeira matrícula das migrações 045 e 047. Use os PNGs para a monografia e os arquivos `.bpmn` para editar os modelos.
+
+#### Cadastro por convite
+
+O convite define perfil e organização. O sistema valida o RGM de novos alunos e vincula o valor ao ticket de cadastro.
+
+![Cadastro por convite com validação de RGM do aluno](docs/diagramas/identidade-acesso/cadastro-por-convite.png)
+
+[Modelo BPMN do cadastro](docs/diagramas/identidade-acesso/cadastro-por-convite.bpmn)
+
+#### Login e controle de acesso
+
+Depois do MFA, o sistema verifica o perfil e consulta o ingresso do aluno. Alunos que ainda não tiveram matrícula aprovada podem solicitar ou acompanhar a matrícula e usar **Verificar liberação** para consultar a aprovação.
+
+![Login com MFA e verificação da primeira matrícula após validar o perfil](docs/diagramas/identidade-acesso/login-e-controle-de-acesso.png)
+
+[Modelo BPMN do login](docs/diagramas/identidade-acesso/login-e-controle-de-acesso.bpmn)
+
+### BPMN — Entrega de 28/09 (histórico)
+
 Os diagramas abaixo descrevem a entrega de **28/09**, não incluem fotografias e reativação de novembro:
 
 ![Cadastro por convite — entrega 28/09](examentech-entrega2809-cadastro.png)
 
-[Arquivo BPMN de cadastro](examentech-entrega2809-cadastro.bpmn)
+[Arquivo BPMN de cadastro de 28/09](https://github.com/ModusMartinez/ExamenTech-PFC2026/blob/26b53174b624ffe74ee46498d77797ba591f2165/examentech-entrega2809-cadastro.bpmn)
 
 ![Login e controle de acesso — entrega 28/09](examentech-entrega2809-acesso.png)
 
-[Arquivo BPMN de acesso](examentech-entrega2809-acesso.bpmn)
+[Arquivo BPMN de acesso de 28/09](https://github.com/ModusMartinez/ExamenTech-PFC2026/blob/26b53174b624ffe74ee46498d77797ba591f2165/examentech-entrega2809-acesso.bpmn)
 
 Os arquivos PNG permitem visualização no GitHub; BPMN é o formato editável. A documentação acadêmica e os diagramas devem acompanhar o escopo implementado na próxima revisão da equipe.
