@@ -1,6 +1,6 @@
 # Fluxo da prova com sessão e fotografias
 
-Fluxograma da implementação da `entrega0911` com as regras da migração 043. O fluxo monitorado se aplica a Provas. Atividades usam a tentativa única sem câmera, tela cheia ou bloqueio da área de transferência. A simulação local continua separada da tentativa real.
+Fluxograma das Provas monitoradas com as regras das migrações 043 e 052. Atividades usam a tentativa única sem câmera, tela cheia ou bloqueio da área de transferência. A simulação local continua separada da tentativa real.
 
 ## 1. Preparação e início
 
@@ -46,8 +46,11 @@ flowchart TD
     G --> B
     C -->|Copiar, colar ou recortar| P["Bloquear operação e registrar o tipo; manter a execução"]
     P --> B
-    C -->|Sair da tela cheia, trocar aba ou perder foco| Q["Interromper e registrar a causa"]
-    Q --> I["Bloquear a execução e cancelar capturas e salvamentos futuros"]
+    C -->|Sair da tela cheia, trocar aba ou perder foco| Q["Pausar a interação e registrar a causa na linha do tempo"]
+    Q -->|Aluno confirma e volta à aba em tela cheia| B
+    Q -->|Prazo termina| K
+    Q -->|Professor cancela a avaliação| R
+    Q -->|Saída, recarga ou perda de conexão detectada| I["Bloquear a execução e cancelar capturas e salvamentos futuros"]
     C -->|Saída, recarga ou perda de conexão detectada| I
     C -->|Aluno confirma envio| J["Salvar respostas preenchidas e tentar concluir envios pendentes"]
     J --> K["Finalizar tentativa; parar câmera e cancelar capturas futuras"]
@@ -85,6 +88,7 @@ Não há gravação contínua de áudio ou vídeo, reconhecimento facial nem ide
 - `src/components/TentativasResponsavelPanel.tsx`: consulta pelo responsável.
 - `database/038_tentativa_sessao.sql`: vínculo com a sessão inicial e bloqueio de retomada.
 - `database/043_execucao_segura_prova.sql` exige a foto inicial e registra ocorrências.
+- `database/052_pausa_prova.sql` registra a pausa na mesma tentativa.
 - `database/031_fotos_tentativa.sql`: consentimentos, horários, autorização das imagens e retenção.
 - `supabase/functions/examentech-limpar-fotos/index.ts`: remoção dos arquivos elegíveis.
 

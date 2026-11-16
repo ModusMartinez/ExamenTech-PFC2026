@@ -138,7 +138,7 @@ Teste manual com as migrações até 038 aplicadas e `npm run dev:full`:
 4. Digitar e usar Enviar prova antes da pausa de 800 ms, confirmando o encerramento. Se houver uma requisição em andamento, aguardar o botão ficar disponível.
 5. Depois de sair da prova, conferir em `respostas_tentativa` o conteúdo final, a versão crescente e o mesmo ID/data inicial. Conferir também os eventos de salvamento e encerramento.
 
-Não trocar de aba ou abrir ferramentas que tirem o foco durante o teste real: a regra atual interrompe a tentativa. Falhas de rede, conflitos e confirmações tardias são cobertos nos testes simulados.
+O comportamento de foco deste roteiro é o da migração 038. Para conferir a pausa introduzida pela 052, siga a [homologação da execução segura](tentativas-prova.md#homologação-da-execução-segura). Falhas de rede, conflitos e confirmações tardias são cobertos nos testes simulados.
 
 Teste local: `npm run test:ui -- tests/respostas-service.test.tsx tests/tentativas-service.test.tsx tests/tentativa-monitorada.test.tsx tests/tentativa-com-fotos.test.tsx`. Sessão, RPC e HTTP simulados; não acessa o Supabase remoto. Cobre consulta, erros, versões, limpeza, confirmação divergente, reenvio após falha, pausa na digitação, edição durante requisição lenta, ordem dos envios, envio final e cancelamento dos temporizadores.
 

@@ -12,7 +12,7 @@ import { useExamPhotos } from '../hooks/useExamPhotos'
 import { photosEnabled } from '../services/examFeatures'
 import { PHOTO_NOTICE, PHOTO_NOTICE_VERSION } from '../services/examPhotos'
 import { ErroAcessoTentativa, ErroConexaoTentativa } from '../services/tentativaValidation'
-import type { ConteudoTentativa, MotivoSaidaTentativa, QuestaoTentativa, TentativaIniciada } from '../services/tentativaValidation'
+import type { ConteudoTentativa, MotivoPausaProva, QuestaoTentativa, TentativaIniciada } from '../services/tentativaValidation'
 import { EXAM_NOTICE_VERSION, PROVA_NOTICE_VERSION } from '../content/legalDocuments'
 import type { LegalDocumentType } from '../content/legalDocuments'
 import { LegalModal } from './LegalModal'
@@ -27,7 +27,7 @@ type Props = {
 }
 
 type Phase = 'preparo' | 'iniciando' | 'em-andamento' | 'bloqueada' | 'falhou'
-type BlockReason = MotivoSaidaTentativa | 'PRAZO' | 'CONEXAO' | 'ACESSO' | 'CANCELAMENTO'
+type BlockReason = 'SAIDA' | 'PRAZO' | 'CONEXAO' | 'ACESSO' | 'CANCELAMENTO'
 type Confirmation = 'ENVIO' | 'SAIDA'
 type EstadoResposta = {
   salva?: RespostaTentativa
@@ -50,12 +50,10 @@ function conferirQuestao(resposta: RespostaTentativa, questoes: QuestaoTentativa
   }
 }
 
-const DEPARTURE_WARNING = 'Permaneça nesta página e nesta aba. Sair, atualizar a página, perder o foco ou ficar sem conexão interrompe sua única tentativa. A tentativa não pode ser retomada.'
-const MONITORING_NOTICE = 'A prova exige tela cheia. Sair da tela cheia encerra a tentativa. Copiar, colar e recortar são bloqueados. O sistema registra o tipo e o horário dessas ocorrências, sem coletar o conteúdo da área de transferência.'
+const DEPARTURE_WARNING = 'Sair, atualizar a página ou ficar sem conexão encerra sua tentativa.'
+const MONITORING_NOTICE = 'Trocar de aba, perder o foco da janela ou sair da tela cheia pausa a prova e registra uma ocorrência. Para continuar, volte a esta aba e confirme a tela cheia. O tempo continua correndo. Copiar, colar e recortar são bloqueados e registrados.'
 const BLOCK_MESSAGES: Record<BlockReason, string> = {
   SAIDA: 'Você saiu da avaliação. A tentativa não pode ser retomada. Procure seu professor ou responsável se precisar de orientação.',
-  ABA_OU_FOCO: 'A aba ou janela da prova perdeu o foco. A tentativa não pode ser retomada. As respostas recebidas ficam salvas.',
-  TELA_CHEIA: 'A tela cheia foi encerrada. A tentativa não pode ser retomada. As respostas recebidas ficam salvas.',
   CONEXAO: 'A conexão foi interrompida. A tentativa não pode ser retomada. As respostas recebidas pelo sistema ficam salvas.',
   ACESSO: 'A sessão desta tentativa ficou indisponível. A tentativa não pode ser retomada.',
   PRAZO: 'O prazo terminou. As respostas recebidas pelo sistema ficam salvas.',
@@ -110,6 +108,9 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const [notice, setNotice] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const [blockReason, setBlockReason] = useState<BlockReason | null>(null)
+  const [pausada, setPausada] = useState(false)
+  const [continuando, setContinuando] = useState(false)
+  const [pausaError, setPausaError] = useState('')
   const [noticeAcknowledged, setNoticeAcknowledged] = useState(false)
   const [photosAcknowledged, setPhotosAcknowledged] = useState(false)
   const [legalDocument, setLegalDocument] = useState<LegalDocumentType | null>(null)
@@ -124,6 +125,8 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const closedRef = useRef(false)
   const blockReasonRef = useRef<BlockReason | null>(null)
   const blockedRef = useRef(false)
+  const motivosPausa = useRef(new Set<MotivoPausaProva>())
+  const continuandoRef = useRef(false)
   const attemptRef = useRef<TentativaIniciada | null>(null)
   const answerRef = useRef(answers)
   const savedRef = useRef(saved)
@@ -131,6 +134,8 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const saveAtRef = useRef<Record<string, number>>({})
   const cancelButton = useRef<HTMLButtonElement>(null)
   const blockHeading = useRef<HTMLHeadingElement>(null)
+  const pauseHeading = useRef<HTMLHeadingElement>(null)
+  const examHeading = useRef<HTMLHeadingElement>(null)
   const prova = avaliacao.tipo === 'PROVA'
   const withPhotos = prova && photosEnabled()
   const allAcknowledged = noticeAcknowledged && (!prova || photosAcknowledged)
@@ -162,6 +167,9 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   useEffect(() => {
     if (phase === 'bloqueada') blockHeading.current?.focus()
   }, [phase, blockReason])
+  useEffect(() => {
+    if (pausada) pauseHeading.current?.focus()
+  }, [pausada])
   useEffect(() => {
     if (!tentativa || phase !== 'em-andamento') return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -205,6 +213,8 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     if (!blockedRef.current || reason === 'CANCELAMENTO') {
       blockReasonRef.current = reason
       blockedRef.current = true
+      motivosPausa.current.clear()
+      setPausada(false)
       disposePhotos()
       stop()
       sairTelaCheia()
@@ -250,11 +260,62 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     void block('PRAZO')
   }, [phase, tentativa, now, block])
 
+  function pausar(motivo: MotivoPausaProva) {
+    if (motivosPausa.current.has(motivo)) return
+    motivosPausa.current.add(motivo)
+    setPausada(true)
+    setPausaError('')
+    setConfirmation(null)
+    setLegalDocument(null)
+    if (attemptRef.current) ocorrencias.registrarPausa(attemptRef.current.id, motivo)
+  }
+
   useEventosExecucao(
-    motivo => { if (startingRef.current && !blockedRef.current) void block(motivo) },
+    motivo => {
+      if (!startingRef.current || blockedRef.current || closedRef.current) return
+      if (motivo === 'SAIDA' || motivo === 'CONEXAO') void block(motivo)
+      else pausar(motivo)
+    },
     () => { if (blockReasonRef.current) void block(blockReasonRef.current) },
     { saida: 'SAIDA', foco: prova ? 'ABA_OU_FOCO' : 'SAIDA', telaCheia: prova ? 'TELA_CHEIA' : undefined },
   )
+
+  async function continuarProva() {
+    const current = attemptRef.current
+    if (!current || !motivosPausa.current.size || blockedRef.current || closedRef.current || continuandoRef.current || busy) return
+    if (!navigator.onLine) return void block('CONEXAO')
+    if (Date.now() >= Date.parse(current.limite_em)) return void block('PRAZO')
+    if (document.visibilityState === 'hidden' || !document.hasFocus()) {
+      setPausaError('Volte para esta aba para continuar.')
+      return
+    }
+
+    continuandoRef.current = true
+    setContinuando(true)
+    setPausaError('')
+    try {
+      // A solicitação precisa ocorrer no gesto do aluno, antes de aguardar o banco.
+      if (document.fullscreenElement !== document.documentElement) {
+        await document.documentElement.requestFullscreen()
+      }
+      const registrada = await ocorrencias.retry()
+      if (!activeRef.current || blockedRef.current || closedRef.current) return
+      if (Date.now() >= Date.parse(current.limite_em)) return void block('PRAZO')
+      if (!registrada) return
+      if (document.fullscreenElement !== document.documentElement || !document.hasFocus() || document.hidden) {
+        setPausaError('Volte para esta aba em tela cheia para continuar.')
+        return
+      }
+      motivosPausa.current.clear()
+      setPausada(false)
+      examHeading.current?.focus()
+    } catch {
+      if (activeRef.current && !blockedRef.current) setPausaError('Permita a tela cheia e tente continuar novamente.')
+    } finally {
+      continuandoRef.current = false
+      if (activeRef.current) setContinuando(false)
+    }
+  }
 
   useEffect(() => {
     // Mantém os documentos do rodapé acessíveis durante a tentativa,
@@ -316,6 +377,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       setTentativa(started)
       setNow(() => Date.now())
       setPhase('em-andamento')
+      for (const motivo of motivosPausa.current) ocorrencias.registrarPausa(started.id, motivo)
       if (withPhotos) {
         const ready = await photos.prepare(started.id, chaveExecucao)
         if (!activeRef.current || blockedRef.current || !ready) return
@@ -326,6 +388,8 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       if (activeRef.current && !blockedRef.current) {
         if (!attemptRef.current) {
           startingRef.current = false
+          motivosPausa.current.clear()
+          setPausada(false)
           sairTelaCheia()
           stop()
         }
@@ -337,7 +401,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
 
   async function retryPhotos() {
     const current = attemptRef.current
-    if (!current || blockedRef.current) return
+    if (!current || blockedRef.current || motivosPausa.current.size) return
     setError('')
     try {
       const ready = await photos.prepare(current.id, chaveExecucao)
@@ -395,6 +459,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     if (previous?.conflito) throw new Error(`Confira a resposta salva da questão ${question.ordem} antes de enviar.`)
     // Confirma o envio anterior antes de usar a próxima versão, mesmo se o aluno editou o campo após a falha.
     if (previous?.pendente) await sendResponse(previous.pendente)
+    if (motivosPausa.current.size) return
     const value = answerRef.current[question.id] ?? ''
     const confirmed = savedRef.current[question.id]?.salva
     if (value === valorResposta(confirmed)) return
@@ -407,7 +472,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
 
   async function reviewResponse(question: QuestaoTentativa) {
     const current = attemptRef.current
-    if (!current || savingRef.current || blockedRef.current) return
+    if (!current || savingRef.current || blockedRef.current || motivosPausa.current.size) return
     savingRef.current = true
     setBusyQuestion(question.id)
     setError('')
@@ -429,7 +494,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   }
 
   async function saveQuestion(question: QuestaoTentativa, automatic = false) {
-    if (savingRef.current || blockedRef.current) return
+    if (savingRef.current || blockedRef.current || motivosPausa.current.size) return
     savingRef.current = true
     setBusyQuestion(question.id)
     if (!automatic) {
@@ -439,7 +504,8 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     try {
       await saveAnswer(question)
       checkAvailable()
-      if (!automatic && (answerRef.current[question.id] ?? '') === valorResposta(savedRef.current[question.id]?.salva)) {
+      if (!automatic && !motivosPausa.current.size &&
+          (answerRef.current[question.id] ?? '') === valorResposta(savedRef.current[question.id]?.salva)) {
         setNotice(`Resposta da questão ${question.ordem} salva.`)
       }
     } catch (cause) {
@@ -452,20 +518,24 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
 
   async function finish() {
     const current = attemptRef.current
-    if (!current || !conteudo || savingRef.current || blockedRef.current) return
+    if (!current || !conteudo || savingRef.current || blockedRef.current || motivosPausa.current.size) return
     savingRef.current = true
     setBusy(true)
     setError('')
     setNotice('')
     try {
       for (const question of conteudo.questoes) {
+        if (motivosPausa.current.size) return
         await saveAnswer(question)
       }
       checkAvailable()
+      if (motivosPausa.current.size) return
       const photosConfirmed = !withPhotos || await photos.flush()
       checkAvailable()
+      if (motivosPausa.current.size) return
       const incidentsConfirmed = await ocorrencias.retry()
       checkAvailable()
+      if (motivosPausa.current.size) return
       await encerrarTentativa(current.id, 'ENVIO', chaveExecucao)
       if (closedRef.current) return
       closedRef.current = true
@@ -486,12 +556,12 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
 
   async function leave() {
     const current = attemptRef.current
-    if (!current || blockedRef.current || savingRef.current) return
+    if (!current || blockedRef.current || savingRef.current || motivosPausa.current.size) return
     await block('SAIDA')
   }
 
   const handleAnswerChange = useCallback((question: QuestaoTentativa, value: string) => {
-    if (busy || blockedRef.current || closedRef.current) return
+    if (busy || blockedRef.current || closedRef.current || motivosPausa.current.size) return
     const next = { ...answerRef.current, [question.id]: value }
     answerRef.current = next
     saveAtRef.current[question.id] = Date.now() + (question.tipo === 'DISSERTATIVA' ? 800 : 0)
@@ -504,7 +574,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   })
 
   useEffect(() => {
-    if (phase !== 'em-andamento' || !conteudo || busy || busyQuestion || confirmation) return
+    if (phase !== 'em-andamento' || !conteudo || busy || busyQuestion || confirmation || pausada) return
     let nextQuestion: QuestaoTentativa | undefined
     let nextTime = Infinity
     for (const question of conteudo.questoes) {
@@ -519,21 +589,21 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     // Um envio por vez. Editar outra questão não reinicia o prazo da primeira.
     const timer = window.setTimeout(() => saveAutomatically(question), Math.max(0, nextTime - Date.now()))
     return () => window.clearTimeout(timer)
-  }, [answers, saved, conteudo, phase, busy, busyQuestion, confirmation])
+  }, [answers, saved, conteudo, phase, busy, busyQuestion, confirmation, pausada])
 
   const remaining = tentativa ? Date.parse(tentativa.limite_em) - now : 0
   return <section className="provas-panel tentativa-aluno" aria-labelledby="tentativa-monitorada-title">
-    <h1 id="tentativa-monitorada-title">{avaliacao.titulo}</h1>
-    <p className="turmas-note">{avaliacao.turma_nome} · Tentativa única, sem retomada.</p>
-    {withPhotos && phase !== 'bloqueada' && <>
+    <h1 id="tentativa-monitorada-title" ref={examHeading} tabIndex={-1}>{avaliacao.titulo}</h1>
+    <p className="turmas-note">{avaliacao.turma_nome} · Tentativa única.</p>
+    {withPhotos && phase !== 'bloqueada' && <div hidden={pausada}>
       <p className="turmas-note">A câmera deve permanecer disponível. As fotos são enviadas para análise manual do responsável, com acesso restrito.</p>
       <div className="provas-camera provas-camera-small">
         <video ref={videoRef} autoPlay muted playsInline aria-label="Câmera durante a avaliação" />
       </div>
       <p role={cameraStatus === 'error' || cameraStatus === 'interrupted' ? 'alert' : 'status'}
         className={cameraStatus === 'error' || cameraStatus === 'interrupted' ? 'alert error' : 'turmas-note'}>{cameraMessage}</p>
-    </>}
-    {prova && phase === 'em-andamento' && <>
+    </div>}
+    {prova && phase === 'em-andamento' && !pausada && <>
       {cameraStatus !== 'ready' && <div className="provas-aviso">
         <p>{withPhotos && !photos.initialReady
           ? 'Reconecte a câmera para obter a foto inicial. O prazo continua correndo.'
@@ -551,7 +621,9 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       <div className="provas-aviso">
         {prova && <p>{MONITORING_NOTICE}</p>}
         {withPhotos && <p>{PHOTO_NOTICE}</p>}
-        <p className="provas-permanencia" id={`${noticeId}-permanencia`}>{DEPARTURE_WARNING}</p>
+        <p className="provas-permanencia" id={`${noticeId}-permanencia`}>
+          {DEPARTURE_WARNING}{!prova && ' Perder o foco também encerra a atividade.'}
+        </p>
         <p>Leia os <a href="/termos" target="_blank" rel="noreferrer">Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noreferrer">Política de Privacidade</a>.</p>
         <label className="provas-aceite" htmlFor={noticeId}>
           <input id={noticeId} type="checkbox" checked={noticeAcknowledged} aria-describedby={`${noticeId}-permanencia`}
@@ -581,16 +653,25 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     {phase === 'iniciando' && <p role="status">Confirmando início da tentativa...</p>}
     {phase === 'falhou' && <button type="button" className="turmas-refresh" onClick={() => { stop(); onCancelar() }}>Voltar às avaliações</button>}
     {phase === 'em-andamento' && tentativa && <p className="tentativa-prazo" role="timer">Tempo restante: {relogio(remaining)}</p>}
-    {phase !== 'bloqueada' && error && <p className="alert error" role="alert">{error}</p>}
-    {notice && <p className="alert success" role="status">{notice}</p>}
-    {withPhotos && phase === 'em-andamento' && <div className="provas-fotos-status">
+    {phase !== 'bloqueada' && !pausada && error && <p className="alert error" role="alert">{error}</p>}
+    {!pausada && notice && <p className="alert success" role="status">{notice}</p>}
+    {withPhotos && phase === 'em-andamento' && !pausada && <div className="provas-fotos-status">
       <p role="status">{photos.message || (photos.initialReady ? 'Foto inicial recebida. As próximas capturas acontecem durante a prova.' : 'Aguardando confirmação da foto inicial antes de mostrar as questões.')}</p>
       {(photos.pending > 0 || !photos.initialReady) && <button type="button" className="turmas-refresh"
         disabled={busy || photos.preparing || (photos.pending === 0 && cameraStatus !== 'ready')} onClick={() => void retryPhotos()}>
         {photos.pending > 0 ? `Reenviar fotos (${photos.pending})` : 'Preparar envio das fotos'}
       </button>}
     </div>}
-    {withPhotos && photos.toast && phase === 'em-andamento' && <div className="provas-photo-toast" role="status">{photos.toast}</div>}
+    {withPhotos && photos.toast && phase === 'em-andamento' && !pausada && <div className="provas-photo-toast" role="status">{photos.toast}</div>}
+
+    {pausada && phase !== 'bloqueada' && <section className="provas-aviso" aria-labelledby={`${noticeId}-pausa`}>
+      <h2 id={`${noticeId}-pausa`} ref={pauseHeading} tabIndex={-1}>Prova pausada</h2>
+      <p>Volte para esta aba e continue em tela cheia. O tempo da prova continua correndo.</p>
+      {pausaError && <p role="alert">{pausaError}</p>}
+      {ocorrencias.pending > 0 && ocorrencias.message && <p role="status">{ocorrencias.message}</p>}
+      <button type="button" className="btn-primary" disabled={phase !== 'em-andamento' || continuando || busy}
+        onClick={() => void continuarProva()}>{continuando ? 'Restabelecendo a prova...' : 'Continuar prova'}</button>
+    </section>}
 
     {phase === 'bloqueada' && <div className="provas-cover" role="alert">
       <h2 ref={blockHeading} tabIndex={-1}>{blockReason === 'CANCELAMENTO' ? 'Avaliação cancelada' : `${prova ? 'Prova' : 'Atividade'} bloqueada`}</h2>
@@ -602,7 +683,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       </div>
     </div>}
 
-    {phase === 'em-andamento' && (!withPhotos || photos.initialReady) && <>
+    {phase === 'em-andamento' && !pausada && (!withPhotos || photos.initialReady) && <>
       {loadingContent && <p role="status">Carregando questões...</p>}
       {!loadingContent && !conteudo && error && tentativa && <button type="button" className="turmas-refresh"
         onClick={() => void loadContent(tentativa)}>Tentar carregar questões</button>}

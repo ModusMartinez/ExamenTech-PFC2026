@@ -11,7 +11,7 @@ O fluxo atual usa as avaliações da equipe: 023 publica, 024 lista, 025 inicia,
 5. As três fotos posteriores não retiram o foco nem bloqueiam as questões. Um aviso no canto inferior direito informa a captura. Uma recusa temporária do servidor permite reenviar o mesmo arquivo e identificador enquanto a execução permanece ativa. Uma perda de conexão detectada encerra a execução.
 6. Alternativas são salvas ao selecionar e dissertativas após uma pausa na digitação. O botão de envio confirma as alterações restantes e encerra a tentativa. Depois do prazo o servidor recusa novas respostas. O job da migração 041 finaliza as tentativas vencidas que continuam em andamento, inclusive quando a página não enviou o encerramento.
 
-A partir da 043, o aviso de Prova é `2026-11-09-v5` e o de Atividade continua em `2026-11-08-v4`. O consentimento específico das fotos é `2026-11-08-fotos-v1`. Cada ciclo com fotos registra as versões dos documentos e o aceite. Não há fotos no localStorage/IndexedDB; capturas pendentes ficam na memória até envio ou saída.
+A migração 052 habilita o aviso de Prova `2026-11-16-v6`. O aviso de Atividade é `2026-11-08-v4` e o consentimento específico das fotos é `2026-11-08-fotos-v1`. Cada ciclo com fotos registra as versões dos documentos e o aceite. Não há fotos no localStorage/IndexedDB; capturas pendentes ficam na memória até envio ou saída.
 
 ## Câmera e permanência
 
@@ -19,7 +19,7 @@ Com `036` e `037`, perder o sinal registra `CAMERA_FALHA` sem ocultar questões 
 
 A foto inicial é obrigatória em Provas: se a captura falhar, reconectar e usar **Preparar envio das fotos** na mesma tentativa. O cronômetro continua correndo. Depois da confirmação inicial, falhas nas capturas seguintes não bloqueiam a prova, e os próximos horários são mantidos. Veja o [contrato e roteiro da câmera](avaliacoes.md#037--continuidade-da-prova-sem-câmera).
 
-Sair pelo botão, trocar de aba, perder o foco, fechar ou recarregar a página ou perder a conexão interrompe a execução. A tela oculta as questões e preserva no banco as respostas já recebidas. Ao reconectar, a página pode tentar confirmar apenas o encerramento. Documentos e confirmações abrem dentro da página.
+Na Prova, trocar de aba, perder o foco ou sair da tela cheia bloqueia as questões temporariamente. O aluno volta à mesma aba, seleciona **Continuar prova** e restaura a tela cheia se necessário. A pausa é registrada na linha do tempo e o prazo continua correndo. Sair pelo botão, fechar ou recarregar a página ou perder a conexão interrompe a execução. Na Atividade, a perda de foco também interrompe a execução. Documentos e confirmações abrem dentro da página.
 
 O servidor exige a sessão inicial e a chave da página para consultar conteúdo e respostas, salvar, encerrar e registrar eventos e fotos. Uma nova aba ou recarga perde a chave original. Outra sessão é recusada mesmo com a chave original. Se a página fechar antes de a saída chegar ao servidor, a linha pode continuar como `EM_ANDAMENTO`. A tentativa fica inacessível em uma nova página, e o servidor continua aplicando o prazo. A ficha dispensa heartbeat. Por isso uma queda transitória que o navegador não sinalize e que não afete nenhuma chamada não é detectada.
 
@@ -92,8 +92,8 @@ A migração 043 exige o aceite versionado de monitoramento para iniciar uma Pro
 
 | Sinal durante a Prova | Ação | Registro |
 | --- | --- | --- |
-| Saída da tela cheia | Encerra a tentativa e oculta as questões. | `TENTATIVA_INTERROMPIDA`, ação `saida_tela_cheia`. |
-| Troca de aba ou perda de foco | Encerra a tentativa e oculta as questões. | `TENTATIVA_INTERROMPIDA`, ação `perda_aba_ou_foco`. |
+| Saída da tela cheia | Pausa a interação até o aluno continuar na mesma aba em tela cheia. | `PROVA_PAUSADA`, ação `saida_tela_cheia`. |
+| Troca de aba ou perda de foco | Pausa a interação e mantém as respostas digitadas na página. | `PROVA_PAUSADA`, ação `perda_aba_ou_foco`. |
 | Copiar, colar ou recortar | Impede a operação e mantém a prova disponível. | `CLIPBOARD_BLOQUEADO` com tipo de operação, tentativa e horário. |
 | Câmera indisponível durante a execução | Registra a falha. Após a foto inicial, respostas e envio continuam disponíveis. | `CAMERA_FALHA`. |
 
@@ -101,9 +101,9 @@ As ocorrências são sinais do navegador para análise humana. O bloqueio da ár
 
 ### Homologação da execução segura
 
-1. Aplique a 042 e depois a 043 no **ExamenTech-Testes**. Confira o [roteiro de ativação de fotos](ativar-fotos-e-reativacao.md#5-habilitar-as-fotografias-na-base-e-no-site) e use um navegador compatível com a Fullscreen API.
+1. Com a base **ExamenTech-Testes** atualizada até a 051, aplique `052_pausa_prova.sql` antes de publicar a interface. Confira o [roteiro de ativação de fotos](ativar-fotos-e-reativacao.md#5-habilitar-as-fotografias-na-base-e-no-site) e use um navegador compatível com a Fullscreen API.
 2. Com dados fictícios, inicie uma Prova após aceitar os avisos. Confira a tela cheia, o recebimento da foto inicial e os três horários sorteados. Para conferir a coleta posterior, mantenha uma tentativa aberta até o último horário e confirme os registros pelo professor.
-3. Salve uma resposta e tente copiar, colar e recortar. A prova deve continuar. Em tentativas separadas, saia da tela cheia e troque de aba. Confira a mensagem, a ocorrência no banco e a preservação das respostas salvas. Se perder apenas o sinal da câmera após a foto inicial, continue respondendo e envie a prova.
+3. Salve uma resposta e tente copiar, colar e recortar. Troque de aba e saia da tela cheia durante a prova. Ao voltar, confira as questões ocultas, o cronômetro em andamento e o botão **Continuar prova**. Restaure a tela cheia, confira a resposta e envie a tentativa. Na gestão do professor, abra **Linha do tempo** e confira os motivos e horários das pausas.
 4. Inicie uma Atividade e confira que ela não solicita a câmera nem a tela cheia. Em uma Prova em navegador incompatível, confira que a preparação não consome a tentativa.
 
 O teste transacional no ExamenTech-Testes confirmou os avisos, o plano de capturas, a exigência da foto inicial, a persistência de respostas e o registro das ocorrências. A confirmação da foto foi simulada no banco, sem enviar arquivo ao Storage. O rollback desfez as alterações da execução. A verificação em Chromium usou dados fictícios e câmera simulada.

@@ -41,23 +41,13 @@ input {
   );
 }
 
-.brand-logo,
-.brand-logo-mobile {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 1.2rem;
-  font-weight: bold;
-}
-
-.logo-icon {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 7px;
-  font-size: 0.8rem;
+.brand-logo {
+  display: block;
+  width: 208px;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
 }
 
 .banner-text {
@@ -104,10 +94,9 @@ input {
   max-width: 400px;
 }
 
-.brand-logo-mobile {
+.form-wrapper > .brand-logo {
   display: none;
   margin-bottom: 36px;
-  color: var(--dark-blue);
 }
 
 .form-header {
@@ -297,6 +286,7 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 16px 48px;
   background: var(--dark-blue);
   color: white;
@@ -442,8 +432,8 @@ input {
     display: none;
   }
 
-  .brand-logo-mobile {
-    display: flex;
+  .form-wrapper > .brand-logo {
+    display: block;
   }
 
   .form-section {

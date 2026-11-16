@@ -15,6 +15,7 @@ import { LegalFooter } from './components/LegalFooter'
 import { DashboardOverview } from './components/DashboardOverview'
 import { IngressoAlunoGate } from './components/IngressoAlunoGate'
 import { AdminMfaPanel } from './components/AdminMfaPanel'
+import { BrandLogo } from './components/BrandLogo'
 import { LegalPage } from './components/LegalPage'
 import { TERMS_VERSION, PRIVACY_VERSION } from './content/legalDocuments'
 import type { LegalDocumentType } from './content/legalDocuments'
@@ -660,10 +661,7 @@ function AccessApp() {
   return (
     <main className="app-container">
       <section className="banner-section">
-        <div className="brand-logo">
-          <span className="logo-icon">ET</span>
-          <span>ExamenTech</span>
-        </div>
+        <BrandLogo />
 
         <div className="banner-text">
           <p className="overline">AMBIENTE ACADÊMICO</p>
@@ -686,10 +684,7 @@ function AccessApp() {
 
       <section className="form-section">
         <div className="form-wrapper">
-          <div className="brand-logo-mobile">
-            <span className="logo-icon">ET</span>
-            <span>ExamenTech</span>
-          </div>
+          <BrandLogo />
 
           {page === 'login' ? (
             <>
@@ -1181,10 +1176,7 @@ function Dashboard({ user, onLogout }: DashboardProps) {
   return (
     <div className="dashboard-container">
       <nav className="dashboard-nav">
-        <div className="brand-logo">
-          <span className="logo-icon">ET</span>
-          <span>ExamenTech</span>
-        </div>
+        <BrandLogo />
 
         <button
           type="button"

@@ -12,7 +12,7 @@ Sistema de Gerenciamento Seguro de Provas e Atividades Acadêmicas (SGPA). Esta 
 - Redefinição do 2FA de alunos e professores pelo ADM da mesma organização, com auditoria e nova configuração no próximo acesso.
 - Turmas, solicitação e aprovação de matrículas, rascunhos de avaliações, questões, alternativas e publicação.
 - **Minhas provas**: lista em cartões, simulação local e preparação da tentativa com câmera e avisos.
-- Questões e alternativas em ordem sorteada persistida, salvamento de respostas e encerramento por envio, prazo ou saída da página/aba/janela. Falhas de câmera durante a resolução geram ocorrência e permitem continuar.
+- Questões e alternativas em ordem sorteada persistida, salvamento de respostas e encerramento por envio, prazo ou saída da página. Em Provas, trocar de aba, perder o foco da janela ou sair da tela cheia pausa a interação e registra uma ocorrência. O aluno pode continuar na mesma aba em tela cheia. Falhas de câmera durante a resolução geram ocorrência e permitem continuar.
 - Quando habilitadas, uma foto inicial e até três durante a tentativa, em horários sorteados no servidor. A confirmação da foto inicial precede a liberação das questões.
 - Fotos em armazenamento privado, para consulta manual pelo professor responsável ou ADM da mesma organização, com MFA e registro de consulta.
 - Tentativa vinculada à sessão e à página que a iniciou, sem reabertura após interrupção.
@@ -81,6 +81,7 @@ Arquivos SQL no repositório não são executados pelo Git nem pelo Vite. Em ban
 | Fotografias privadas, consentimento e retenção | `database/031_fotos_tentativa.sql`. |
 | Versões anteriores dos documentos com fotos | `database/032_documentos_fotos.sql`. |
 | Execução segura e ocorrências de prova | `database/043_execucao_segura_prova.sql`, após a 042. |
+| Pausa da prova e registro na linha do tempo | `database/052_pausa_prova.sql`, após a 051 e antes de publicar a interface do RF32. |
 
 O bucket usado é **`examentech-evidencias`**, privado, somente `image/jpeg`, até 1 MiB. O banco mantém a coleta desligada ao aplicar 031. A ativação depende de conferir o bucket, a função de limpeza, o agendamento e os avisos.
 

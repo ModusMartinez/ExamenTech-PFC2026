@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { consultarIngressoAluno } from '../services/ingressoAluno'
 import type { IngressoAluno } from '../services/ingressoAluno'
+import { BrandLogo } from './BrandLogo'
 import { SolicitarMatriculaPanel } from './SolicitarMatriculaPanel'
 import { MinhasMatriculasPanel } from './MinhasMatriculasPanel'
 import '../styles/turmas.css'
@@ -47,7 +48,7 @@ export function IngressoAlunoGate({ children, onLogout }: Props) {
 
   return <div className="dashboard-container">
     <nav className="dashboard-nav" aria-label="Conta do aluno">
-      <div className="brand-logo"><span className="logo-icon">ET</span><span>ExamenTech</span></div>
+      <BrandLogo />
       <button type="button" className="btn-outline" disabled={leaving} onClick={() => void logout()}>
         {leaving ? 'Saindo...' : 'Sair'}
       </button>
