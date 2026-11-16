@@ -265,9 +265,9 @@ test('atividade inicia sem câmera, fotos ou tela cheia e permite área de trans
 
 test('cancelamento Realtime da própria tentativa fecha a prova, a confirmação e a câmera', async () => {
   const { track, onLeave } = await iniciarProva()
-  expect(realtime.on).toHaveBeenCalledWith('postgres_changes', {
+  await waitFor(() => expect(realtime.on).toHaveBeenCalledWith('postgres_changes', {
     event: 'UPDATE', schema: 'public', table: 'tentativas', filter: `id=eq.${tentativa.id}`,
-  }, expect.any(Function))
+  }, expect.any(Function)))
   fireEvent.click(screen.getByRole('button', { name: 'Enviar prova' }))
   expect(screen.getByRole('dialog')).toBeTruthy()
   const receberEvento = realtime.on.mock.calls[0][2]

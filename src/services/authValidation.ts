@@ -1,5 +1,19 @@
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+// Limite técnico de entrada; o formato institucional não fixa uma quantidade de dígitos.
+export function normalizeRgm(value: string): string {
+  return value.trim().toUpperCase()
+}
+
+export function validateRgm(value: string): string | null {
+  const rgm = normalizeRgm(value)
+  if (rgm && !/^[A-Z0-9][A-Z0-9._/-]{0,49}$/.test(rgm)) {
+    return 'Informe um RGM com até 50 caracteres, usando letras, números, ponto, hífen, barra ou sublinhado.'
+  }
+  // O convite define o perfil: o banco exige o RGM quando o destino é ALUNO.
+  return null
+}
+
 export function validateLoginFields(email: string, password: string): string | null {
   if (!email.trim() || !password) {
     return 'Preencha o e-mail e a senha.'
@@ -29,6 +43,7 @@ export function validateRegistrationFields(
   email: string,
   password: string,
   confirmation: string,
+  rgm = '',
 ): string | null {
   if (!name.trim() || !email.trim() || !password || !confirmation) {
     return 'Preencha todos os campos.'
@@ -46,22 +61,31 @@ export function validateRegistrationFields(
     return 'As senhas não são iguais.'
   }
 
-  return null
+  return validateRgm(rgm)
 }
 
 export function validateInvitationFields(
   organizationCode: string,
   invitationCode: string,
 ): string | null {
-  if (!organizationCode.trim() || !invitationCode.trim()) {
+  const organization = organizationCode.trim()
+  const invitation = invitationCode.trim()
+
+  if (!organization || !invitation) {
     return 'Informe o código da organização e o convite individual.'
   }
 
-  if (
-    !/^[A-Za-z0-9_-]{21}$/.test(organizationCode.trim()) ||
-    !/^[a-fA-F0-9]{64}$/.test(invitationCode.trim())
-  ) {
-    return 'Um dos códigos informados é inválido.'
+  if (organization.length !== 21) {
+    return `O código da organização precisa ter 21 caracteres. Foram informados ${organization.length}.`
+  }
+  if (!/^[A-Za-z0-9_-]{21}$/.test(organization)) {
+    return 'O código da organização contém caracteres inválidos. Copie somente o código, sem aspas ou espaços no meio.'
+  }
+  if (invitation.length !== 64) {
+    return `O convite individual precisa ter 64 caracteres. Foram informados ${invitation.length}.`
+  }
+  if (!/^[a-fA-F0-9]{64}$/.test(invitation)) {
+    return 'O convite individual contém caracteres inválidos. Copie somente o código gerado para o seu e-mail, sem aspas ou espaços no meio.'
   }
 
   return null

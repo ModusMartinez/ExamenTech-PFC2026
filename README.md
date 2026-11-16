@@ -8,16 +8,23 @@ Sistema de Gerenciamento Seguro de Provas e Atividades Acadêmicas (SGPA). Esta 
 
 - Login, recuperação de senha, confirmação de e-mail e MFA TOTP com Supabase Auth.
 - Cadastro por convite, perfis Aluno/Professor/Administrador e autorização no banco.
+- RGM validado para novos alunos; ingresso inicial pelo fluxo de matrícula na primeira turma.
+- Redefinição do 2FA de alunos e professores pelo ADM da mesma organização, com auditoria e nova configuração no próximo acesso.
 - Turmas, solicitação e aprovação de matrículas, rascunhos de avaliações, questões, alternativas e publicação.
 - **Minhas provas**: lista em cartões, simulação local e preparação da tentativa com câmera e avisos.
-- Questões e alternativas em ordem sorteada persistida, salvamento de respostas e encerramento por envio, prazo, saída da página/aba/janela ou perda persistente da câmera.
+- Questões e alternativas em ordem sorteada persistida, salvamento de respostas e encerramento por envio, prazo ou saída da página/aba/janela. Falhas de câmera durante a resolução geram ocorrência e permitem continuar.
 - Quando habilitadas, uma foto inicial e até três durante a tentativa, em horários sorteados no servidor. A confirmação da foto inicial precede a liberação das questões.
 - Fotos em armazenamento privado, para consulta manual pelo professor responsável ou ADM da mesma organização, com MFA e registro de consulta.
-- Reativação excepcional de tentativa interrompida, autorizada pelo responsável com motivo e minutos, preservando respostas e histórico. Prova finalizada não é reaberta.
+- Tentativa vinculada à sessão e à página que a iniciou, sem reabertura após interrupção.
+- Correção, publicação de resultados e dashboard com indicadores do banco por perfil.
 - Política de Privacidade, Termos, aceite geral e consentimento específico das fotos. Conservação de até 90 dias por foto e rotina de exclusão pelo Storage.
 - Auditoria dos fluxos implementados. As tentativas de acesso recusadas antes do MFA também têm os registros próprios do Supabase Auth.
 
-Não há reconhecimento facial automático, gravação contínua de vídeo/áudio ou classificação automática de fraude. Correção e cálculo de notas não fazem parte desta integração. Os componentes de dashboard com dados de exemplo permanecem separados da navegação atual.
+Não há reconhecimento facial automático, gravação contínua de vídeo/áudio ou classificação automática de fraude.
+
+## Atualização de identidade — 12/11
+
+O roteiro de aplicação de **045–048**, as regras de RGM, ingresso inicial, redefinição administrativa do 2FA e os testes estão em [Identidade e acesso](docs/identidade-e-acesso-1211.md). Essas migrações acompanham a nova interface e as novas versões dos documentos legais; devem ser conferidas primeiro na base de testes.
 
 ## Executar localmente
 

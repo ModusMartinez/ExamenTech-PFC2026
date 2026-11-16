@@ -1,8 +1,8 @@
-// A regra de sessão acompanha a migração 038. Os aceites anteriores permanecem com sua versão.
+// Identidade e ingresso acompanham 045–048. Aceites anteriores conservam suas versões.
 const env = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env
 const updatedDocuments = env?.VITE_EXAM_PHOTOS_ENABLED === 'true' || env?.VITE_EXAM_MANAGEMENT_ENABLED === 'true'
-export const TERMS_VERSION = updatedDocuments ? '2026-11-08-v9' : '2026-11-08-v10'
-export const PRIVACY_VERSION = updatedDocuments ? '2026-11-08-v6' : '2026-11-08-v7'
+export const TERMS_VERSION = updatedDocuments ? '2026-11-12-v11' : '2026-11-12-v12'
+export const PRIVACY_VERSION = updatedDocuments ? '2026-11-12-v8' : '2026-11-12-v9'
 export const EXAM_NOTICE_VERSION = '2026-11-08-v4'
 export const PROVA_NOTICE_VERSION = '2026-11-09-v5'
 export const EXAM_NOTICE_SUMMARY = 'Use apenas provas de teste e dados fictícios nesta demonstração. A câmera precisa estar disponível durante a prova. Você tem uma única tentativa. Sair, atualizar a página ou perder a conexão encerra seu acesso. A indisponibilidade da câmera é registrada e permite continuar respondendo. Respostas salvas e interrupções ficam no banco. Nesta versão, nenhuma foto, gravação ou áudio é enviado.'
@@ -35,9 +35,11 @@ const documentsWithoutPhotos: Record<LegalDocumentType, LegalDocument> = {
       {
         title: '2. Cadastro e acesso',
         paragraphs: [
-          'O cadastro exige convite individual válido, código da organização, nome e um e-mail sob seu controle. Utilize somente dados necessários à demonstração. Emita convites apenas para participantes que solicitaram acesso; não cadastre dados de terceiros sem autorização.',
+          'O cadastro exige convite individual válido, código da organização, nome e um e-mail sob seu controle. Para alunos, também exige o RGM, usado como identificador acadêmico. Utilize dados fictícios na demonstração. Emita convites apenas para participantes que solicitaram acesso; não cadastre dados de terceiros sem autorização.',
           'O convite define uma conta de aluno ou professor, sem aprovação manual adicional. Somente administradores emitem convites para professores. Professores convidam alunos da própria organização; administradores também podem convidar alunos.',
           'O acesso exige confirmação de e-mail e autenticação em duas etapas. O cadastro por convite não cria administradores. Esse perfil é atribuído por procedimento administrativo da equipe.',
+          'O aluno que ainda não teve matrícula aprovada na própria organização pode solicitar ingresso e acompanhar a matrícula. A primeira aprovação pelo professor responsável ou administrador libera o painel acadêmico. Vínculos depois inativados preservam a consulta ao histórico; cada nova avaliação continua exigindo matrícula e turma ativas e as demais permissões.',
+          'Em caso de perda do autenticador, um administrador ativo da mesma organização pode redefinir o segundo fator de alunos e professores, com registro de auditoria. A redefinição encerra as sessões da conta e exige nova configuração do autenticador no próximo acesso. A equipe deve confirmar a identidade do solicitante antes desse procedimento e nunca solicitar senha ou código do autenticador.',
         ],
       },
       {
@@ -86,9 +88,9 @@ const documentsWithoutPhotos: Record<LegalDocumentType, LegalDocument> = {
       {
         title: '2. Dados utilizados',
         paragraphs: [
-          'Cadastro: nome, e-mail, identificador da conta, organização, perfil de acesso, situação e datas do cadastro. O RGM pode ser atribuído administrativamente; não é solicitado pelo formulário atual. Os dados são informados pelo participante ou pela equipe autorizada.',
+          'Cadastro: nome, e-mail, RGM do aluno, identificador da conta, organização, perfil de acesso, situação e datas do cadastro. O RGM identifica o vínculo acadêmico e evita cadastros duplicados; é validado no cadastro e associado ao perfil por meio do convite. Contas antigas sem RGM são preservadas. Os dados são informados pelo participante ou pela equipe autorizada.',
           'Convites: e-mail do destinatário, organização, perfil de destino, emissor, datas de criação, validade e utilização. Códigos de organização, convites e tickets temporários verificam a autorização para cadastrar.',
-          'Segurança: identificadores de usuário e sessão, data e hora, tipo de evento, resultado e, quando presentes, provedor, ação e códigos de erro. O aceite registra a conta, as versões dos documentos e o horário do servidor. A tabela de eventos da aplicação não guarda senhas, códigos de MFA nem tokens de autenticação ou do Turnstile.',
+          'Segurança: identificadores de usuário e sessão, data e hora, tipo de evento, resultado e, quando presentes, provedor, ação e códigos de erro. A redefinição administrativa do segundo fator registra o responsável, a conta afetada e o resultado. O aceite registra a conta, as versões dos documentos e o horário do servidor. A tabela de eventos da aplicação não guarda senhas, códigos de MFA nem tokens de autenticação ou do Turnstile.',
           'Autenticação: o Supabase Auth trata e-mail, hash da senha, fatores de autenticação e sessões. A sessão usa armazenamento local do navegador para manter o acesso. Os serviços de infraestrutura e proteção também podem tratar IP, navegador e outros sinais técnicos, mesmo que esses dados não estejam na tabela de eventos da aplicação.',
           'Provas de teste: turma e matrícula, prova escolhida, questões, alternativas selecionadas ou texto digitado pelo aluno, horários da tentativa, tempo restante, situação, falha da câmera quando detectada, identificador da sessão, verificador da página que iniciou a prova, versão e horário do aviso. Os eventos de publicação, início, falha, interrupção, salvamento e envio são registrados na auditoria. A prévia da câmera é processada localmente no navegador; o aplicativo não envia nem armazena imagens ou áudio nesta etapa.',
         ],

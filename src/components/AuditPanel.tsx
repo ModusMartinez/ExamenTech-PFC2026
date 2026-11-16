@@ -26,6 +26,9 @@ const eventNames: Record<string, string> = {
   MATRICULA_APROVADA: 'Matrícula aprovada',
   MATRICULA_INATIVADA: 'Matrícula inativada',
   CAMERA_FALHA: 'Falha da câmera',
+  MFA_REDEFINICAO_INICIADA: 'Redefinição do 2FA iniciada',
+  MFA_REDEFINIDO: 'Segundo fator redefinido',
+  MFA_REDEFINICAO_FALHOU: 'Falha na redefinição do 2FA',
 }
 
 function formatDate(value: string) {
