@@ -8,10 +8,10 @@
   --ink: #1f2d3d;
   --muted: #66788a;
   --line: #dce5ee;
-  --soft: #f4f8fb;
+  --background: #fdf8f2;
 
   color: var(--ink);
-  background: var(--soft);
+  background: var(--background);
 }
 
 * {

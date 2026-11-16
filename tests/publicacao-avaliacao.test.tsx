@@ -84,6 +84,28 @@ test('cancelar não publica e devolve foco; confirmar remove o rascunho e atuali
   await screen.findByRole('table', { name: `Avaliações publicadas de ${turma.nome}` })
 })
 
+test('cancelar um rascunho remove a opção de publicar e o exibe no histórico', async () => {
+  const cancelada = { ...avaliacao, situacao: 'CANCELADA', publicada_em: null, cancelada_em: '2026-11-09T20:00:00.000Z' } as const
+  mocks.rpc.mockImplementation(async () => {
+    rascunhos = []
+    publicadas = [cancelada]
+    return { data: cancelada, error: null }
+  })
+  await abrir()
+  fireEvent.click(screen.getByRole('button', { name: `Publicadas de ${turma.nome}` }))
+  await screen.findByText('Nenhuma avaliação publicada nesta turma.')
+  fireEvent.click(screen.getByRole('button', { name: `Rascunhos de ${turma.nome}` }))
+  fireEvent.click(await screen.findByRole('button', { name: `Cancelar rascunho ${avaliacao.titulo}` }))
+  fireEvent.click(screen.getByRole('button', { name: 'Manter avaliação' }))
+  expect(mocks.rpc).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: `Cancelar rascunho ${avaliacao.titulo}` }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+  await screen.findByText('Sem publicação')
+  expect(screen.getByText('Cancelada')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: `Publicar ${avaliacao.titulo}` })).toBeNull()
+  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('cancelar_avaliacao', { p_avaliacao_id: avaliacao.id })
+})
+
 test.each(['Administrador', 'Professor'] as const)('%s consulta publicadas em turma inativa sem publicar ou editar', async (profile) => {
   mocks.listar.mockResolvedValue([{ ...turma, situacao: 'INATIVA' }])
   publicadas = [{ ...publicada, titulo: `${'Título longo '.repeat(9)}<script>teste</script>` }]

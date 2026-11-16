@@ -71,7 +71,7 @@ Use uma avaliação fictícia por cenário. Registre a situação no painel resp
 
 ## Cancelamento da avaliação (RF28–RF29)
 
-Em **Turmas → Publicadas → Gerenciar**, o professor autor autenticado com MFA pode cancelar uma avaliação publicada, inclusive durante a aplicação. A confirmação informa que novas tentativas serão bloqueadas e que as tentativas em andamento serão encerradas. O banco recusa o cancelamento de rascunhos e de avaliações com resultados já divulgados. A avaliação cancelada continua no histórico da turma com data e registro de auditoria.
+Com a migração 055, o professor autor com MFA pode cancelar em **Turmas → Rascunhos → Cancelar rascunho** ou em **Turmas → Publicadas → Gerenciar**. A segunda opção também vale para avaliações com resultados divulgados. O histórico inclui a data do cancelamento e identifica rascunhos cancelados como **Sem publicação**. O aluno continua podendo consultar resultados já divulgados.
 
 A migração 042 encerra as tentativas em andamento na mesma transação em que cancela a avaliação. As respostas recebidas e as tentativas que já estavam encerradas permanecem no histórico. Uma avaliação cancelada sai da lista de provas do aluno e não pode ser reaberta nem ter novos resultados publicados.
 
@@ -81,7 +81,7 @@ No ExamenTech-Testes, o teste transacional confirmou a inclusão de `tentativas`
 
 ### Homologação em duas sessões
 
-1. Aplique a 042 depois de 040 e 041 no Supabase de teste. Use `VITE_EXAM_MANAGEMENT_ENABLED=true` no ambiente da aplicação.
+1. Aplique a 055 no Supabase de testes já atualizado até a 054. Use `VITE_EXAM_MANAGEMENT_ENABLED=true` no ambiente da aplicação.
 2. Em dois dispositivos, abra a gestão da avaliação com o professor autor e inicie a prova com um aluno matriculado. Mantenha a prova visível e com foco no navegador do aluno e salve uma resposta.
 3. Confirme o cancelamento com o professor. Confira o aviso e o desligamento da câmera na sessão do aluno sem atualizar a página.
 4. Volte às avaliações e confira que a prova saiu da lista. No histórico do professor, confira a situação e o horário. No banco de teste, confira que a resposta recebida continua vinculada à tentativa cancelada.

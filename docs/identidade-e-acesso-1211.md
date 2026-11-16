@@ -15,6 +15,11 @@ O convite continua determinando organização e perfil; o formulário não permi
 
 O formato técnico aceita de 1 a 50 caracteres: começa por letra ou número e permite letras ASCII, números, ponto, hífen, barra e sublinhado. Espaços externos são removidos e letras convertidas para maiúsculas; zeros iniciais são preservados. A ficha não estabelece quantidade institucional de dígitos. O limite técnico não comprova a autenticidade do registro. A unicidade global já existia e passa a considerar também caixa e espaços externos. Se houver colisões em dados antigos, 045 interrompe a aplicação para revisão manual.
 
+## Aprovação de professores
+
+Com a migração 054, um professor que concluir o cadastro por convite fica pendente. Em **Administrador → Professores**, confira o nome, o e-mail e a organização e selecione **Aprovar**. A decisão fica na auditoria. Antes da aprovação, o professor recebe um aviso ao tentar entrar após o MFA. Depois da aprovação, ele pode entrar novamente. A migração preserva os professores já ativos.
+
+
 ## Primeira turma
 
 A ficha informa “aluno depende da primeira turma”, sem detalhar os estados. Nesta implementação, a conta continua `ATIVO`, permitindo solicitar e acompanhar matrícula após o MFA. Enquanto nunca houve matrícula aprovada na organização, o aluno vê somente o ingresso inicial. Depois da aprovação, o botão **Verificar liberação** consulta novamente o servidor e libera o painel.

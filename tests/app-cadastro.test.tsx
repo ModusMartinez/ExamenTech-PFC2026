@@ -107,7 +107,7 @@ afterEach(() => {
 
 async function openRegistration() {
   render(<App />)
-  await screen.findByRole('heading', { name: 'Boas-vindas' })
+  await screen.findByRole('heading', { name: 'Acessar o Sistema' })
   fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
   acceptTerms()
   expect(screen.getByRole('heading', { name: 'Crie sua conta' })).toBeTruthy()
@@ -153,7 +153,7 @@ async function runEvent(callback: () => void) {
 
 test('antes do cadastro mostra termos com aceite desmarcado e botão desabilitado', async () => {
   render(<App />)
-  await screen.findByRole('heading', { name: 'Boas-vindas' })
+  await screen.findByRole('heading', { name: 'Acessar o Sistema' })
   fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
 
   expect(screen.getByRole('dialog', { name: 'Termos de Uso' })).toBeTruthy()
@@ -175,7 +175,7 @@ test('antes do cadastro mostra termos com aceite desmarcado e botão desabilitad
 for (const closeAction of ['Cancelar', 'Fechar documento', 'Escape']) {
   test(`${closeAction} fecha os termos sem abrir cadastro e reabre sem aceite`, async () => {
     render(<App />)
-    await screen.findByRole('heading', { name: 'Boas-vindas' })
+    await screen.findByRole('heading', { name: 'Acessar o Sistema' })
     const trigger = screen.getByRole('button', { name: 'Criar conta' })
     trigger.focus()
     fireEvent.click(trigger)
@@ -201,7 +201,7 @@ for (const closeAction of ['Cancelar', 'Fechar documento', 'Escape']) {
 
 test('a política pode ser consultada dentro dos termos sem aceitar ou abrir cadastro', async () => {
   render(<App />)
-  await screen.findByRole('heading', { name: 'Boas-vindas' })
+  await screen.findByRole('heading', { name: 'Acessar o Sistema' })
   fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
   fireEvent.click(screen.getByRole('button', { name: 'Consultar Política de Privacidade' }))
   expect(screen.getByRole('dialog', { name: 'Política de Privacidade' })).toBeTruthy()
@@ -215,7 +215,7 @@ test('a política pode ser consultada dentro dos termos sem aceitar ou abrir cad
 for (const [documentName, path] of [['Termos de Uso', '/termos'], ['Política de Privacidade', '/privacidade']]) {
   test(`${documentName} tem link público no rodapé sem exigir aceite`, async () => {
     render(<App />)
-    await screen.findByRole('heading', { name: 'Boas-vindas' })
+    await screen.findByRole('heading', { name: 'Acessar o Sistema' })
     const link = screen.getByRole('link', { name: `${documentName} (abre em nova aba)` })
     expect(link.getAttribute('href')).toBe(path)
     expect(link.getAttribute('target')).toBe('_blank')
@@ -343,7 +343,7 @@ test('sucesso volta ao login com confirmação e limpa o formulário de cadastro
   await fillRegistration()
   fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
   await screen.findByText('Solicitação recebida. Confira seu e-mail para confirmar o cadastro.')
-  expect(screen.getByRole('heading', { name: 'Boas-vindas' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Acessar o Sistema' })).toBeTruthy()
   expect(screen.getByLabelText('E-mail').getAttribute('value')).toBe(email)
   expect(mocks.rpc).toHaveBeenCalledWith('preparar_cadastro_com_rgm', {
     p_email: email, p_codigo_organizacao: 'A'.repeat(21), p_codigo_convite: 'b'.repeat(64),
@@ -406,23 +406,23 @@ test('SIGNED_IN durante o cadastro não abre MFA antes de terminar a solicitaç�
   await act(async () => finishSignup())
 
   await screen.findByText('Cadastro realizado. Entre para configurar seu Authenticator.')
-  expect(screen.getByRole('heading', { name: 'Boas-vindas' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Acessar o Sistema' })).toBeTruthy()
   expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' })
 })
 
 test('eventos de login fora do cadastro continuam exigindo MFA', async () => {
   render(<App />)
-  await screen.findByRole('heading', { name: 'Boas-vindas' })
+  await screen.findByRole('heading', { name: 'Acessar o Sistema' })
   mocks.resolveAccess.mockResolvedValue({ kind: 'setup-totp' })
   await runEvent(() => authCallback('SIGNED_IN', session))
   expect(screen.getByText('Etapa MFA: setup')).toBeTruthy()
   await runEvent(() => authCallback('SIGNED_OUT', null))
-  expect(screen.getByRole('heading', { name: 'Boas-vindas' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Acessar o Sistema' })).toBeTruthy()
 })
 
 test('login em outra aba fecha o modal de cadastro e encaminha para MFA', async () => {
   render(<App />)
-  await screen.findByRole('heading', { name: 'Boas-vindas' })
+  await screen.findByRole('heading', { name: 'Acessar o Sistema' })
   fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }))
   fireEvent.click(screen.getByRole('checkbox'))
   mocks.resolveAccess.mockResolvedValue({ kind: 'setup-totp' })
@@ -444,7 +444,7 @@ test('voltar à janela ainda verifica uma sessão autenticada e nega perfil bloq
   mocks.resolveAccess.mockResolvedValue({ kind: 'denied', message: 'Perfil bloqueado.' })
   await runEvent(() => fireEvent.focus(globalThis.window))
   expect(screen.getByText('Perfil bloqueado.')).toBeTruthy()
-  expect(screen.getByRole('heading', { name: 'Boas-vindas' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Acessar o Sistema' })).toBeTruthy()
   expect(screen.queryByRole('heading', { name: 'Olá, Aluno.' })).toBeNull()
 })
 
@@ -553,7 +553,7 @@ test('aluno tem uma única seção Minhas provas com a simulação, sem aba de p
 
 test('solicita link de recuperação com CAPTCHA e retorno ao próprio site', async () => {
   render(<App />)
-  await screen.findByRole('heading', { name: 'Boas-vindas' })
+  await screen.findByRole('heading', { name: 'Acessar o Sistema' })
   fireEvent.click(screen.getByRole('button', { name: 'Esqueci minha senha' }))
   fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: email } })
   fireEvent.click(screen.getByRole('button', { name: 'Validar CAPTCHA de login' }))
@@ -568,7 +568,7 @@ test('solicita link de recuperação com CAPTCHA e retorno ao próprio site', as
 
 test('link de recuperação passa por MFA e permite definir a nova senha sem abrir o painel', async () => {
   render(<App />)
-  await screen.findByRole('heading', { name: 'Boas-vindas' })
+  await screen.findByRole('heading', { name: 'Acessar o Sistema' })
   mocks.resolveRecoveryAccess.mockResolvedValueOnce({ kind: 'verify-totp', factorId: 'fator-simulado' })
     .mockResolvedValue({ kind: 'verified' })
   mocks.updateUser.mockImplementation(async () => {
@@ -589,7 +589,7 @@ test('link de recuperação passa por MFA e permite definir a nova senha sem abr
   await screen.findByText('Senha alterada. Entre com a nova senha e confirme o Authenticator.')
   expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'NovaSenha123!' })
   expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' })
-  expect(screen.getByRole('heading', { name: 'Boas-vindas' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Acessar o Sistema' })).toBeTruthy()
 })
 
 test('retorno inicial de recuperação não abre o painel antes do evento do Supabase', async () => {

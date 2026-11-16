@@ -150,4 +150,38 @@ test('045: RGM fica vinculado ao ticket e protege novos cadastros sem modificar 
   await assert.rejects(signup(unauthorizedEmail,await prepare(unauthorizedEmail,unauthorizedInvite,'NO-ACCEPT'),{
     termos_aceitos:'true',termos_versao:'2026-11-12-v11',privacidade_versao:'2026-11-12-v8',
   }),/aceite da versão atual/)
+  await t.test('RF02 bloqueia professor novo até aprovação auditada por administrador com MFA', async () => {
+    await migrate('054_aprovacao_professores.sql')
+    const email = 'aguardando-aprovacao@example.test'
+    const invite = await issue(email, 'PROFESSOR')
+    const professor = await signup(email, await prepare(email, invite, ''), {
+      nome: 'Professor novo', termos_versao: '2026-11-12-v11', privacidade_versao: '2026-11-12-v8',
+    })
+    const sessaoProfessor = randomUUID()
+    await db.query('INSERT INTO auth.sessions(id,user_id) VALUES($1,$2)', [sessaoProfessor, professor])
+    const executar = (sql: string, params: unknown[] = [], sub = admin, sessao = adminSession, aal = 'aal2') =>
+      db.transaction(async tx => {
+        await tx.query("SELECT set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub, aal, session_id: sessao })])
+        await tx.exec('SET LOCAL ROLE authenticated')
+        return tx.query(sql, params)
+      })
+    const listar = 'SELECT public.listar_professores_pendentes() AS pendentes'
+    const aprovar = 'SELECT public.aprovar_professor($1) AS aprovado'
+    const acessar = () => executar("SELECT public.registrar_acesso()->>'situacao' AS situacao", [], professor, sessaoProfessor)
+    assert.deepEqual((await acessar()).rows, [{ situacao: 'PENDENTE' }])
+    assert.deepEqual((await db.query('SELECT situacao FROM public.perfis WHERE id=$1', [teacherId])).rows, [{ situacao: 'ATIVO' }])
+    const [{ pendentes }] = (await executar(listar)).rows as { pendentes: { email: string }[] }[]
+    assert.deepEqual(pendentes.map(item => item.email), [email])
+    await assert.rejects(executar(listar, [], professor, sessaoProfessor), { code: '42501' })
+    await assert.rejects(executar(aprovar, [professor], professor, sessaoProfessor), { code: '42501' })
+    await assert.rejects(executar(aprovar, [professor], admin, adminSession, 'aal1'), { code: '42501' })
+    assert.deepEqual((await executar(aprovar, [professor])).rows, [{ aprovado: true }])
+    assert.deepEqual((await executar(aprovar, [professor])).rows, [{ aprovado: false }])
+    assert.deepEqual((await acessar()).rows, [{ situacao: 'ATIVO' }])
+    assert.deepEqual((await executar(listar)).rows, [{ pendentes: [] }])
+    assert.deepEqual((await db.query(
+      "SELECT usuario_id FROM public.eventos_seguranca WHERE evento='PROFESSOR_APROVADO' AND recurso_id=$1", [professor]
+    )).rows, [{ usuario_id: admin }])
+  })
+
 })

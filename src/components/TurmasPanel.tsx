@@ -130,7 +130,7 @@ export function TurmasPanel({ profile, initialDraftsTurmaId = null }: {
               {turmaAberta === turma.id && <AlunosTurmaPanel key={turma.id} turmaId={turma.id} turmaNome={turma.nome} />}
               {rascunhosAbertos === turma.id && <RascunhosTurmaPanel key={`rascunhos-${turma.id}`} turmaId={turma.id} turmaNome={turma.nome}
                 podeEditar={isTeacher && turma.situacao === 'ATIVA'}
-                onPublicada={() => setAtualizacaoPublicadas((current) => current + 1)} />}
+                podeCancelar={isTeacher} onAtualizarPublicadas={() => setAtualizacaoPublicadas((current) => current + 1)} />}
               {publicadasAbertas === turma.id && <PublicadasTurmaPanel key={`publicadas-${turma.id}`} turmaId={turma.id}
                 turmaNome={turma.nome} atualizacao={atualizacaoPublicadas} podeCorrigir={isTeacher} />}
             </li>

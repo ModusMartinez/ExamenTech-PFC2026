@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { listarAvaliacoesRascunho } from '../services/avaliacoes'
+import { cancelarAvaliacao, listarAvaliacoesRascunho } from '../services/avaliacoes'
 import type { AvaliacaoRascunho } from '../services/avaliacaoValidation'
 import { EditarAvaliacaoForm } from './EditarAvaliacaoForm'
 import { NovaQuestaoForm } from './NovaQuestaoForm'
 import { QuestoesAvaliacaoPanel } from './QuestoesAvaliacaoPanel'
 import { PublicarAvaliacaoForm } from './PublicarAvaliacaoForm'
 
-export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, onPublicada }: {
-  turmaId: string; turmaNome: string; podeEditar: boolean; onPublicada: () => void
+export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancelar, onAtualizarPublicadas }: {
+  turmaId: string; turmaNome: string; podeEditar: boolean; podeCancelar: boolean; onAtualizarPublicadas: () => void
 }) {
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoRascunho[]>([])
   const [loading, setLoading] = useState(true)
@@ -17,15 +17,20 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, onPublicad
   const [novaQuestao, setNovaQuestao] = useState<AvaliacaoRascunho | null>(null)
   const [questoesAbertas, setQuestoesAbertas] = useState<string | null>(null)
   const [publicando, setPublicando] = useState<AvaliacaoRascunho | null>(null)
+  const [confirmando, setConfirmando] = useState<AvaliacaoRascunho | null>(null)
+  const [cancelando, setCancelando] = useState(false)
+  const [erroCancelamento, setErroCancelamento] = useState('')
+  const manterRascunho = useRef<HTMLButtonElement>(null)
   const [success, setSuccess] = useState('')
   const actionButton = useRef<HTMLButtonElement | null>(null)
   const notice = useRef<HTMLParagraphElement>(null)
-  const formularioAberto = Boolean(editando || novaQuestao || publicando)
+  const formularioAberto = Boolean(editando || novaQuestao || publicando || confirmando)
   const avaliacaoAberta = avaliacoes.find((avaliacao) => avaliacao.id === questoesAbertas)
 
   useEffect(() => {
-    if (!editando && !novaQuestao && !publicando) (success ? notice.current : actionButton.current)?.focus()
-  }, [editando, novaQuestao, publicando, success])
+    if (confirmando) manterRascunho.current?.focus()
+    else if (!editando && !novaQuestao && !publicando) (success ? notice.current : actionButton.current)?.focus()
+  }, [editando, novaQuestao, publicando, confirmando, success])
 
   useEffect(() => {
     let active = true
@@ -44,6 +49,23 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, onPublicad
     void load()
     return () => { active = false }
   }, [turmaId, refresh])
+
+  async function confirmarCancelamento() {
+    if (!confirmando || cancelando) return
+    setCancelando(true)
+    setErroCancelamento('')
+    try {
+      await cancelarAvaliacao(confirmando.id)
+      setAvaliacoes(atuais => atuais.filter(item => item.id !== confirmando.id))
+      setSuccess(`Avaliação “${confirmando.titulo}” cancelada.`)
+      setConfirmando(null)
+      onAtualizarPublicadas()
+    } catch (error) {
+      setErroCancelamento(error instanceof Error ? error.message : 'Não foi possível cancelar o rascunho.')
+    } finally {
+      setCancelando(false)
+    }
+  }
 
   return (
     <section id={`rascunhos-${turmaId}`} className="rascunhos-turma" aria-label={`Rascunhos de ${turmaNome}`}>
@@ -106,6 +128,14 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, onPublicad
                         setPublicando(avaliacao)
                       }}>Publicar</button>
                     </>}
+                    {podeCancelar && <button type="button" className="turmas-refresh" disabled={formularioAberto}
+                      aria-label={`Cancelar rascunho ${avaliacao.titulo}`} onClick={(event) => {
+                        actionButton.current = event.currentTarget
+                        setSuccess('')
+                        setErroCancelamento('')
+                        setQuestoesAbertas(null)
+                        setConfirmando(avaliacao)
+                      }}>Cancelar</button>}
                   </div></td>
                 </tr>
               ))}
@@ -115,6 +145,16 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, onPublicad
       )}
       {!loading && !error && avaliacaoAberta && <QuestoesAvaliacaoPanel key={avaliacaoAberta.id}
         avaliacaoId={avaliacaoAberta.id} avaliacaoTitulo={avaliacaoAberta.titulo} podeEditar={podeEditar} />}
+      {confirmando && <div className="provas-aviso" role="group" aria-label="Confirmar cancelamento do rascunho">
+        <p>Cancelar “{confirmando.titulo}” impedirá editar ou publicar a avaliação.</p>
+        {erroCancelamento && <p className="alert error" role="alert">{erroCancelamento}</p>}
+        <div className="avaliacao-form-actions">
+          <button type="button" className="turmas-refresh" ref={manterRascunho} disabled={cancelando}
+            onClick={() => setConfirmando(null)}>Manter avaliação</button>
+          <button type="button" className="turmas-refresh" disabled={cancelando}
+            onClick={() => void confirmarCancelamento()}>{cancelando ? 'Cancelando...' : 'Confirmar cancelamento'}</button>
+        </div>
+      </div>}
       {podeEditar && editando && <EditarAvaliacaoForm key={editando.id} avaliacao={editando}
         onCancelar={() => setEditando(null)} onSalvo={(atualizada) => {
           setAvaliacoes((current) => current.map((item) => item.id === atualizada.id ? atualizada : item))
@@ -131,7 +171,7 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, onPublicad
           setAvaliacoes((current) => current.filter((item) => item.id !== publicando.id))
           setSuccess(`Avaliação “${publicando.titulo}” publicada.`)
           setPublicando(null)
-          onPublicada()
+          onAtualizarPublicadas()
         }} />}
     </section>
   )

@@ -106,7 +106,8 @@ export function createAvaliacoesHandler(
         const { data, error } = await (publicadas
           ? consulta.in('situacao', ['PUBLICADA', 'CANCELADA'])
           : consulta.eq('situacao', 'RASCUNHO'))
-          .order(publicadas ? 'publicada_em' : 'criado_em', { ascending: false }).order('id', { ascending: false }).limit(50)
+          .order(publicadas ? 'publicada_em' : 'criado_em', { ascending: false, ...(publicadas ? { nullsFirst: false } : {}) })
+          .order('id', { ascending: false }).limit(50)
         if (error || !Array.isArray(data) || data.length > 50) {
           return jsonResponse(503, { message: 'Não foi possível consultar as avaliações.' })
         }

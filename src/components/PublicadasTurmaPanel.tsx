@@ -67,7 +67,7 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorr
         <button type="button" className="turmas-refresh" disabled={loading || cancelando}
           onClick={() => setRefresh((current) => current + 1)}>Atualizar publicadas</button>
       </div>
-      <p className="turmas-note">Até 50 publicações mais recentes. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
+      <p className="turmas-note">Até 50 avaliações, incluindo as canceladas. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
       {loading && <p role="status">Carregando publicadas...</p>}
       {error && <p className="alert error" role="alert">{error}</p>}
       {!loading && !error && avaliacoes.length === 0 && <p role="status">Nenhuma avaliação publicada nesta turma.</p>}
@@ -93,9 +93,9 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorr
                 {new Date(data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
               </time></td>)}
               <td>{avaliacao.duracao_minutos} min</td>
-              <td><time dateTime={avaliacao.publicada_em}>
+              <td>{avaliacao.publicada_em ? <time dateTime={avaliacao.publicada_em}>
                 {new Date(avaliacao.publicada_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
-              </time>{avaliacao.situacao === 'CANCELADA' && <div>Cancelada</div>}</td>
+              </time> : 'Sem publicação'}{avaliacao.situacao === 'CANCELADA' && <div>Cancelada</div>}</td>
             </tr>)}</tbody>
           </table>
         </div>
@@ -110,7 +110,7 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorr
             <button type="button" className="turmas-refresh" ref={abrirConfirmacao} aria-expanded={confirmando}
               disabled={confirmando} onClick={() => setConfirmando(true)}>Cancelar avaliação</button>
             {confirmando && <div className="provas-aviso" role="group" aria-label="Confirmar cancelamento da avaliação">
-              <p>As tentativas em andamento serão encerradas e novas tentativas ficarão bloqueadas. As respostas já salvas serão preservadas.</p>
+              <p>As tentativas em andamento serão encerradas e novas tentativas ficarão bloqueadas. As respostas salvas e os resultados já divulgados continuarão disponíveis no histórico.</p>
               {erroCancelamento && <p className="alert error" role="alert">{erroCancelamento}</p>}
               <div className="avaliacao-form-actions">
                 <button type="button" className="turmas-refresh" ref={manterAvaliacao} disabled={cancelando} onClick={() => {

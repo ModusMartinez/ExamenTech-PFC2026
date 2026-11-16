@@ -25,7 +25,7 @@
 .overview-indicator-card > span { color: var(--gray); font-size: .75rem; }
 .dashboard-refresh { padding: 8px 14px; border: 1px solid #cbddec; border-radius: 7px; background: #fff; color: var(--dark-blue); cursor: pointer; }
 .dashboard-refresh:hover { background: #f1f6fa; }
-.overview-period-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 0 0 18px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; }
+.overview-period-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 0 0 18px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
 .overview-period-filter > p { flex: 0 0 100%; margin: 0; color: var(--gray); font-size: .84rem; }
 .overview-period-filter label { display: grid; gap: 5px; color: var(--dark-blue); font-size: .82rem; font-weight: 600; }
 .overview-period-filter input { min-height: 36px; padding: 6px 9px; border: 1px solid #cbddec; border-radius: 7px; background: #fff; color: var(--text); font: inherit; }

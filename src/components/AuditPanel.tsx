@@ -15,6 +15,7 @@ type SecurityEvent = {
 }
 
 const eventNames: Record<string, string> = {
+  PROFESSOR_APROVADO: 'Cadastro de professor aprovado',
   CADASTRO_REALIZADO: 'Cadastro realizado',
   LOGIN_SUCESSO: 'Login autorizado',
   LOGIN_NEGADO: 'Login negado',

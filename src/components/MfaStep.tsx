@@ -125,7 +125,7 @@ export function MfaStep({ mode, factorId, onComplete, onCancel }: MfaStepProps) 
     <>
       <header className="form-header">
         <p className="overline">VERIFICAÇÃO EM DUAS ETAPAS</p>
-        <h2>{mode === 'setup' ? 'Proteja sua conta' : 'Confirme seu acesso'}</h2>
+        <h1>{mode === 'setup' ? 'Proteja sua conta' : 'Confirme seu acesso'}</h1>
         <p className="subtitle">
           {mode === 'setup'
             ? 'Configure um aplicativo autenticador para continuar.'

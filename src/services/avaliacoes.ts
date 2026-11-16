@@ -70,7 +70,6 @@ export async function cancelarAvaliacao(avaliacaoId: string) {
   if (!UUID_PATTERN.test(avaliacaoId)) throw new Error('ID da avaliação inválido.')
   const { data, error } = await supabase.rpc('cancelar_avaliacao', { p_avaliacao_id: avaliacaoId })
   if (error?.code === '42501') throw new Error('O cancelamento exige o professor autor com MFA.')
-  if (error?.code === '55000') throw new Error('Só é possível cancelar avaliações publicadas sem resultados divulgados.')
   const canceladaEm = lerDataComFuso(data?.cancelada_em)
   if (error || data?.id !== avaliacaoId || data.situacao !== 'CANCELADA' || !canceladaEm) {
     throw new Error('Não foi possível confirmar o cancelamento. Atualize a lista de avaliações e confira a situação.')

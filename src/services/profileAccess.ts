@@ -21,7 +21,9 @@ export function decideProfileAccess(record: ProfileRecord): ProfileDecision {
   if (record.situacao !== 'ATIVO') {
     return {
       kind: 'denied',
-      message: 'Sua conta não está ativa. Procure o administrador.',
+      message: record.perfil === 'PROFESSOR' && record.situacao === 'PENDENTE'
+        ? 'Seu cadastro de professor aguarda a aprovação do administrador.'
+        : 'Sua conta não está ativa. Procure o administrador.',
     }
   }
 

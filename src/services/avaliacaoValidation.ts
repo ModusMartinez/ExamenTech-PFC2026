@@ -21,7 +21,7 @@ export type AvaliacaoRascunho = DadosAvaliacaoRascunho & {
 export type PublicacaoAvaliacao = { id: string; situacao: 'PUBLICADA'; publicada_em: string }
 export type AvaliacaoPublicada = Omit<AvaliacaoRascunho, 'situacao'> & (PublicacaoAvaliacao | {
   situacao: 'CANCELADA'
-  publicada_em: string
+  publicada_em: string | null
   cancelada_em: string
 })
 export type AvaliacaoAluno = DadosAvaliacaoRascunho & PublicacaoAvaliacao & { turma_nome: string }
@@ -99,7 +99,7 @@ export function lerAvaliacaoPublicada(value: unknown): AvaliacaoPublicada | null
   if (value.situacao === 'CANCELADA') {
     const publicadaEm = lerDataComFuso(value.publicada_em)
     const canceladaEm = lerDataComFuso(value.cancelada_em)
-    return publicadaEm && canceladaEm && canceladaEm >= publicadaEm
+    return canceladaEm && (value.publicada_em === null || (publicadaEm && canceladaEm >= publicadaEm))
       ? { ...registro, situacao: 'CANCELADA', publicada_em: publicadaEm, cancelada_em: canceladaEm }
       : null
   }

@@ -14,6 +14,7 @@ import { LegalModal } from './components/LegalModal'
 import { LegalFooter } from './components/LegalFooter'
 import { DashboardOverview } from './components/DashboardOverview'
 import { IngressoAlunoGate } from './components/IngressoAlunoGate'
+import { AprovacaoProfessoresPanel } from './components/AprovacaoProfessoresPanel'
 import { AdminMfaPanel } from './components/AdminMfaPanel'
 import { BrandLogo } from './components/BrandLogo'
 import { LegalPage } from './components/LegalPage'
@@ -660,40 +661,14 @@ function AccessApp() {
 
   return (
     <main className="app-container">
-      <section className="banner-section">
-        <BrandLogo />
-
-        <div className="banner-text">
-          <p className="overline">AMBIENTE ACADÊMICO</p>
-
-          <h1>
-            Segurança e organização para cada avaliação.
-          </h1>
-
-          <p>
-            Acesse provas, atividades e informações acadêmicas
-            em um único ambiente.
-          </p>
-        </div>
-
-        <p className="copyright">
-          © {new Date().getFullYear()} ExamenTech · Sistema de
-          Gerenciamento Acadêmico
-        </p>
-      </section>
-
       <section className="form-section">
         <div className="form-wrapper">
           <BrandLogo />
 
           {page === 'login' ? (
             <>
-              <header className="form-header">
-                <p className="overline">ACESSO AO SISTEMA</p>
-                <h2>Boas-vindas</h2>
-                <p className="subtitle">
-                  Informe seus dados para continuar.
-                </p>
+              <header className="form-header login-header">
+                <h1>Acessar o Sistema</h1>
               </header>
 
               <form noValidate onSubmit={handleLogin}>
@@ -735,15 +710,6 @@ function AccessApp() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className="btn-link recovery-link"
-                  disabled={loading}
-                  onClick={openPasswordRecovery}
-                >
-                  Esqueci minha senha
-                </button>
-
                 <TurnstileWidget
                   siteKey={turnstileSiteKey}
                   action="login"
@@ -761,11 +727,6 @@ function AccessApp() {
                     setLoginError(message)
                   }}
                 />
-
-                <p className="security-note">
-                  O Turnstile protege o acesso. A senha é verificada pelo
-                  Supabase Auth e não é armazenada neste aplicativo.
-                </p>
 
                 {loginError && (
                   <div className="alert error" role="alert">
@@ -791,6 +752,15 @@ function AccessApp() {
                       ? 'Entrar'
                       : 'Conclua a verificação'}
                 </button>
+
+                <button
+                  type="button"
+                  className="btn-link recovery-link"
+                  disabled={loading}
+                  onClick={openPasswordRecovery}
+                >
+                  Esqueci minha senha
+                </button>
               </form>
 
               <div className="form-footer">
@@ -805,6 +775,10 @@ function AccessApp() {
                   Criar conta
                 </button>
               </div>
+
+              <p className="auth-copyright">
+                © {new Date().getFullYear()} ExamenTech · Sistema de Gerenciamento Acadêmico
+              </p>
             </>
           ) : page === 'request-password' ? (
             <>
@@ -817,7 +791,7 @@ function AccessApp() {
                   ← Voltar
                 </button>
                 <p className="overline">RECUPERAÇÃO DE ACESSO</p>
-                <h2>Redefinir senha</h2>
+                <h1>Redefinir senha</h1>
                 <p className="subtitle">Enviaremos um link para o e-mail da sua conta.</p>
               </header>
 
@@ -866,7 +840,7 @@ function AccessApp() {
             <>
               <header className="form-header">
                 <p className="overline">RECUPERAÇÃO DE ACESSO</p>
-                <h2>Crie uma nova senha</h2>
+                <h1>Crie uma nova senha</h1>
                 <p className="subtitle">O Authenticator foi confirmado. Defina a senha para entrar novamente.</p>
               </header>
 
@@ -906,7 +880,7 @@ function AccessApp() {
             <>
               <header className="form-header">
                 <p className="overline">RECUPERAÇÃO DE ACESSO</p>
-                <h2>Link indisponível</h2>
+                <h1>Link indisponível</h1>
                 <p className="subtitle">O link pode ter expirado ou já ter sido utilizado.</p>
               </header>
               {recoveryError && <div className="alert error" role="alert">{recoveryError}</div>}
@@ -939,7 +913,7 @@ function AccessApp() {
                 </button>
 
                 <p className="overline">CADASTRO POR CONVITE</p>
-                <h2>Crie sua conta</h2>
+                <h1>Crie sua conta</h1>
 
                 <p className="subtitle">
                   Seu convite define se a conta será de aluno ou professor.
@@ -1077,7 +1051,7 @@ function AccessApp() {
                     </div>
 
                     <p className="security-note">
-                      Convites para professores são emitidos pelo administrador.
+                      Professores precisam de convite e da aprovação do administrador após o cadastro.
                       Para alunos, pelo professor ou administrador da organização.
                     </p>
                   </>
@@ -1157,7 +1131,7 @@ type DashboardProps = {
 
 function Dashboard({ user, onLogout }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
-  const [dashboardView, setDashboardView] = useState<'dashboard' | 'inicio' | 'auditoria' | 'mfa' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'provas'>('dashboard')
+  const [dashboardView, setDashboardView] = useState<'dashboard' | 'inicio' | 'auditoria' | 'mfa' | 'professores' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'provas'>('dashboard')
   const [draftsTarget, setDraftsTarget] = useState<string | null>(null)
   const [examActive, setExamActive] = useState(false)
   const [examNotice, setExamNotice] = useState('')
@@ -1230,6 +1204,11 @@ function Dashboard({ user, onLogout }: DashboardProps) {
               </button>
             )}
             {user.profile === 'Administrador' && (
+              <button type="button" aria-pressed={dashboardView === 'professores'} onClick={() => setDashboardView('professores')}>
+                Professores
+              </button>
+            )}
+            {user.profile === 'Administrador' && (
               <button type="button" aria-pressed={dashboardView === 'mfa'} onClick={() => setDashboardView('mfa')}>
                 Redefinir 2FA
               </button>
@@ -1245,7 +1224,8 @@ function Dashboard({ user, onLogout }: DashboardProps) {
           </nav>
         )}
 
-        {dashboardView === 'dashboard' ? <DashboardOverview /> : showingAudit ? <AuditPanel /> : dashboardView === 'mfa' && user.profile === 'Administrador' ? <AdminMfaPanel /> : dashboardView === 'turmas' &&
+        {dashboardView === 'dashboard' ? <DashboardOverview /> : showingAudit ? <AuditPanel /> : dashboardView === 'mfa' && user.profile === 'Administrador' ? <AdminMfaPanel /> :
+          dashboardView === 'professores' && user.profile === 'Administrador' ? <AprovacaoProfessoresPanel /> : dashboardView === 'turmas' &&
           (user.profile === 'Administrador' || user.profile === 'Professor') ? (
           <TurmasPanel profile={user.profile} initialDraftsTurmaId={draftsTarget} />
         ) : dashboardView === 'nova-avaliacao' && user.profile === 'Professor' ? (

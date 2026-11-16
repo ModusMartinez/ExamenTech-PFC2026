@@ -22,7 +22,7 @@ test('RF28–RF29 cancelam a avaliação e preservam respostas e tentativas já 
   await db.query("INSERT INTO public.turma_alunos(turma_id,aluno_id,situacao) VALUES ($1,$2,'ATIVA')", [turmaId, segundoAluno])
 
   for (const nome of ['037_camera_sem_interrupcao', '038_tentativa_sessao', '039_correcao_tentativa',
-    '040_finalizacao_e_resultados', '042_cancelamento_avaliacao']) {
+    '040_finalizacao_e_resultados', '042_cancelamento_avaliacao', '055_cancelamento_avaliacao_em_qualquer_estado']) {
     await db.exec(await readFile(new URL(`../database/${nome}.sql`, import.meta.url), 'utf8'))
   }
 
@@ -41,11 +41,14 @@ test('RF28–RF29 cancelam a avaliação e preservam respostas e tentativas já 
     [id, prova.questaoId, versao, alternativa, chave])
   await salvar(1)
 
-  await t.test('só o autor com MFA cancela e o rascunho continua editável', async () => {
+  await t.test('só o autor com MFA cancela, inclusive quando a avaliação é rascunho', async () => {
     for (const usuario of [colega, admin, aluno]) await assert.rejects(cancelar(prova.avaliacaoId, usuario), { code: '42501' })
     await assert.rejects(cancelar(prova.avaliacaoId, professor, 'aal1'), { code: '42501' })
-    await assert.rejects(cancelar(avaliacaoId), { code: '55000' })
-    assert.deepEqual((await db.query('SELECT situacao FROM public.avaliacoes WHERE id=$1', [avaliacaoId])).rows, [{ situacao: 'RASCUNHO' }])
+    const rascunhoCancelado = await cancelar(avaliacaoId)
+    assert.deepEqual(await cancelar(avaliacaoId), rascunhoCancelado)
+    assert.deepEqual((await db.query('SELECT situacao, publicada_em FROM public.avaliacoes WHERE id=$1', [avaliacaoId])).rows,
+      [{ situacao: 'CANCELADA', publicada_em: null }])
+    await assert.rejects(queryAs(professor, 'SELECT public.publicar_avaliacao($1)', [avaliacaoId]), { code: '55000' })
   })
 
   await t.test('fecha somente tentativas ativas, audita uma vez e mantém a resposta recebida', async () => {
@@ -82,7 +85,14 @@ test('RF28–RF29 cancelam a avaliação e preservam respostas e tentativas já 
     assert.deepEqual((await queryAs(segundoAluno, situacao, [id])).rows, [])
     assert.deepEqual((await queryAs(aluno, 'SELECT public.listar_meus_resultados() AS resultados')).rows, [{ resultados: [] }])
     const divulgada = (await criarProva()).avaliacaoId
+    const tentativaDivulgada = await iniciar(divulgada)
+    await queryAs(aluno, "SELECT public.encerrar_tentativa($1,'ENVIO',$2)", [tentativaDivulgada, chave])
     await db.query('INSERT INTO examentech_private.resultados_publicados(avaliacao_id,publicado_por) VALUES ($1,$2)', [divulgada, professor])
-    await assert.rejects(cancelar(divulgada), { code: '55000' })
+    const consultarResultado = () => queryAs(aluno, 'SELECT public.consultar_meu_resultado($1)', [tentativaDivulgada])
+    const resultadoAntes = await consultarResultado()
+    const cancelamento = await cancelar(divulgada)
+    assert.deepEqual(await cancelar(divulgada), cancelamento)
+    assert.deepEqual((await consultarResultado()).rows, resultadoAntes.rows)
+    await assert.rejects(iniciar(divulgada), { code: '55000' })
   })
 })
