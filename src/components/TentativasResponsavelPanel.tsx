@@ -6,6 +6,7 @@ import type { ResponsiblePhoto } from '../services/examPhotos'
 import { photosEnabled } from '../services/examFeatures'
 import { CorrecaoTentativaPanel } from './CorrecaoTentativaPanel'
 import { PublicacaoResultadosPanel } from './PublicacaoResultadosPanel'
+import { LinhaTempoTentativa } from './LinhaTempoTentativa'
 import '../styles/provas.css'
 
 const momentLabels = { INICIAL: 'Foto inicial', PROVA_1: 'Foto durante a prova 1', PROVA_2: 'Foto durante a prova 2', PROVA_3: 'Foto durante a prova 3' }
@@ -97,12 +98,12 @@ export function TentativasResponsavelPanel({ avaliacaoId, podeCorrigir = false, 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [refresh, setRefresh] = useState(0)
-  const [selecao, setSelecao] = useState<{ id: string; painel: 'fotos' | 'correcao' } | null>(null)
+  const [selecao, setSelecao] = useState<{ id: string; painel: 'fotos' | 'correcao' | 'linha-tempo' } | null>(null)
   const [resultadosPublicados, setResultadosPublicados] = useState(false)
   const [revisaoCorrecao, setRevisaoCorrecao] = useState(0)
   const marcarPublicados = useCallback(() => setResultadosPublicados(true), [])
 
-  function alternarPainel(id: string, painel: 'fotos' | 'correcao') {
+  function alternarPainel(id: string, painel: 'fotos' | 'correcao' | 'linha-tempo') {
     setSelecao(atual => atual?.id === id && atual.painel === painel ? null : { id, painel })
   }
   useEffect(() => {
@@ -131,12 +132,15 @@ export function TentativasResponsavelPanel({ avaliacaoId, podeCorrigir = false, 
         <h5>{attempt.aluno_nome}</h5>
         <p>{situacoesTentativa[attempt.situacao]} · ciclo {attempt.ciclo}</p>
         <div className="avaliacao-form-actions">
+          <button type="button" className="turmas-refresh" aria-expanded={painel === 'linha-tempo'}
+            onClick={() => alternarPainel(attempt.id, 'linha-tempo')}>{painel === 'linha-tempo' ? 'Fechar linha do tempo' : 'Linha do tempo'}</button>
           {photosEnabled() && <button type="button" className="turmas-refresh" aria-expanded={painel === 'fotos'}
             onClick={() => alternarPainel(attempt.id, 'fotos')}>{painel === 'fotos' ? 'Fechar fotos' : `Fotos de ${attempt.aluno_nome}`}</button>}
           {podeCorrigir && attempt.situacao === 'FINALIZADA' && <button type="button" className="turmas-refresh" aria-expanded={painel === 'correcao'}
             onClick={() => alternarPainel(attempt.id, 'correcao')}>{painel === 'correcao' ? 'Fechar correção'
               : `${resultadosPublicados ? 'Ver correção de' : 'Corrigir tentativa de'} ${attempt.aluno_nome}`}</button>}
         </div>
+        {painel === 'linha-tempo' && <LinhaTempoTentativa tentativaId={attempt.id} />}
         {painel === 'fotos' && <FotosResponsavel tentativaId={attempt.id} />}
         {painel === 'correcao' && podeCorrigir && <CorrecaoTentativaPanel tentativaId={attempt.id} alunoNome={attempt.aluno_nome}
           somenteConsulta={resultadosPublicados} onCorrecaoSalva={() => setRevisaoCorrecao(valor => valor + 1)} />}

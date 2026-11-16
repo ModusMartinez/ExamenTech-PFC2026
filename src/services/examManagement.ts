@@ -5,6 +5,44 @@ export type ResponsibleAttempt = {
   situacao: 'EM_ANDAMENTO' | 'FINALIZADA' | 'INTERROMPIDA' | 'CANCELADA';
   iniciada_em: string; limite_em: string; encerrada_em: string | null; ciclo: number;
 }
+
+export type AttemptTimelineItem = {
+  id: string
+  ocorrido_em: string
+  tipo: 'EVENTO' | 'FOTO'
+  titulo: string
+  detalhe: string
+  situacao: string | null
+  momento: string | null
+  expira_em: string | null
+}
+
+export async function listarLinhaTempoTentativa(tentativaId: string): Promise<AttemptTimelineItem[]> {
+  if (!UUID_PATTERN.test(tentativaId)) throw new Error('Tentativa inválida.')
+  const { supabase } = await import('../lib/supabase')
+  const { data, error } = await supabase.rpc('listar_linha_tempo_tentativa', { p_tentativa_id: tentativaId })
+  if (error || !Array.isArray(data) || data.length > 500) {
+    throw new Error(error?.code === '42501' ? 'Somente o professor responsável pode consultar esta linha do tempo.'
+      : 'Não foi possível consultar a linha do tempo para seu acesso.')
+  }
+  return data.map((value: unknown) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Os registros da linha do tempo são inválidos.')
+    const item = value as Record<string, unknown>
+    if (typeof item.id !== 'string' || !UUID_PATTERN.test(item.id) ||
+        (item.tipo !== 'EVENTO' && item.tipo !== 'FOTO') ||
+        typeof item.titulo !== 'string' || typeof item.detalhe !== 'string' ||
+        !lerDataComFuso(item.ocorrido_em) ||
+        (item.situacao !== null && typeof item.situacao !== 'string') ||
+        (item.momento !== null && typeof item.momento !== 'string') ||
+        (item.expira_em !== null && !lerDataComFuso(item.expira_em))) {
+      throw new Error('Os registros da linha do tempo são inválidos.')
+    }
+    return { id: item.id, ocorrido_em: item.ocorrido_em as string, tipo: item.tipo as AttemptTimelineItem['tipo'],
+      titulo: item.titulo, detalhe: item.detalhe, situacao: item.situacao as string | null,
+      momento: item.momento as string | null, expira_em: item.expira_em as string | null }
+  })
+}
+
 export async function listarTentativasResponsavel(avaliacaoId: string): Promise<ResponsibleAttempt[]> {
   if (!UUID_PATTERN.test(avaliacaoId)) throw new Error('Avaliação inválida.')
   const { supabase } = await import('../lib/supabase')

@@ -288,3 +288,10 @@
   outline: 3px solid #2563eb;
   outline-offset: 2px;
 }
+
+.provas-linha-tempo { margin-top: 1rem; padding: 1rem; border: 1px solid #d9e2ec; border-radius: 10px; background: #fff; }
+.provas-linha-tempo h5 { margin: 0; }
+.provas-linha-tempo ol { display: grid; gap: .75rem; margin: 1rem 0 0; padding: 0 0 0 1.25rem; }
+.provas-linha-tempo li { display: grid; gap: .2rem; padding: .15rem .5rem; }
+.provas-linha-tempo time, .provas-linha-tempo li span { color: #526579; font-size: .88rem; }
+.provas-linha-tempo li strong { color: #173b5e; }
