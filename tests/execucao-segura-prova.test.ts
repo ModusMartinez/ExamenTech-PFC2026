@@ -9,9 +9,10 @@ import { prepararBancoCamera } from './helpers/bancoCamera.ts'
 test('RF30–RF36 exigem a foto da prova e registram bloqueios sem classificar o aluno', async t => {
   const db = new PGlite()
   t.after(() => db.close())
-  const { aluno, professor, admin, turmaId, queryAs, criarProva } = await prepararBancoCamera(db)
+  const { aluno, professor, colega, admin, turmaId, queryAs, criarProva } = await prepararBancoCamera(db)
   for (const nome of ['037_camera_sem_interrupcao', '038_tentativa_sessao', '039_correcao_tentativa',
-    '040_finalizacao_e_resultados', '042_cancelamento_avaliacao', '043_execucao_segura_prova']) {
+    '040_finalizacao_e_resultados', '042_cancelamento_avaliacao', '043_execucao_segura_prova',
+    '049_linha_tempo_tentativa', '052_pausa_prova']) {
     await db.exec(await readFile(new URL(`../database/${nome}.sql`, import.meta.url), 'utf8'))
   }
   const prova = await criarProva()
@@ -24,6 +25,8 @@ test('RF30–RF36 exigem a foto da prova e registram bloqueios sem classificar o
     "SELECT public.encerrar_tentativa($1,$2,$3)->>'situacao' AS situacao", [id, motivo, chave])
   const clipboard = (id: string, op: string, solicitacao = randomUUID(), execucao = chave, usuario = aluno) =>
     queryAs(usuario, 'SELECT public.registrar_bloqueio_clipboard($1,$2,$3,$4) AS ocorrencia', [id, solicitacao, execucao, op])
+  const pausar = (id: string, motivo: string, solicitacao = randomUUID(), execucao = chave, usuario = aluno) =>
+    queryAs(usuario, 'SELECT public.registrar_pausa_prova($1,$2,$3,$4) AS ocorrencia', [id, solicitacao, execucao, motivo])
 
   await t.test('prova sem coleta ou com aviso antigo é recusada sem consumir a tentativa', async () => {
     await assert.rejects(iniciar(prova.avaliacaoId), { code: '55000' })
@@ -67,14 +70,35 @@ test('RF30–RF36 exigem a foto da prova e registram bloqueios sem classificar o
     assert.deepEqual((await db.query('SELECT situacao FROM public.tentativas WHERE id=$1', [id])).rows, [{ situacao: 'EM_ANDAMENTO' }])
   })
 
-  await t.test('sair da tela cheia e perder foco encerram e auditam uma vez sem apagar a resposta', async () => {
+  await t.test('RF32 registra os motivos na linha do tempo sem mudar a situação, as respostas ou o prazo', async () => {
+    const antes = await db.query('SELECT situacao, limite_em, encerrada_em FROM public.tentativas WHERE id=$1', [id])
+    const solicitacao = randomUUID()
+    const primeira = await pausar(id, 'ABA_OU_FOCO', solicitacao)
+    assert.deepEqual((await pausar(id, 'ABA_OU_FOCO', solicitacao)).rows, primeira.rows)
+    await assert.rejects(pausar(id, 'TELA_CHEIA', solicitacao), { code: '23514' })
+    await assert.rejects(pausar(id, 'SAIDA'), { code: '23514' })
+    await assert.rejects(pausar(id, 'TELA_CHEIA', randomUUID(), randomUUID()), { code: '42501' })
+    await assert.rejects(pausar(id, 'TELA_CHEIA', randomUUID(), chave, professor), { code: '42501' })
+    await pausar(id, 'TELA_CHEIA')
+    const linhaDoTempo = 'SELECT public.listar_linha_tempo_tentativa($1) AS itens'
+    const [{ itens }] = (await queryAs<{ itens: { titulo: string; detalhe: string }[] }>(professor, linhaDoTempo, [id])).rows
+    assert.deepEqual(itens.filter(item => item.titulo === 'PROVA_PAUSADA').map(item => item.detalhe),
+      ['perda_aba_ou_foco', 'saida_tela_cheia'])
+    await assert.rejects(queryAs(colega, linhaDoTempo, [id]), { code: '42501' })
+    assert.deepEqual((await db.query('SELECT situacao, limite_em, encerrada_em FROM public.tentativas WHERE id=$1', [id])).rows, antes.rows)
+    await queryAs(aluno, 'SELECT public.consultar_conteudo_tentativa($1,$2)', [id, chave])
+    assert.equal((await db.query('SELECT versao FROM public.respostas_tentativa WHERE tentativa_id=$1', [id])).rows.length, 1)
+  })
+
+  await t.test('o encerramento por versões anteriores continua aceito e preserva a resposta', async () => {
     assert.equal((await encerrar(id, 'TELA_CHEIA')).rows[0].situacao, 'INTERROMPIDA')
     await encerrar(id, 'TELA_CHEIA')
+    await assert.rejects(pausar(id, 'TELA_CHEIA'), { code: '55000' })
     await assert.rejects(salvar(), { code: '55000' })
     assert.deepEqual((await db.query('SELECT alternativa_id,versao FROM public.respostas_tentativa WHERE tentativa_id=$1', [id])).rows,
       [{ alternativa_id: alternativa, versao: 1 }])
     const segundaProva = await criarProva()
-    const segunda = (await iniciarComFotos(segundaProva.avaliacaoId)).rows[0].id
+    const segunda = (await iniciarComFotos(segundaProva.avaliacaoId, '2026-11-09-v5')).rows[0].id
     assert.equal((await encerrar(segunda, 'ABA_OU_FOCO')).rows[0].situacao, 'INTERROMPIDA')
     assert.deepEqual((await db.query(`SELECT acao FROM public.eventos_seguranca
       WHERE recurso_id IN ($1,$2) AND evento='TENTATIVA_INTERROMPIDA' ORDER BY acao`, [id, segunda])).rows,
@@ -91,6 +115,7 @@ test('RF30–RF36 exigem a foto da prova e registram bloqueios sem classificar o
     const tentativa = (await iniciar(atividade)).rows[0].id
     assert.deepEqual((await db.query('SELECT id FROM public.fotos_tentativa WHERE tentativa_id=$1', [tentativa])).rows, [])
     await assert.rejects(clipboard(tentativa, 'copy'), { code: '23514' })
+    await assert.rejects(pausar(tentativa, 'TELA_CHEIA'), { code: '23514' })
     await assert.rejects(queryAs(aluno, 'SELECT public.registrar_falha_camera($1,$2,$3)', [tentativa, randomUUID(), chave]), { code: '23514' })
     await assert.rejects(encerrar(tentativa, 'TELA_CHEIA'), { code: '23514' })
     assert.equal((await encerrar(tentativa, 'ENVIO')).rows[0].situacao, 'FINALIZADA')

@@ -2,8 +2,8 @@ import { supabase } from '../lib/supabase'
 import { UUID_PATTERN } from './avaliacaoValidation'
 import { lerDataComFuso } from './avaliacaoValidation'
 import { ErroAcessoTentativa, ErroConexaoTentativa, EXECUCAO_HEADER, lerChaveExecucao,
-  lerConteudoTentativa, lerTentativaIniciada, motivoSaidaValido, OPERACOES_CLIPBOARD } from './tentativaValidation'
-import type { MotivoSaidaTentativa, OperacaoClipboard } from './tentativaValidation'
+  lerConteudoTentativa, lerTentativaIniciada, motivoSaidaValido, MOTIVOS_PAUSA_PROVA, OPERACOES_CLIPBOARD } from './tentativaValidation'
+import type { MotivoPausaProva, MotivoSaidaTentativa, OperacaoClipboard } from './tentativaValidation'
 import { EXAM_NOTICE_VERSION, PROVA_NOTICE_VERSION } from '../content/legalDocuments'
 import { PHOTO_NOTICE_VERSION } from './examPhotos'
 
@@ -146,6 +146,23 @@ export async function registrarBloqueioClipboard(tentativaId: string, solicitaca
   const confirmacao: unknown = data
   if (!isRecord(confirmacao) || confirmacao.tentativa_id !== tentativaId ||
       confirmacao.solicitacao_id !== solicitacaoId || !lerDataComFuso(confirmacao.registrado_em)) throw new Error(failure)
+}
+
+export async function registrarPausaProva(tentativaId: string, solicitacaoId: string, chaveExecucao: string,
+  motivo: MotivoPausaProva) {
+  if (!UUID_PATTERN.test(tentativaId) || !UUID_PATTERN.test(solicitacaoId) || !lerChaveExecucao(chaveExecucao) ||
+      !MOTIVOS_PAUSA_PROVA.includes(motivo)) throw new Error('Ocorrência inválida.')
+  const id = tentativaId.toLowerCase()
+  const solicitacao = solicitacaoId.toLowerCase()
+  const failure = 'Não foi possível confirmar o registro da pausa. Tente continuar novamente.'
+  const { data, error, status } = await supabase.rpc('registrar_pausa_prova', {
+    p_tentativa_id: id, p_solicitacao_id: solicitacao, p_chave_execucao: chaveExecucao, p_motivo: motivo,
+  }).abortSignal(AbortSignal.timeout(8000)).retry(false)
+  if (status === 401) throw new ErroAcessoTentativa('Sua sessão terminou. Entre novamente.')
+  if (error) throw erroTentativa(error.code, failure)
+  const confirmacao: unknown = data
+  if (!isRecord(confirmacao) || confirmacao.tentativa_id !== id ||
+      confirmacao.solicitacao_id !== solicitacao || !lerDataComFuso(confirmacao.registrado_em)) throw new Error(failure)
 }
 
 export async function encerrarTentativa(tentativaId: string, motivo: 'ENVIO' | 'PRAZO' | MotivoSaidaTentativa,

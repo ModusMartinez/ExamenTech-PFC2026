@@ -4,6 +4,8 @@ import { enunciadoQuestaoValido, pontuacaoQuestaoValida } from './questaoValidat
 
 export const MOTIVOS_SAIDA_TENTATIVA = ['SAIDA', 'ABA_OU_FOCO', 'TELA_CHEIA'] as const
 export type MotivoSaidaTentativa = typeof MOTIVOS_SAIDA_TENTATIVA[number]
+export const MOTIVOS_PAUSA_PROVA = ['ABA_OU_FOCO', 'TELA_CHEIA'] as const
+export type MotivoPausaProva = typeof MOTIVOS_PAUSA_PROVA[number]
 export const OPERACOES_CLIPBOARD = ['copy', 'cut', 'paste'] as const
 export type OperacaoClipboard = typeof OPERACOES_CLIPBOARD[number]
 
