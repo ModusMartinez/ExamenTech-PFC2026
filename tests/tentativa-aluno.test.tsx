@@ -92,6 +92,19 @@ test('confirmação inicia uma vez e apresenta conteúdo na ordem salva, sem gab
   expect(mocks.fetch.mock.calls[2][1].headers[EXECUCAO_HEADER]).toBe(chaveExecucao)
 })
 
+test('atividade na execução alternativa mantém o conteúdo ao trocar de aba', async () => {
+  render(<TentativaAlunoPanel avaliacao={avaliacao} onCancelar={vi.fn()} />)
+  confirmar()
+  const questions = await screen.findByRole('list', { name: 'Questões da tentativa' })
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  fireEvent(document, new Event('visibilitychange'))
+  fireEvent(window, new Event('blur'))
+  fireEvent(window, new Event('focus'))
+  await act(async () => {})
+  expect(screen.getByRole('list', { name: 'Questões da tentativa' })).toBe(questions)
+  expect(mocks.fetch.mock.calls.some(([url]) => String(url).includes('/api/encerrar-tentativa'))).toBe(false)
+})
+
 test('fechar a página invalida a consulta na execução alternativa', async () => {
   mocks.fetch.mockImplementation(async (url: string) => {
     if (url === '/api/iniciar-tentativa') return Response.json({ tentativa }, { status: 201 })

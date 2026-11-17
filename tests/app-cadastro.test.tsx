@@ -38,7 +38,10 @@ vi.mock('../src/services/ingressoAluno', () => ({ consultarIngressoAluno: mocks.
 vi.mock('../src/components/DashboardOverview', () => ({ DashboardOverview: () => <h2>Indicadores acadêmicos</h2> }))
 vi.mock('../src/components/InvitationPanel', () => ({ InvitationPanel: () => null }))
 vi.mock('../src/components/AuditPanel', () => ({ AuditPanel: () => <p>Consulta de auditoria</p> }))
-vi.mock('../src/components/NovaAvaliacaoPanel', () => ({ NovaAvaliacaoPanel: () => <p>Cadastro de rascunho</p> }))
+vi.mock('../src/components/NovaAvaliacaoPanel', () => ({ NovaAvaliacaoPanel: () => <>
+  <p>Cadastro de rascunho</p>
+  <label>Título do rascunho<input /></label>
+</> }))
 vi.mock('../src/components/MatriculasPanel', () => ({
   MatriculasPanel: ({ profile }: { profile: string }) => <p>Pendências para {profile}</p>,
 }))
@@ -433,16 +436,151 @@ test('login em outra aba fecha o modal de cadastro e encaminha para MFA', async 
   expect(mocks.signUp).not.toHaveBeenCalled()
 })
 
-test('voltar à janela ainda verifica uma sessão autenticada e nega perfil bloqueado', async () => {
+test.each(['Professor', 'Administrador', 'Aluno'])('voltar à janela preserva a navegação de %s', async profile => {
+  mocks.resolveAccess.mockResolvedValue({
+    kind: 'ready', user: { name: 'Pessoa Teste', email, profile },
+  })
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Indicadores acadêmicos' })
+  fireEvent.click(screen.getByRole('button', { name: 'Início' }))
+  const heading = screen.getByRole('heading', { name: 'Olá, Pessoa.' })
+  const checks = mocks.resolveAccess.mock.calls.length
+
+  fireEvent(window, new Event('blur'))
+  fireEvent(document, new Event('visibilitychange'))
+  await runEvent(() => fireEvent.focus(window))
+
+  expect(screen.getByRole('heading', { name: 'Olá, Pessoa.' })).toBe(heading)
+  expect(mocks.resolveAccess).toHaveBeenCalledTimes(checks)
+})
+
+test('reconfirmação e renovação da mesma conta preservam um rascunho durante e após a consulta', async () => {
+  const access = { kind: 'ready', user: { name: 'Professor Teste', email, profile: 'Professor' } }
+  mocks.resolveAccess.mockResolvedValue(access)
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Indicadores acadêmicos' })
+  authCallback('INITIAL_SESSION', session)
+  fireEvent.click(screen.getByRole('button', { name: 'Nova avaliação' }))
+  const input = screen.getByRole('textbox', { name: 'Título do rascunho' }) as HTMLInputElement
+  fireEvent.change(input, { target: { value: 'Prova em elaboração' } })
+
+  for (const event of ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'] as const) {
+    let finish!: (value: typeof access) => void
+    mocks.resolveAccess.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    await runEvent(() => authCallback(event, session))
+    expect(screen.queryByText('Verificando sua sessão...')).toBeNull()
+    expect(screen.getByRole('textbox', { name: 'Título do rascunho' })).toBe(input)
+    expect(input.value).toBe('Prova em elaboração')
+    await act(async () => finish(access))
+    expect(screen.getByRole('textbox', { name: 'Título do rascunho' })).toBe(input)
+    expect(input.value).toBe('Prova em elaboração')
+  }
+  expect(mocks.resolveAccess).toHaveBeenCalledTimes(4)
+})
+
+test('falha na reconfirmação permite repetir a consulta sem perder o formulário', async () => {
+  mocks.resolveAccess.mockResolvedValue({
+    kind: 'ready', user: { name: 'Professor Teste', email, profile: 'Professor' },
+  })
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Indicadores acadêmicos' })
+  authCallback('INITIAL_SESSION', session)
+  fireEvent.click(screen.getByRole('button', { name: 'Nova avaliação' }))
+  const input = screen.getByRole('textbox', { name: 'Título do rascunho' }) as HTMLInputElement
+  fireEvent.change(input, { target: { value: 'Rascunho preservado' } })
+  mocks.resolveAccess.mockRejectedValueOnce(new Error('Rede indisponível.'))
+
+  await runEvent(() => authCallback('TOKEN_REFRESHED', session))
+  expect(screen.getByRole('alert').textContent).toContain('Não foi possível confirmar sua sessão.')
+  expect(screen.getByRole('textbox', { name: 'Título do rascunho' })).toBe(input)
+  fireEvent.click(screen.getByRole('button', { name: 'Verificar sessão' }))
+  await act(async () => {})
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.getByRole('textbox', { name: 'Título do rascunho' })).toBe(input)
+  expect(input.value).toBe('Rascunho preservado')
+})
+
+test('saída da conta invalida uma reconfirmação ainda pendente', async () => {
+  const access = { kind: 'ready', user: { name: 'Professor Teste', email, profile: 'Professor' } }
+  mocks.resolveAccess.mockResolvedValue(access)
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Indicadores acadêmicos' })
+  authCallback('INITIAL_SESSION', session)
+  let finish!: (value: typeof access) => void
+  mocks.resolveAccess.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  await runEvent(() => authCallback('TOKEN_REFRESHED', session))
+  await runEvent(() => authCallback('SIGNED_OUT', null))
+  await act(async () => finish(access))
+  expect(screen.getByRole('heading', { name: 'Acessar o Sistema' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Nova avaliação' })).toBeNull()
+})
+
+test('troca de conta remove o formulário anterior antes de validar o novo acesso', async () => {
+  mocks.resolveAccess.mockResolvedValue({
+    kind: 'ready', user: { name: 'Professor Teste', email, profile: 'Professor' },
+  })
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Indicadores acadêmicos' })
+  authCallback('INITIAL_SESSION', session)
+  fireEvent.click(screen.getByRole('button', { name: 'Nova avaliação' }))
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Rascunho da primeira conta' } })
+  let finish!: (value: object) => void
+  mocks.resolveAccess.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  const otherSession = { ...session, user: { ...session.user, id: 'outra-conta' } }
+
+  await runEvent(() => authCallback('SIGNED_IN', otherSession))
+  expect(screen.getByText('Verificando sua sessão...')).toBeTruthy()
+  expect(screen.queryByRole('textbox')).toBeNull()
+  await act(async () => finish({ kind: 'ready', user: { name: 'Outro Professor', email: 'outro@example.test', profile: 'Professor' } }))
+  expect(screen.getByRole('heading', { name: 'Indicadores acadêmicos' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Nova avaliação' }))
+  expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('')
+})
+
+test('mudança de perfil na mesma conta reinicia a navegação com as novas permissões', async () => {
+  mocks.resolveAccess.mockResolvedValue({
+    kind: 'ready', user: { name: 'Pessoa Teste', email, profile: 'Professor' },
+  })
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Indicadores acadêmicos' })
+  authCallback('INITIAL_SESSION', session)
+  fireEvent.click(screen.getByRole('button', { name: 'Nova avaliação' }))
+  mocks.resolveAccess.mockResolvedValue({
+    kind: 'ready', user: { name: 'Pessoa Teste', email, profile: 'Administrador' },
+  })
+  await runEvent(() => authCallback('USER_UPDATED', session))
+  expect(screen.getByRole('heading', { name: 'Indicadores acadêmicos' })).toBeTruthy()
+  expect(screen.queryByRole('textbox', { name: 'Título do rascunho' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Nova avaliação' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Auditoria' })).toBeTruthy()
+})
+
+test('reconfirmação da mesma conta preserva a etapa MFA enquanto aguarda a consulta', async () => {
+  const access = { kind: 'setup-totp' }
+  mocks.resolveAccess.mockResolvedValue(access)
+  render(<App />)
+  await screen.findByText('Etapa MFA: setup')
+  authCallback('INITIAL_SESSION', session)
+  const button = screen.getByRole('button', { name: 'Confirmar MFA simulado' })
+  let finish!: (value: typeof access) => void
+  mocks.resolveAccess.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  await runEvent(() => authCallback('SIGNED_IN', session))
+  expect(screen.getByRole('button', { name: 'Confirmar MFA simulado' })).toBe(button)
+  await act(async () => finish(access))
+  expect(screen.getByRole('button', { name: 'Confirmar MFA simulado' })).toBe(button)
+})
+
+test('revalidação silenciosa identifica perfil bloqueado e encerra o acesso', async () => {
   mocks.resolveAccess.mockResolvedValue({
     kind: 'ready', user: { name: 'Aluno Teste', email, profile: 'Aluno' },
   })
   render(<App />)
   await screen.findByRole('heading', { name: 'Indicadores acadêmicos' })
+  authCallback('INITIAL_SESSION', session)
   fireEvent.click(screen.getByRole('button', { name: 'Início' }))
   await screen.findByRole('heading', { name: 'Olá, Aluno.' })
   mocks.resolveAccess.mockResolvedValue({ kind: 'denied', message: 'Perfil bloqueado.' })
-  await runEvent(() => fireEvent.focus(globalThis.window))
+  await runEvent(() => authCallback('TOKEN_REFRESHED', session))
   expect(screen.getByText('Perfil bloqueado.')).toBeTruthy()
   expect(screen.getByRole('heading', { name: 'Acessar o Sistema' })).toBeTruthy()
   expect(screen.queryByRole('heading', { name: 'Olá, Aluno.' })).toBeNull()

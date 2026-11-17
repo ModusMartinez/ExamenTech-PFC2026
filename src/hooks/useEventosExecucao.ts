@@ -4,7 +4,7 @@ import type { MotivoSaidaTentativa } from '../services/tentativaValidation'
 export function useEventosExecucao<Motivo extends MotivoSaidaTentativa>(
   onInterrupcao: (motivo: Motivo | 'CONEXAO') => void,
   onReconexao: () => void,
-  motivos: { saida: Motivo; foco: Motivo; telaCheia?: Motivo },
+  motivos: { saida: Motivo; foco?: Motivo; telaCheia?: Motivo },
 ) {
   const interromper = useEffectEvent(onInterrupcao)
   const reconectar = useEffectEvent(onReconexao)
@@ -12,7 +12,7 @@ export function useEventosExecucao<Motivo extends MotivoSaidaTentativa>(
 
   useEffect(() => {
     const sair = () => interromper(saida)
-    const perderFoco = () => interromper(foco)
+    const perderFoco = () => { if (foco) interromper(foco) }
     const desconectar = () => interromper('CONEXAO')
     const conectar = () => reconectar()
     function abaOculta() {
@@ -25,12 +25,14 @@ export function useEventosExecucao<Motivo extends MotivoSaidaTentativa>(
       if (event.persisted) sair()
     }
 
-    window.addEventListener('blur', perderFoco)
+    if (foco) {
+      window.addEventListener('blur', perderFoco)
+      document.addEventListener('visibilitychange', abaOculta)
+    }
     window.addEventListener('pagehide', sair)
     window.addEventListener('pageshow', paginaRestaurada)
     window.addEventListener('offline', desconectar)
     window.addEventListener('online', conectar)
-    document.addEventListener('visibilitychange', abaOculta)
     if (telaCheia) document.addEventListener('fullscreenchange', mudouTelaCheia)
     return () => {
       window.removeEventListener('blur', perderFoco)

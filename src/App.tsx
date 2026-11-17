@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import { MfaStep } from './components/MfaStep'
 import { InvitationPanel } from './components/InvitationPanel'
 import { AuditPanel } from './components/AuditPanel'
@@ -74,6 +74,7 @@ function AccessApp() {
   )
   const [loggedUser, setLoggedUser] = useState<AccessUser | null>(null)
   const [checkingSession, setCheckingSession] = useState(true)
+  const [sessionError, setSessionError] = useState('')
   const [mfaFactorId, setMfaFactorId] = useState('')
   const [turnstileToken, setTurnstileToken] = useState('')
   const [turnstileResetSignal, setTurnstileResetSignal] = useState(0)
@@ -109,10 +110,21 @@ function AccessApp() {
   const [acceptedTermsVersion, setAcceptedTermsVersion] = useState<string | null>(null)
   const registerNameRef = useRef<HTMLInputElement>(null)
   const registeringRef = useRef(false)
-  const checkAccessRef = useRef<() => Promise<void>>(async () => {})
+  const checkAccessRef = useRef<(background?: boolean) => Promise<void>>(async () => {})
 
   const applyAccess = useCallback(async (access: AccessState | RecoveryAccessState) => {
-    // Nunca manter dados de outra conta visíveis durante uma nova verificação.
+    if (access.kind !== 'signed-out') {
+      // Uma sessão iniciada em outra aba encerra a tentativa de cadastro local.
+      setLegalModal(null)
+      setAcceptedTermsVersion(null)
+    }
+
+    if (access.kind === 'ready') {
+      setLoggedUser(access.user)
+      setLoginError('')
+      return
+    }
+
     setLoggedUser(null)
 
     if (access.kind === 'signed-out') {
@@ -121,10 +133,6 @@ function AccessApp() {
         : current === 'cadastro' || current === 'request-password' ? current : 'login')
       return
     }
-
-    // Uma sessão iniciada em outra aba encerra a tentativa de cadastro local.
-    setLegalModal(null)
-    setAcceptedTermsVersion(null)
 
     if (access.kind === 'denied') {
       setPage('login')
@@ -149,18 +157,17 @@ function AccessApp() {
       setRecoveryError('')
       return
     }
-
-    setLoggedUser(access.user)
-    setLoginError('')
   }, [])
 
   useEffect(() => {
     let active = true
+    let accessConfirmed = false
+    let currentUserId: string | null = null
     let latestCheck = 0
     let scheduledCheck: ReturnType<typeof setTimeout> | null = null
     let recoveryTimeout: ReturnType<typeof setTimeout> | null = null
 
-    async function checkAccess() {
+    async function checkAccess(background = false) {
       // Um link na URL ainda não prova que o Supabase o aceitou. Aguarde o
       // evento PASSWORD_RECOVERY antes de consultar ou alterar a conta.
       if (recoveryPendingRef.current && !recoveryConfirmedRef.current) return
@@ -169,17 +176,26 @@ function AccessApp() {
         scheduledCheck = null
       }
       const checkId = ++latestCheck
-      setCheckingSession(true)
-      setLoggedUser(null)
+      if (!background) {
+        accessConfirmed = false
+        setCheckingSession(true)
+        setLoggedUser(null)
+      }
 
       try {
         const access = recoveryPendingRef.current
           ? await resolveRecoveryAccess(supabase)
           : await resolveAccess(supabase)
-        if (active && checkId === latestCheck) await applyAccess(access)
+        if (active && checkId === latestCheck) {
+          accessConfirmed = access.kind !== 'signed-out' && access.kind !== 'denied'
+          setSessionError('')
+          await applyAccess(access)
+        }
       } catch {
         if (active && checkId === latestCheck) {
-          if (recoveryPendingRef.current) {
+          if (background) {
+            setSessionError('Não foi possível confirmar sua sessão. Tente verificar novamente.')
+          } else if (recoveryPendingRef.current) {
             setPage('invalid-recovery')
             setRecoveryError('Não foi possível confirmar o link de recuperação. Solicite outro e-mail.')
           } else {
@@ -192,16 +208,19 @@ function AccessApp() {
       }
     }
 
-    function scheduleCheck() {
+    function scheduleCheck(background = false) {
       if (registeringRef.current) return
 
       latestCheck += 1
-      setLoggedUser(null)
-      setCheckingSession(true)
+      if (!background) {
+        accessConfirmed = false
+        setLoggedUser(null)
+        setCheckingSession(true)
+      }
       if (scheduledCheck) clearTimeout(scheduledCheck)
       scheduledCheck = setTimeout(() => {
         scheduledCheck = null
-        if (active) void checkAccess()
+        if (active) void checkAccess(background)
       }, 0)
     }
 
@@ -218,18 +237,23 @@ function AccessApp() {
     }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event) => {
+      (event, session) => {
         // O signUp pode emitir SIGNED_IN antes de devolver seu resultado.
         // Durante o envio, quem decide a tela e a mensagem é handleRegister.
         if (registeringRef.current) return
 
+        const sameUser = session !== null && session.user.id === currentUserId
+        currentUserId = session?.user.id ?? null
+
         if (event === 'SIGNED_OUT') {
+          accessConfirmed = false
           recoveryPendingRef.current = false
           recoveryConfirmedRef.current = false
           if (recoveryTimeout) clearTimeout(recoveryTimeout)
           latestCheck += 1
           if (scheduledCheck) clearTimeout(scheduledCheck)
           setLoggedUser(null)
+          setSessionError('')
           setPage((current) => current === 'cadastro' || current === 'request-password' ? current : 'login')
           setCheckingSession(false)
           return
@@ -253,8 +277,10 @@ function AccessApp() {
           event === 'USER_UPDATED' ||
           event === 'MFA_CHALLENGE_VERIFIED'
         ) {
+          // SIGNED_IN também é emitido ao voltar à aba. A mesma conta pode
+          // ser reconferida sem desmontar o painel e perder os formulários.
           // Chamadas assíncronas ao Supabase ficam fora do callback de Auth.
-          scheduleCheck()
+          scheduleCheck(accessConfirmed && sameUser)
         }
       },
     )
@@ -268,19 +294,6 @@ function AccessApp() {
       subscription.unsubscribe()
     }
   }, [applyAccess])
-
-  useEffect(() => {
-    // Login e cadastro são telas públicas: voltar à janela não deve desmontar
-    // o formulário nem o CAPTCHA. Sessões autenticadas continuam conferidas.
-    if (!loggedUser && page !== 'mfa-setup' && page !== 'mfa-verify' && page !== 'reset-password') return
-
-    function checkOnFocus() {
-      void checkAccessRef.current()
-    }
-
-    window.addEventListener('focus', checkOnFocus)
-    return () => window.removeEventListener('focus', checkOnFocus)
-  }, [loggedUser, page])
 
   useEffect(() => {
     if (page === 'cadastro') registerNameRef.current?.focus()
@@ -643,6 +656,11 @@ function AccessApp() {
     setLegalModal(null)
   }
 
+  const sessionWarning = sessionError && <div className="alert error" role="alert">
+    <p>{sessionError}</p>
+    <button type="button" className="btn-link" onClick={() => void checkAccessRef.current(true)}>Verificar sessão</button>
+  </div>
+
   if (checkingSession) {
     return <main className="auth-loading">Verificando sua sessão...</main>
   }
@@ -650,8 +668,10 @@ function AccessApp() {
   if (loggedUser) {
     const dashboard = (
       <Dashboard
+        key={loggedUser.profile}
         user={loggedUser}
         onLogout={handleLogout}
+        sessionWarning={sessionWarning}
       />
     )
     return loggedUser.profile === 'Aluno'
@@ -664,6 +684,7 @@ function AccessApp() {
       <section className="form-section">
         <div className="form-wrapper">
           <BrandLogo />
+          {sessionWarning}
 
           {page === 'login' ? (
             <>
@@ -1127,9 +1148,10 @@ function AccessApp() {
 type DashboardProps = {
   user: AccessUser
   onLogout: () => Promise<void>
+  sessionWarning: ReactNode
 }
 
-function Dashboard({ user, onLogout }: DashboardProps) {
+function Dashboard({ user, onLogout, sessionWarning }: DashboardProps) {
   const [logoutError, setLogoutError] = useState('')
   const [dashboardView, setDashboardView] = useState<'dashboard' | 'inicio' | 'auditoria' | 'mfa' | 'professores' | 'turmas' | 'matricula' | 'aprovacoes' | 'minhas-matriculas' | 'nova-avaliacao' | 'provas'>('dashboard')
   const [draftsTarget, setDraftsTarget] = useState<string | null>(null)
@@ -1168,6 +1190,7 @@ function Dashboard({ user, onLogout }: DashboardProps) {
       </nav>
 
       <main className={showingAudit ? 'dashboard-content dashboard-content-audit' : 'dashboard-content'}>
+        {sessionWarning}
         {logoutError && <div className="alert error" role="alert">{logoutError}</div>}
         {dashboardView === 'inicio' && examNotice && <div className="alert error" role="alert">{examNotice}</div>}
         {(canViewTurmas || user.profile === 'Aluno') && (

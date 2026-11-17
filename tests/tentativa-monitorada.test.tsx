@@ -276,6 +276,34 @@ test('atividade inicia sem câmera, fotos ou tela cheia e permite área de trans
   expect(services.registrarBloqueioClipboard).not.toHaveBeenCalled()
 })
 
+test('atividade mantém a resposta e o salvamento ao trocar de aba ou perder foco', async () => {
+  const atividade = { ...avaliacao, tipo: 'ATIVIDADE' as const }
+  services.consultarConteudoTentativa.mockResolvedValue({
+    ...conteudo, tipo: 'ATIVIDADE', questoes: [{ ...questao, tipo: 'DISSERTATIVA', alternativas: [] }],
+  })
+  render(<TentativaMonitoradaPanel avaliacao={atividade} onCancelar={vi.fn()}
+    onLeave={vi.fn()} onActiveChange={vi.fn()} />)
+  fireEvent.click(screen.getByRole('checkbox', { name: /Li o aviso da atividade/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
+  const answer = await screen.findByRole('textbox') as HTMLTextAreaElement
+  vi.useFakeTimers()
+  fireEvent.change(answer, { target: { value: 'Resposta em elaboração' } })
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  fireEvent(document, new Event('visibilitychange'))
+  fireEvent(window, new Event('blur'))
+  fireEvent(document, new Event('fullscreenchange'))
+  await act(() => vi.advanceTimersByTimeAsync(1000))
+
+  expect(screen.getByRole('textbox')).toBe(answer)
+  expect(answer.value).toBe('Resposta em elaboração')
+  expect(services.salvarRespostaTentativa).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    tentativa_id: tentativa.id, texto: 'Resposta em elaboração',
+  }), chaveDaExecucao())
+  expect(services.registrarPausaProva).not.toHaveBeenCalled()
+  expect(services.encerrarTentativa).not.toHaveBeenCalled()
+  expect(getUserMedia).not.toHaveBeenCalled()
+})
+
 test('cancelamento Realtime da própria tentativa encerra a prova mesmo durante a pausa', async () => {
   const { track, onLeave } = await iniciarProva()
   await waitFor(() => expect(realtime.on).toHaveBeenCalledWith('postgres_changes', {

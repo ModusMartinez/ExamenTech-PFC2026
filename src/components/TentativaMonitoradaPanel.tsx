@@ -277,7 +277,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       else pausar(motivo)
     },
     () => { if (blockReasonRef.current) void block(blockReasonRef.current) },
-    { saida: 'SAIDA', foco: prova ? 'ABA_OU_FOCO' : 'SAIDA', telaCheia: prova ? 'TELA_CHEIA' : undefined },
+    { saida: 'SAIDA', foco: prova ? 'ABA_OU_FOCO' : undefined, telaCheia: prova ? 'TELA_CHEIA' : undefined },
   )
 
   async function continuarProva() {

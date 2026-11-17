@@ -62,7 +62,7 @@ export function TentativaAlunoPanel({ avaliacao, onCancelar }: { avaliacao: Aval
   useEventosExecucao(
     motivo => { if (inicioSolicitado.current && !motivoInterrupcao.current) void interromper(motivo) },
     () => { if (motivoInterrupcao.current) void interromper(motivoInterrupcao.current) },
-    { saida: 'SAIDA', foco: 'SAIDA' },
+    { saida: 'SAIDA', foco: avaliacao.tipo === 'PROVA' ? 'SAIDA' : undefined },
   )
 
   useCancelamentoTentativa(cancelada ? undefined : tentativa?.id, () => {
