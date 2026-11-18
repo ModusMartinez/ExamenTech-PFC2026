@@ -14,7 +14,8 @@ test('o servidor finaliza pelo prazo e publica apenas resultados autorizados e c
   const db = new PGlite()
   t.after(() => db.close())
   const { aluno, professor, colega, admin, queryAs, turmaId, criarProva } = await prepararBancoCamera(db)
-  for (const nome of ['037_camera_sem_interrupcao', '038_tentativa_sessao', '039_correcao_tentativa', '040_finalizacao_e_resultados']) {
+  for (const nome of ['037_camera_sem_interrupcao', '038_tentativa_sessao', '039_correcao_tentativa', '040_finalizacao_e_resultados',
+    '060_paginacao_resultados_aluno']) {
     await db.exec(await readFile(new URL(`../database/${nome}.sql`, import.meta.url), 'utf8'))
   }
 

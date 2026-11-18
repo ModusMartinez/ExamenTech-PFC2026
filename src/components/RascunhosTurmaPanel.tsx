@@ -5,11 +5,13 @@ import { EditarAvaliacaoForm } from './EditarAvaliacaoForm'
 import { NovaQuestaoForm } from './NovaQuestaoForm'
 import { QuestoesAvaliacaoPanel } from './QuestoesAvaliacaoPanel'
 import { PublicarAvaliacaoForm } from './PublicarAvaliacaoForm'
+import { Paginacao } from './Paginacao'
 
 export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancelar, onAtualizarPublicadas }: {
   turmaId: string; turmaNome: string; podeEditar: boolean; podeCancelar: boolean; onAtualizarPublicadas: () => void
 }) {
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoRascunho[]>([])
+  const [pagina, setPagina] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
@@ -24,8 +26,18 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancel
   const [success, setSuccess] = useState('')
   const actionButton = useRef<HTMLButtonElement | null>(null)
   const notice = useRef<HTMLParagraphElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
   const formularioAberto = Boolean(editando || novaQuestao || publicando || confirmando)
+  const navegacaoBloqueada = loading || formularioAberto
   const avaliacaoAberta = avaliacoes.find((avaliacao) => avaliacao.id === questoesAbertas)
+
+  function mudarPagina(numero: number) {
+    setSuccess('')
+    setQuestoesAbertas(null)
+    setLoading(true)
+    setPagina(numero)
+    heading.current?.focus()
+  }
 
   useEffect(() => {
     if (confirmando) manterRascunho.current?.focus()
@@ -38,7 +50,7 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancel
       setLoading(true)
       setError('')
       try {
-        const result = await listarAvaliacoesRascunho(turmaId)
+        const result = await listarAvaliacoesRascunho(turmaId, pagina)
         if (active) setAvaliacoes(result)
       } catch (error) {
         if (active) setError(error instanceof Error ? error.message : 'Não foi possível carregar os rascunhos.')
@@ -48,7 +60,7 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancel
     }
     void load()
     return () => { active = false }
-  }, [turmaId, refresh])
+  }, [turmaId, pagina, refresh])
 
   async function confirmarCancelamento() {
     if (!confirmando || cancelando) return
@@ -59,6 +71,10 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancel
       setAvaliacoes(atuais => atuais.filter(item => item.id !== confirmando.id))
       setSuccess(`Avaliação “${confirmando.titulo}” cancelada.`)
       setConfirmando(null)
+      if (avaliacoes.length > 50) {
+        setLoading(true)
+        setRefresh(current => current + 1)
+      }
       onAtualizarPublicadas()
     } catch (error) {
       setErroCancelamento(error instanceof Error ? error.message : 'Não foi possível cancelar o rascunho.')
@@ -70,15 +86,15 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancel
   return (
     <section id={`rascunhos-${turmaId}`} className="rascunhos-turma" aria-label={`Rascunhos de ${turmaNome}`}>
       <div className="turmas-list-heading">
-        <h4>Avaliações em rascunho</h4>
-        <button type="button" className="turmas-refresh" disabled={loading || formularioAberto}
-          onClick={() => { setSuccess(''); setQuestoesAbertas(null); setRefresh((current) => current + 1) }}>Atualizar rascunhos</button>
+        <h4 ref={heading} tabIndex={-1}>Avaliações em rascunho</h4>
+        <button type="button" className="turmas-refresh" disabled={navegacaoBloqueada}
+          onClick={() => { mudarPagina(0); setRefresh((current) => current + 1) }}>Atualizar rascunhos</button>
       </div>
-      <p className="turmas-note">Até 50 rascunhos mais recentes. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
+      <p className="turmas-note">50 rascunhos por página, dos mais recentes aos antigos. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
       {success && <p ref={notice} tabIndex={-1} className="alert success" role="status">{success}</p>}
       {loading && <p role="status">Carregando rascunhos...</p>}
       {error && <p className="alert error" role="alert">{error}</p>}
-      {!loading && !error && avaliacoes.length === 0 && <p role="status">Nenhum rascunho nesta turma.</p>}
+      {!loading && !error && avaliacoes.length === 0 && <p role="status">{pagina === 0 ? 'Nenhum rascunho nesta turma.' : 'Nenhum rascunho nesta página.'}</p>}
       {!loading && !error && avaliacoes.length > 0 && (
         <div className="rascunhos-tabela" role="region" aria-label="Tabela de avaliações" tabIndex={0}>
           <table aria-label={`Avaliações em rascunho de ${turmaNome}`}>
@@ -88,7 +104,7 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancel
               <th scope="col" className="rascunhos-coluna-acoes">Ações</th>
             </tr></thead>
             <tbody>
-              {avaliacoes.map((avaliacao) => (
+              {avaliacoes.slice(0, 50).map((avaliacao) => (
                 <tr key={avaliacao.id}>
                   <th scope="row">{avaliacao.titulo}</th>
                   <td>{avaliacao.tipo === 'PROVA' ? 'Prova' : 'Atividade'}</td>
@@ -143,6 +159,8 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancel
           </table>
         </div>
       )}
+      <Paginacao pagina={pagina} temProxima={!error && avaliacoes.length > 50} desabilitada={navegacaoBloqueada || questoesAbertas !== null}
+        rotulo={`Paginação dos rascunhos de ${turmaNome}`} onMudarPagina={mudarPagina} />
       {!loading && !error && avaliacaoAberta && <QuestoesAvaliacaoPanel key={avaliacaoAberta.id}
         avaliacaoId={avaliacaoAberta.id} avaliacaoTitulo={avaliacaoAberta.titulo} podeEditar={podeEditar} />}
       {confirmando && <div className="provas-aviso" role="group" aria-label="Confirmar cancelamento do rascunho">
@@ -171,6 +189,10 @@ export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancel
           setAvaliacoes((current) => current.filter((item) => item.id !== publicando.id))
           setSuccess(`Avaliação “${publicando.titulo}” publicada.`)
           setPublicando(null)
+          if (avaliacoes.length > 50) {
+            setLoading(true)
+            setRefresh(current => current + 1)
+          }
           onAtualizarPublicadas()
         }} />}
     </section>

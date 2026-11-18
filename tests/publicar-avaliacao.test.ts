@@ -60,10 +60,10 @@ test('publicação: API integrada às regras e à auditoria no PostgreSQL local'
           const publicadas = url.searchParams.get('situacao') === 'in.(PUBLICADA,CANCELADA)'
           assert.equal(url.searchParams.get('select'), 'id,turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,criado_em' + (publicadas ? ',publicada_em,cancelada_em' : ''))
           assert.equal(url.searchParams.get('order'), `${publicadas ? 'publicada_em.desc.nullslast' : 'criado_em.desc'},id.desc`)
-          assert.equal(url.searchParams.get('limit'), '50')
+          assert.equal(url.searchParams.get('limit'), '51')
           return Response.json((await queryAs(id, `SELECT * FROM public.avaliacoes WHERE turma_id=$1 AND situacao=ANY($2::text[])
-            ORDER BY ${publicadas ? 'publicada_em DESC NULLS LAST' : 'criado_em DESC'},id DESC LIMIT 50`,
-          [url.searchParams.get('turma_id')?.slice(3), publicadas ? ['PUBLICADA', 'CANCELADA'] : ['RASCUNHO']], aal)).rows)
+            ORDER BY ${publicadas ? 'publicada_em DESC NULLS LAST' : 'criado_em DESC'},id DESC LIMIT 51 OFFSET $3`,
+          [url.searchParams.get('turma_id')?.slice(3), publicadas ? ['PUBLICADA', 'CANCELADA'] : ['RASCUNHO'], Number(url.searchParams.get('offset'))], aal)).rows)
         }
         assert.equal(url.pathname, '/rest/v1/rpc/publicar_avaliacao')
         assert.equal(req.method, 'POST')
@@ -319,22 +319,6 @@ test('publicação: API integrada às regras e à auditoria no PostgreSQL local'
     assert.deepEqual(await events(), logged)
   })
 
-  await t.test('consulta vazia, limite de 50 e ordenação por publicação com desempate por ID', async () => {
-    const turma = (await queryAs<{ id: string }>(professor, "INSERT INTO public.turmas(nome) VALUES ('Turma da listagem') RETURNING id")).rows[0].id
-    const { listagem } = apiFor(professor)
-    assert.deepEqual(await (await listagem.fetch(consultar('PUBLICADA', turma))).json(), { avaliacoes: [], limite: 50 })
-    // Massa local de listagem, com criação em ordem inversa à publicação.
-    await db.query(`INSERT INTO public.avaliacoes(turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,publicada_em,criado_em)
-      SELECT $1,$2,'Publicada '||n,'PROVA',now(),now()+interval '2 hours',60,'PUBLICADA',
-        now()+make_interval(mins => n / 2),now()-make_interval(mins => n) FROM generate_series(1,51) AS n`, [turma, professor])
-    const response = await listagem.fetch(consultar('PUBLICADA', turma))
-    assert.equal(response.status, 200)
-    const result = await response.json()
-    assert.equal(result.avaliacoes.length, 50)
-    const expected = (await db.query("SELECT id FROM public.avaliacoes WHERE turma_id=$1 ORDER BY publicada_em DESC,id DESC LIMIT 50", [turma])).rows
-    assert.deepEqual(result.avaliacoes.map((item: { id: string }) => ({ id: item.id })), expected)
-  })
-
   await t.test('consulta recusa filtros e respostas inválidas sem tratar falha como lista vazia', async () => {
     const { listagem, transport } = apiFor(professor)
     for (const query of [`turma_id=${turmaId}&situacao=CANCELADA`, `turma_id=${turmaId}&situacao=`,
@@ -371,4 +355,32 @@ test('publicação: API integrada às regras e à auditoria no PostgreSQL local'
       return tx.query(publicarSql, [avaliacaoId])
     }), { code: '42501' })
   })
+  await t.test('consulta todas as publicadas e canceladas em páginas de 50 com desempate por ID', async () => {
+    for (const nome of ['025_iniciar_tentativa', '042_cancelamento_avaliacao', '055_cancelamento_avaliacao_em_qualquer_estado']) {
+      await db.exec(await readFile(new URL(`../database/${nome}.sql`, import.meta.url), 'utf8'))
+    }
+    const turma = (await queryAs<{ id: string }>(professor, "INSERT INTO public.turmas(nome) VALUES ('Turma da listagem') RETURNING id")).rows[0].id
+    const { listagem } = apiFor(professor)
+    assert.deepEqual(await (await listagem.fetch(consultar('PUBLICADA', turma))).json(), { avaliacoes: [], limite: 50 })
+    // Massa local de listagem, com criação em ordem inversa à publicação.
+    await db.query(`INSERT INTO public.avaliacoes(turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,publicada_em,cancelada_em,criado_em)
+      SELECT $1,$2,'Publicada '||n,'PROVA',now(),now()+interval '2 hours',60,
+        CASE WHEN n % 3 = 0 THEN 'CANCELADA' ELSE 'PUBLICADA' END,
+        CASE WHEN n % 3 = 0 THEN NULL ELSE now()+make_interval(mins => n / 2) END,
+        CASE WHEN n % 3 = 0 THEN now() ELSE NULL END,
+        now()-make_interval(mins => n) FROM generate_series(1,103) AS n`, [turma, professor])
+    const paginas = []
+    for (const pagina of [0, 1, 2]) {
+      const request = consultar('PUBLICADA', turma)
+      const response = await listagem.fetch(new Request(request.url + `&pagina=${pagina}`, request))
+      assert.equal(response.status, 200)
+      paginas.push((await response.json()).avaliacoes as { id: string; situacao: string }[])
+    }
+    assert.deepEqual(paginas.map(pagina => pagina.length), [51, 51, 3])
+    const registros = paginas.flatMap(pagina => pagina.slice(0, 50))
+    const expected = (await db.query("SELECT id FROM public.avaliacoes WHERE turma_id=$1 ORDER BY publicada_em DESC NULLS LAST,id DESC", [turma])).rows
+    assert.deepEqual(registros.map(item => ({ id: item.id })), expected)
+    assert.equal(registros.filter(item => item.situacao === 'CANCELADA').length, 34)
+  })
+
 })

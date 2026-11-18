@@ -29,7 +29,8 @@ beforeEach(() => {
     if (url.startsWith('/api/avaliacoes?')) {
       const query = new URL(url, 'http://localhost').searchParams
       const registros = query.get('situacao') === 'PUBLICADA' ? publicadas : rascunhos
-      return Response.json({ avaliacoes: registros.filter((item) => item.turma_id === query.get('turma_id')), limite: 50 })
+      const inicio = Number(query.get('pagina') ?? 0) * 50
+      return Response.json({ avaliacoes: registros.filter((item) => item.turma_id === query.get('turma_id')).slice(inicio, inicio + 51), limite: 50 })
     }
     if (url === '/api/publicar-avaliacao' && options.method === 'POST') {
       publicadas = [publicada]; rascunhos = []
@@ -249,10 +250,71 @@ test('serviços validam ID, sessão, confirmação e lista; falhas não geram su
   mocks.fetch.mockResolvedValueOnce(Response.json({ avaliacao: confirmacao }, { status: 201 }))
   await expect(publicarAvaliacao(avaliacao.id)).rejects.toThrow(/Confira Publicadas/)
   for (const registros of [[publicada, publicada], [avaliacao], [{ ...publicada, turma_id: outra.id }],
-    [{ ...publicada, publicada_em: null }], Array(51).fill(publicada)]) {
+    [{ ...publicada, publicada_em: null }], Array(52).fill(publicada)]) {
     mocks.fetch.mockResolvedValueOnce(Response.json({ avaliacoes: registros, limite: 50 }))
     await expect(listarAvaliacoesPublicadas(turma.id)).rejects.toThrow('Não foi possível conferir a lista de publicadas.')
   }
   publicadas = Array.from({ length: 50 }, (_, i) => ({ ...publicada, id: `30000000-0000-0000-0000-${String(i).padStart(12, '0')}` }))
   expect(await listarAvaliacoesPublicadas(turma.id)).toHaveLength(50)
+})
+
+test('pagina publicadas e canceladas, permite gerenciar avaliações antigas e fecha o detalhe ao navegar', async () => {
+  mocks.gestaoAtiva.mockReturnValue(true)
+  mocks.rpc.mockResolvedValue({ data: [], error: null })
+  publicadas = Array.from({ length: 103 }, (_, i) => ({ ...publicada,
+    id: `30000000-0000-0000-0000-${String(i + 1).padStart(12, '0')}`, titulo: `Avaliação antiga ${i + 1}`,
+    ...(i === 50 ? { situacao: 'CANCELADA', publicada_em: null, cancelada_em: '2026-11-09T20:00:00Z' } : {}),
+  }))
+  await abrir()
+  fireEvent.click(screen.getByRole('button', { name: `Publicadas de ${turma.nome}` }))
+  await screen.findByRole('rowheader', { name: 'Avaliação antiga 1' })
+  expect(screen.getAllByRole('rowheader')).toHaveLength(50)
+  expect(screen.queryByRole('rowheader', { name: 'Avaliação antiga 51' })).toBeNull()
+  const nav = within(screen.getByRole('navigation', { name: `Paginação das publicadas de ${turma.nome}` }))
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  await screen.findByRole('rowheader', { name: 'Avaliação antiga 51' })
+  expect(nav.getByText('Página 2')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Gerenciar Avaliação antiga 51' }))
+  await screen.findByText('Nenhum aluno iniciou esta avaliação.')
+  expect(screen.getByRole('heading', { name: 'Avaliação antiga 51' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Cancelar avaliação', exact: true })).toBeNull()
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  await screen.findByRole('rowheader', { name: 'Avaliação antiga 101' })
+  expect(screen.getAllByRole('rowheader')).toHaveLength(3)
+  expect(screen.queryByRole('heading', { name: 'Tentativas dos alunos' })).toBeNull()
+  expect(nav.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(nav.getByRole('button', { name: 'Anterior' }))
+  await screen.findByRole('rowheader', { name: 'Avaliação antiga 51' })
+  mocks.fetch.mockRejectedValueOnce(new TypeError('Falha de rede'))
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  await screen.findByRole('alert')
+  expect(screen.queryByRole('table')).toBeNull()
+  expect(nav.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(nav.getByRole('button', { name: 'Anterior' }))
+  await screen.findByRole('rowheader', { name: 'Avaliação antiga 51' })
+  fireEvent.click(screen.getByRole('button', { name: 'Atualizar publicadas' }))
+  await screen.findByRole('rowheader', { name: 'Avaliação antiga 1' })
+  expect(nav.getByText('Página 1')).toBeTruthy()
+})
+
+test('cancelar um rascunho numa página cheia recarrega a lista e mantém acesso às páginas seguintes', async () => {
+  rascunhos = Array.from({ length: 103 }, (_, i) => ({ ...avaliacao,
+    id: `30000000-0000-0000-0000-${String(i + 1).padStart(12, '0')}`, titulo: `Rascunho ${i + 1}`,
+  }))
+  mocks.rpc.mockImplementation(async (_name: string, params: { p_avaliacao_id: string }) => {
+    const item = rascunhos.find(registro => registro.id === params.p_avaliacao_id)
+    rascunhos = rascunhos.filter(registro => registro.id !== params.p_avaliacao_id)
+    return { data: { ...item, situacao: 'CANCELADA', cancelada_em: '2026-11-09T20:00:00Z' }, error: null }
+  })
+  await abrir()
+  fireEvent.click(screen.getByRole('button', { name: `Rascunhos de ${turma.nome}` }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Cancelar rascunho Rascunho 1' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+  await screen.findByRole('rowheader', { name: 'Rascunho 51' })
+  expect(screen.getAllByRole('rowheader')).toHaveLength(50)
+  expect(screen.queryByRole('rowheader', { name: 'Rascunho 1' })).toBeNull()
+  const nav = within(screen.getByRole('navigation', { name: `Paginação dos rascunhos de ${turma.nome}` }))
+  expect(nav.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(false)
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  await screen.findByRole('rowheader', { name: 'Rascunho 52' })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { consultarMeuResultado, listarMeusResultados } from '../services/resultadosAvaliacao'
 import type { ResultadoAluno, ResultadoPublicado } from '../services/resultadosAvaliacao'
+import { Paginacao } from './Paginacao'
 
 const formatarPontos = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 })
 const formatarNota = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -50,17 +51,25 @@ function ResultadoDetalhe({ selecionado, onVoltar }: { selecionado: ResultadoPub
 
 export function ResultadosAlunoPanel({ onVoltar }: { onVoltar: () => void }) {
   const [resultados, setResultados] = useState<ResultadoPublicado[] | null>(null)
+  const [pagina, setPagina] = useState(0)
   const [selecionado, setSelecionado] = useState<ResultadoPublicado | null>(null)
   const [erro, setErro] = useState('')
   const [revisao, setRevisao] = useState(0)
   const heading = useRef<HTMLHeadingElement>(null)
+
+  function mudarPagina(numero: number) {
+    setErro('')
+    setResultados(null)
+    setPagina(numero)
+    heading.current?.focus()
+  }
   useEffect(() => { if (!selecionado) heading.current?.focus() }, [selecionado])
   useEffect(() => {
     let ativo = true
-    listarMeusResultados().then(value => { if (ativo) setResultados(value) })
+    listarMeusResultados(pagina).then(value => { if (ativo) setResultados(value) })
       .catch(cause => { if (ativo) setErro(cause instanceof Error ? cause.message : 'Não foi possível consultar seus resultados.') })
     return () => { ativo = false }
-  }, [revisao])
+  }, [pagina, revisao])
 
   if (selecionado) return <ResultadoDetalhe key={selecionado.tentativa_id} selecionado={selecionado} onVoltar={() => setSelecionado(null)} />
   return <section className="provas-panel resultado-aluno" aria-labelledby="resultados-aluno-title">
@@ -68,16 +77,18 @@ export function ResultadosAlunoPanel({ onVoltar }: { onVoltar: () => void }) {
     <div className="avaliacao-form-actions">
       <button type="button" className="btn-outline" onClick={onVoltar}>Voltar às avaliações</button>
       <button type="button" className="btn-outline" disabled={!resultados && !erro}
-        onClick={() => { setErro(''); setResultados(null); setRevisao(valor => valor + 1) }}>Atualizar resultados</button>
+        onClick={() => { mudarPagina(0); setRevisao(valor => valor + 1) }}>Atualizar resultados</button>
     </div>
     {!resultados && !erro && <p role="status">Carregando resultados...</p>}
     {erro && <p className="alert error" role="alert">{erro}</p>}
-    {resultados?.length === 0 && <p role="status">Nenhum resultado foi publicado para você.</p>}
-    {resultados?.map(resultado => <article className="provas-card" key={resultado.tentativa_id}>
+    {resultados?.length === 0 && <p role="status">{pagina === 0 ? 'Nenhum resultado foi publicado para você.' : 'Nenhum resultado nesta página.'}</p>}
+    {resultados?.slice(0, 50).map(resultado => <article className="provas-card" key={resultado.tentativa_id}>
       <h2>{resultado.titulo}</h2>
       <p>{resultado.turma_nome} · <time dateTime={resultado.publicado_em}>{new Date(resultado.publicado_em).toLocaleString('pt-BR')}</time></p>
       <button type="button" className="btn-outline" aria-label={`Ver resultado de ${resultado.titulo}`}
         onClick={() => setSelecionado(resultado)}>Ver resultado</button>
     </article>)}
+    <Paginacao pagina={pagina} temProxima={!erro && (resultados?.length ?? 0) > 50} desabilitada={!resultados && !erro}
+      rotulo="Paginação dos resultados" onMudarPagina={mudarPagina} />
   </section>
 }

@@ -3,11 +3,13 @@ import { cancelarAvaliacao, listarAvaliacoesPublicadas } from '../services/avali
 import type { AvaliacaoPublicada } from '../services/avaliacaoValidation'
 import { examManagementEnabled } from '../services/examFeatures'
 import { TentativasResponsavelPanel } from './TentativasResponsavelPanel'
+import { Paginacao } from './Paginacao'
 
 export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorrigir }: {
   turmaId: string; turmaNome: string; atualizacao: number; podeCorrigir: boolean
 }) {
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoPublicada[]>([])
+  const [pagina, setPagina] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
@@ -22,6 +24,15 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorr
   const gestaoAtiva = examManagementEnabled()
   const selected = avaliacoes.find(avaliacao => avaliacao.id === selectedId)
   const canceladaEm = selected?.situacao === 'CANCELADA' ? selected.cancelada_em : null
+
+  function mudarPagina(numero: number) {
+    setSelectedId(null)
+    setConfirmando(false)
+    setErroCancelamento('')
+    setLoading(true)
+    setPagina(numero)
+    heading.current?.focus()
+  }
   useEffect(() => { heading.current?.focus() }, [])
   useEffect(() => { if (confirmando) manterAvaliacao.current?.focus() }, [confirmando])
   useEffect(() => { if (canceladaEm) avisoCancelamento.current?.focus() }, [canceladaEm])
@@ -31,7 +42,7 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorr
       setLoading(true)
       setError('')
       try {
-        const result = await listarAvaliacoesPublicadas(turmaId)
+        const result = await listarAvaliacoesPublicadas(turmaId, pagina)
         if (active) setAvaliacoes(result)
       } catch (error) {
         if (active) setError(error instanceof Error ? error.message : 'Não foi possível carregar as publicadas.')
@@ -41,7 +52,7 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorr
     }
     void load()
     return () => { active = false }
-  }, [turmaId, refresh, atualizacao])
+  }, [turmaId, pagina, refresh, atualizacao])
 
   async function confirmarCancelamento() {
     if (!selected || selected.situacao !== 'PUBLICADA' || cancelando) return
@@ -64,13 +75,13 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorr
     <section id={`publicadas-${turmaId}`} className="publicadas-turma" aria-label={`Publicadas de ${turmaNome}`}>
       <div className="turmas-list-heading">
         <h4 ref={heading} tabIndex={-1}>Avaliações publicadas</h4>
-        <button type="button" className="turmas-refresh" disabled={loading || cancelando}
-          onClick={() => setRefresh((current) => current + 1)}>Atualizar publicadas</button>
+        <button type="button" className="turmas-refresh" disabled={loading || cancelando || confirmando}
+          onClick={() => { mudarPagina(0); setRefresh((current) => current + 1) }}>Atualizar publicadas</button>
       </div>
-      <p className="turmas-note">Até 50 avaliações, incluindo as canceladas. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
+      <p className="turmas-note">50 avaliações por página, incluindo as canceladas. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
       {loading && <p role="status">Carregando publicadas...</p>}
       {error && <p className="alert error" role="alert">{error}</p>}
-      {!loading && !error && avaliacoes.length === 0 && <p role="status">Nenhuma avaliação publicada nesta turma.</p>}
+      {!loading && !error && avaliacoes.length === 0 && <p role="status">{pagina === 0 ? 'Nenhuma avaliação publicada nesta turma.' : 'Nenhuma avaliação publicada nesta página.'}</p>}
       {!loading && !error && avaliacoes.length > 0 && (
         <div className="rascunhos-tabela" role="region" aria-label="Tabela de avaliações publicadas" tabIndex={0}>
           <table aria-label={`Avaliações publicadas de ${turmaNome}`}>
@@ -80,7 +91,7 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorr
               <th scope="col">Tipo</th><th scope="col">Início</th>
               <th scope="col">Fim</th><th scope="col">Duração</th><th scope="col">Publicada em</th>
             </tr></thead>
-            <tbody>{avaliacoes.map((avaliacao) => <tr key={avaliacao.id}>
+            <tbody>{avaliacoes.slice(0, 50).map((avaliacao) => <tr key={avaliacao.id}>
               <th scope="row">{avaliacao.titulo}</th>
               {gestaoAtiva && <td><button type="button" className="turmas-refresh" disabled={cancelando}
                 aria-label={`Gerenciar ${avaliacao.titulo}`} aria-expanded={selectedId === avaliacao.id} onClick={() => {
@@ -100,6 +111,8 @@ export function PublicadasTurmaPanel({ turmaId, turmaNome, atualizacao, podeCorr
           </table>
         </div>
       )}
+      <Paginacao pagina={pagina} temProxima={!error && avaliacoes.length > 50} desabilitada={loading || cancelando || confirmando}
+        rotulo={`Paginação das publicadas de ${turmaNome}`} onMudarPagina={mudarPagina} />
       {gestaoAtiva && selected && <>
         <div className="provas-gestao" aria-label={selected.titulo}>
           <h4>{selected.titulo}</h4>

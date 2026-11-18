@@ -58,12 +58,12 @@ async function gravarAvaliacaoRascunho(entrada: DadosAvaliacaoRascunho | DadosEd
   return avaliacao
 }
 
-export function listarAvaliacoesRascunho(turmaId: string) {
-  return listarAvaliacoes(turmaId, 'RASCUNHO', lerAvaliacaoRascunho)
+export function listarAvaliacoesRascunho(turmaId: string, pagina = 0) {
+  return listarAvaliacoes(turmaId, 'RASCUNHO', lerAvaliacaoRascunho, pagina)
 }
 
-export function listarAvaliacoesPublicadas(turmaId: string) {
-  return listarAvaliacoes(turmaId, 'PUBLICADA', lerAvaliacaoPublicada)
+export function listarAvaliacoesPublicadas(turmaId: string, pagina = 0) {
+  return listarAvaliacoes(turmaId, 'PUBLICADA', lerAvaliacaoPublicada, pagina)
 }
 
 export async function cancelarAvaliacao(avaliacaoId: string) {
@@ -99,9 +99,10 @@ export async function listarMinhasAvaliacoes() {
 }
 
 async function listarAvaliacoes<T extends { id: string; turma_id: string }>(
-  turmaId: string, situacao: 'RASCUNHO' | 'PUBLICADA', lerAvaliacao: (value: unknown) => T | null,
+  turmaId: string, situacao: 'RASCUNHO' | 'PUBLICADA', lerAvaliacao: (value: unknown) => T | null, pagina: number,
 ): Promise<T[]> {
   if (!UUID_PATTERN.test(turmaId)) throw new Error('ID da turma inválido.')
+  if (!Number.isInteger(pagina) || pagina < 0 || pagina > 2147483647) throw new Error('Página inválida.')
   const { data, error } = await supabase.auth.getSession()
   if (error || !data.session) throw new Error('Sua sessão terminou. Entre novamente.')
 
@@ -109,6 +110,7 @@ async function listarAvaliacoes<T extends { id: string; turma_id: string }>(
   try {
     const query = new URLSearchParams({ turma_id: turmaId.toLowerCase() })
     if (situacao === 'PUBLICADA') query.set('situacao', situacao)
+    if (pagina > 0) query.set('pagina', String(pagina))
     response = await fetch(`/api/avaliacoes?${query}`, {
       method: 'GET', headers: { Authorization: `Bearer ${data.session.access_token}` }, cache: 'no-store',
     })
@@ -127,7 +129,7 @@ async function listarAvaliacoes<T extends { id: string; turma_id: string }>(
     throw new Error('message' in result && typeof result.message === 'string' ? result.message : invalidResponse)
   }
   if (response.status !== 200 || !('limite' in result) || result.limite !== 50 ||
-      !('avaliacoes' in result) || !Array.isArray(result.avaliacoes) || result.avaliacoes.length > 50) {
+      !('avaliacoes' in result) || !Array.isArray(result.avaliacoes) || result.avaliacoes.length > 51) {
     throw new Error(invalidResponse)
   }
   const avaliacoes: T[] = []

@@ -43,11 +43,12 @@ export async function listarLinhaTempoTentativa(tentativaId: string): Promise<At
   })
 }
 
-export async function listarTentativasResponsavel(avaliacaoId: string): Promise<ResponsibleAttempt[]> {
+export async function listarTentativasResponsavel(avaliacaoId: string, pagina = 0): Promise<ResponsibleAttempt[]> {
   if (!UUID_PATTERN.test(avaliacaoId)) throw new Error('Avaliação inválida.')
+  if (!Number.isInteger(pagina) || pagina < 0 || pagina > 2147483647) throw new Error('Página inválida.')
   const { supabase } = await import('../lib/supabase')
-  const { data, error } = await supabase.rpc('listar_tentativas_responsavel', { p_avaliacao_id: avaliacaoId })
-  if (error || !Array.isArray(data) || data.length > 50) throw new Error('Não foi possível consultar tentativas para seu acesso.')
+  const { data, error } = await supabase.rpc('listar_tentativas_responsavel', { p_avaliacao_id: avaliacaoId, p_pagina: pagina })
+  if (error || !Array.isArray(data) || data.length > 51) throw new Error('Não foi possível consultar tentativas para seu acesso.')
   return data.map(item => {
     if (!item || !UUID_PATTERN.test(item.id) || !UUID_PATTERN.test(item.aluno_id) || item.avaliacao_id !== avaliacaoId ||
         typeof item.aluno_nome !== 'string' || !item.aluno_nome.trim() ||

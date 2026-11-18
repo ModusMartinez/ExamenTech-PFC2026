@@ -95,6 +95,7 @@ export function TentativasResponsavelPanel({ avaliacaoId, podeCorrigir = false, 
   avaliacaoId: string; podeCorrigir?: boolean; avaliacaoCancelada?: boolean
 }) {
   const [attempts, setAttempts] = useState<ResponsibleAttempt[]>([])
+  const [pagina, setPagina] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [refresh, setRefresh] = useState(0)
@@ -102,6 +103,14 @@ export function TentativasResponsavelPanel({ avaliacaoId, podeCorrigir = false, 
   const [resultadosPublicados, setResultadosPublicados] = useState(false)
   const [revisaoCorrecao, setRevisaoCorrecao] = useState(0)
   const marcarPublicados = useCallback(() => setResultadosPublicados(true), [])
+  const heading = useRef<HTMLHeadingElement>(null)
+
+  function mudarPagina(numero: number) {
+    setSelecao(null)
+    setLoading(true)
+    setPagina(numero)
+    heading.current?.focus()
+  }
 
   function alternarPainel(id: string, painel: 'fotos' | 'correcao' | 'linha-tempo') {
     setSelecao(atual => atual?.id === id && atual.painel === painel ? null : { id, painel })
@@ -110,23 +119,25 @@ export function TentativasResponsavelPanel({ avaliacaoId, podeCorrigir = false, 
     let active = true
     async function load() {
       setLoading(true); setLoadError('')
-      return listarTentativasResponsavel(avaliacaoId)
+      return listarTentativasResponsavel(avaliacaoId, pagina)
     }
     load().then(result => { if (active) setAttempts(result) })
       .catch(cause => { if (active) setLoadError(cause instanceof Error ? cause.message : 'Não foi possível carregar as tentativas.') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [avaliacaoId, refresh])
+  }, [avaliacaoId, pagina, refresh])
   return <section className="provas-gestao" aria-label="Tentativas dos alunos">
-    <h4>Tentativas dos alunos</h4>
+    <h4 ref={heading} tabIndex={-1}>Tentativas dos alunos</h4>
     <p>Tentativas encerradas ou interrompidas ficam no histórico da avaliação com as respostas recebidas.</p>
     {podeCorrigir && !avaliacaoCancelada && <PublicacaoResultadosPanel avaliacaoId={avaliacaoId} revisao={revisaoCorrecao + refresh}
       onPublicada={marcarPublicados} />}
-    <button type="button" className="turmas-refresh" disabled={loading} onClick={() => { setSelecao(null); setRefresh(value => value + 1) }}>Atualizar tentativas</button>
+    <button type="button" className="turmas-refresh" disabled={loading} onClick={() => {
+      setSelecao(null); setLoading(true); setPagina(0); setRefresh(value => value + 1)
+    }}>Atualizar tentativas</button>
     {loading && <p role="status">Carregando tentativas...</p>}
     {loadError && <p className="alert error" role="alert">{loadError}</p>}
-    {!loading && !attempts.length && !loadError && <p>Nenhum aluno iniciou esta avaliação.</p>}
-    {!loading && !loadError && <ul className="provas-tentativas-lista">{attempts.map(attempt => {
+    {!loading && !attempts.length && !loadError && <p>{pagina === 0 ? 'Nenhum aluno iniciou esta avaliação.' : 'Nenhuma tentativa nesta página.'}</p>}
+    {!loading && !loadError && <ul className="provas-tentativas-lista">{attempts.slice(0, 50).map(attempt => {
       const painel = selecao?.id === attempt.id ? selecao.painel : null
       return <li key={attempt.id}>
         <h5>{attempt.aluno_nome}</h5>
@@ -146,5 +157,12 @@ export function TentativasResponsavelPanel({ avaliacaoId, podeCorrigir = false, 
           somenteConsulta={resultadosPublicados} onCorrecaoSalva={() => setRevisaoCorrecao(valor => valor + 1)} />}
       </li>
     })}</ul>}
+    <nav className="avaliacao-form-actions" aria-label="Paginação das tentativas">
+      <button type="button" className="turmas-refresh" disabled={loading || pagina === 0}
+        onClick={() => mudarPagina(pagina - 1)}>Anterior</button>
+      <span aria-live="polite">Página {pagina + 1}</span>
+      <button type="button" className="turmas-refresh" disabled={loading || Boolean(loadError) || attempts.length <= 50}
+        onClick={() => mudarPagina(pagina + 1)}>Próxima</button>
+    </nav>
   </section>
 }

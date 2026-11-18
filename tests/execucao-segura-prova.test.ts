@@ -9,7 +9,7 @@ import { prepararBancoCamera } from './helpers/bancoCamera.ts'
 test('RF30–RF36 exigem a foto da prova e registram bloqueios sem classificar o aluno', async t => {
   const db = new PGlite()
   t.after(() => db.close())
-  const { aluno, professor, colega, admin, turmaId, queryAs, criarProva } = await prepararBancoCamera(db)
+  const { aluno, professor, colega, admin, turmaId, sessions, queryAs, criarProva } = await prepararBancoCamera(db)
   for (const nome of ['037_camera_sem_interrupcao', '038_tentativa_sessao', '039_correcao_tentativa',
     '040_finalizacao_e_resultados', '042_cancelamento_avaliacao', '043_execucao_segura_prova',
     '049_linha_tempo_tentativa', '052_pausa_prova']) {
@@ -119,5 +119,71 @@ test('RF30–RF36 exigem a foto da prova e registram bloqueios sem classificar o
     await assert.rejects(queryAs(aluno, 'SELECT public.registrar_falha_camera($1,$2,$3)', [tentativa, randomUUID(), chave]), { code: '23514' })
     await assert.rejects(encerrar(tentativa, 'TELA_CHEIA'), { code: '23514' })
     assert.equal((await encerrar(tentativa, 'ENVIO')).rows[0].situacao, 'FINALIZADA')
+  })
+
+  await t.test('RF39 soma as pausas nos totais por perfil e no gráfico do professor', async () => {
+    for (const nome of ['050_dashboard_periodo', '051_dashboard_ocorrencias_e_agenda', '053_dashboard_correcoes_professor']) {
+      await db.exec(await readFile(new URL(`../database/${nome}.sql`, import.meta.url), 'utf8'))
+    }
+    type Indicador = { rotulo: string; valor: number | null }
+    type Dashboard = { indicadores: Indicador[]; grafico_ocorrencias?: Indicador[]; indicadores_correcoes?: Indicador[] }
+    const dashboard = async (usuario = professor, inicio: string | null = null, fim: string | null = null, aal = 'aal2') =>
+      (await queryAs<{ resultado: Dashboard }>(usuario,
+        'SELECT public.consultar_indicadores_dashboard_periodo($1,$2) AS resultado', [inicio, fim], aal)).rows[0].resultado
+    const ocorrencias = (resultado: Dashboard) => resultado.indicadores.find(item => item.rotulo === 'Ocorrências registradas')?.valor
+    const anterior = await dashboard()
+    assert.equal(ocorrencias(anterior), 6)
+
+    const migracao = await readFile(new URL('../database/059_dashboard_ocorrencias_pausas.sql', import.meta.url), 'utf8')
+    await db.exec(migracao)
+    const atualizado = await dashboard()
+    assert.equal(ocorrencias(atualizado), 8)
+    assert.deepEqual(atualizado.grafico_ocorrencias, [
+      { rotulo: 'Falha de câmera', valor: 1 },
+      { rotulo: 'Área de transferência bloqueada', valor: 3 },
+      { rotulo: 'Tentativa interrompida', valor: 2 },
+      { rotulo: 'Prova pausada', valor: 2 },
+    ])
+    assert.deepEqual(atualizado.indicadores_correcoes, anterior.indicadores_correcoes)
+    for (const usuario of [aluno, admin]) assert.equal(ocorrencias(await dashboard(usuario)), 8)
+    assert.equal(ocorrencias(await dashboard(colega)), 0)
+    assert.deepEqual((await dashboard(colega)).grafico_ocorrencias, [])
+
+    const { hoje } = (await db.query<{ hoje: string }>(
+      "SELECT (now() AT TIME ZONE 'America/Sao_Paulo')::date::text AS hoje")).rows[0]
+    await db.query(`UPDATE public.eventos_seguranca SET criado_em=$1::date::timestamp AT TIME ZONE 'America/Sao_Paulo'
+      WHERE recurso_id=$2 AND evento='PROVA_PAUSADA' AND acao='perda_aba_ou_foco'`, [hoje, id])
+    for (const horario of ['23:59:59.999999', '00:00:00']) {
+      await db.query(`INSERT INTO public.eventos_seguranca
+        (solicitacao_id,evento,provedor,acao,sucesso,usuario_id,recurso_id,criado_em)
+        VALUES($1,'PROVA_PAUSADA','EXAMENTECH','saida_tela_cheia',TRUE,$2,$3,
+          (($4::date + CASE WHEN $5='00:00:00' THEN 1 ELSE -1 END) + $5::time) AT TIME ZONE 'America/Sao_Paulo')`,
+      [randomUUID(), aluno, id, hoje, horario])
+    }
+    for (const usuario of [professor, aluno, admin]) {
+      assert.equal(ocorrencias(await dashboard(usuario)), 10)
+      assert.equal(ocorrencias(await dashboard(usuario, hoje, hoje)), 8)
+      assert.equal(ocorrencias(await dashboard(usuario, null, hoje)), 9)
+      assert.equal(ocorrencias(await dashboard(usuario, hoje, null)), 9)
+      assert.equal(ocorrencias(await dashboard(usuario, null, '2000-01-01')), 0)
+    }
+    assert.deepEqual((await dashboard(professor, hoje, hoje)).grafico_ocorrencias, atualizado.grafico_ocorrencias)
+    assert.deepEqual((await dashboard(professor, null, '2000-01-01')).grafico_ocorrencias, [])
+    await assert.rejects(dashboard(professor, '2026-11-19', '2026-11-18'), { code: '22023' })
+    await assert.rejects(dashboard(professor, null, null, 'aal1'), { code: '42501' })
+    const sessao = sessions.get(professor)!
+    await db.query('DELETE FROM auth.sessions WHERE id=$1', [sessao])
+    await assert.rejects(dashboard(), { code: '42501' })
+    await db.query('INSERT INTO auth.sessions(id,user_id) VALUES($1,$2)', [sessao, professor])
+    await assert.rejects(db.transaction(async tx => {
+      await tx.exec('SET LOCAL ROLE anon')
+      return tx.query('SELECT public.consultar_indicadores_dashboard_periodo()')
+    }), { code: '42501' })
+    for (const funcao of ['consultar_indicadores_dashboard_periodo', 'dashboard_complemento_rf47']) {
+      await assert.rejects(queryAs(professor, `SELECT examentech_private.${funcao}(NULL,NULL)`), { code: '42501' })
+    }
+    const antesDeReaplicar = await dashboard()
+    await db.exec(migracao)
+    assert.deepEqual(await dashboard(), antesDeReaplicar)
   })
 })

@@ -1,12 +1,12 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { TentativasResponsavelPanel } from '../src/components/TentativasResponsavelPanel'
 import type { CorrecaoTentativa } from '../src/services/correcoesTentativa'
 
-const services=vi.hoisted(()=>({list:vi.fn(),photos:vi.fn(),image:vi.fn()}))
+const services=vi.hoisted(()=>({list:vi.fn(),photos:vi.fn(),image:vi.fn(),timeline:vi.fn()}))
 const correcoes = vi.hoisted(() => ({ consultar: vi.fn(), salvar: vi.fn() }))
 const publicacoes = vi.hoisted(() => ({ consultar: vi.fn(), publicar: vi.fn() }))
-vi.mock('../src/services/examManagement',()=>({listarTentativasResponsavel:services.list}))
+vi.mock('../src/services/examManagement',()=>({listarTentativasResponsavel:services.list,listarLinhaTempoTentativa:services.timeline}))
 vi.mock('../src/services/correcoesTentativa', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/correcoesTentativa')>(),
   consultarCorrecaoTentativa: correcoes.consultar, salvarCorrecaoDissertativa: correcoes.salvar,
@@ -25,9 +25,102 @@ beforeEach(()=>{
   vi.stubEnv('VITE_EXAM_PHOTOS_ENABLED','true')
   services.list.mockResolvedValue([interrupted])
   services.photos.mockResolvedValue([])
+  services.timeline.mockResolvedValue([])
   publicacoes.consultar.mockResolvedValue({ estado: 'CORRECAO_PENDENTE', publicado_em: null })
 })
 afterEach(()=>{cleanup();vi.unstubAllEnvs();vi.restoreAllMocks()})
+
+const tentativas = Array.from({ length: 51 }, (_, index) => ({ ...interrupted, situacao: 'FINALIZADA',
+  id: `20000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`, aluno_nome: `Aluno ${index + 1}` }))
+
+test('navega além das 50 tentativas e permite consultar, corrigir e publicar a partir da segunda página', async () => {
+  services.list.mockImplementation(async (_id: string, pagina: number) => pagina === 0 ? tentativas : tentativas.slice(50))
+  const ultima = tentativas[50]
+  const questao = { id: '40000000-0000-0000-0000-000000000001', tipo: 'DISSERTATIVA' as const,
+    ordem: 1, enunciado: 'Explique o resultado.', maximo: 2, resposta: 'Minha resposta.', gabarito: null,
+    pontos: null, comentario: null, versao: 0 }
+  correcoes.consultar.mockResolvedValue({ tentativa_id: ultima.id, pontos_obtidos: 0, pontos_totais: 2,
+    pendentes: 1, nota: null, questoes: [questao] })
+  correcoes.salvar.mockResolvedValue({ tentativa_id: ultima.id, pontos_obtidos: 2, pontos_totais: 2,
+    pendentes: 0, nota: 10, questoes: [{ ...questao, pontos: 2, versao: 1 }] })
+  publicacoes.publicar.mockResolvedValue({ estado: 'PUBLICADO', publicado_em: '2026-11-18T12:00:00Z' })
+  render(<TentativasResponsavelPanel avaliacaoId={assessment} podeCorrigir />)
+  await screen.findByText('Aluno 1')
+  expect(screen.getAllByRole('listitem')).toHaveLength(50)
+  expect(screen.queryByText('Aluno 51')).toBeNull()
+  const nav = within(screen.getByRole('navigation', { name: 'Paginação das tentativas' }))
+  expect(nav.getByRole('button', { name: 'Anterior' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  await screen.findByText('Aluno 51')
+  expect(services.list).toHaveBeenLastCalledWith(assessment, 1)
+  expect(screen.getByText('Página 2')).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Tentativas dos alunos' })).toBe(document.activeElement)
+  expect(nav.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Fotos de Aluno 51' }))
+  await waitFor(() => expect(services.photos).toHaveBeenCalledExactlyOnceWith(ultima.id))
+  fireEvent.click(screen.getByRole('button', { name: 'Linha do tempo' }))
+  await waitFor(() => expect(services.timeline).toHaveBeenCalledExactlyOnceWith(ultima.id))
+  fireEvent.click(screen.getByRole('button', { name: 'Corrigir tentativa de Aluno 51' }))
+  fireEvent.change(await screen.findByLabelText('Pontos da questão 1'), { target: { value: '2' } })
+  publicacoes.consultar.mockResolvedValue({ estado: 'PRONTO', publicado_em: null })
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar correção da questão 1' }))
+  await screen.findByText('Nota final 10,00 de 10')
+  expect(correcoes.salvar).toHaveBeenCalledExactlyOnceWith(ultima.id, questao, 2, '')
+  fireEvent.click(await screen.findByRole('button', { name: 'Publicar resultados' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar publicação' }))
+  await screen.findByText(/Resultados publicados\. Cada aluno/)
+  expect(publicacoes.publicar).toHaveBeenCalledExactlyOnceWith(assessment)
+  expect(screen.queryByRole('button', { name: 'Salvar correção da questão 1' })).toBeNull()
+  fireEvent.click(nav.getByRole('button', { name: 'Anterior' }))
+  await screen.findByText('Aluno 1')
+  expect(screen.queryByRole('heading', { name: 'Correção de Aluno 51' })).toBeNull()
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  await screen.findByText('Aluno 51')
+  expect(screen.getByRole('button', { name: 'Ver correção de Aluno 51' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Atualizar tentativas' }))
+  await screen.findByText('Aluno 1')
+  expect(screen.getByText('Página 1')).toBeTruthy()
+  expect(services.list).toHaveBeenLastCalledWith(assessment, 0)
+})
+
+test('carregamento e falha de página ocultam a lista anterior e permitem voltar', async () => {
+  services.list.mockResolvedValueOnce(tentativas)
+  let falhar!: (error: Error) => void
+  services.list.mockReturnValueOnce(new Promise((_resolve, reject) => { falhar = reject }))
+  services.list.mockResolvedValue(tentativas)
+  render(<TentativasResponsavelPanel avaliacaoId={assessment} />)
+  await screen.findByText('Aluno 1')
+  const nav = within(screen.getByRole('navigation', { name: 'Paginação das tentativas' }))
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  expect(screen.queryByText('Aluno 1')).toBeNull()
+  expect(nav.getByRole('button', { name: 'Anterior' }).hasAttribute('disabled')).toBe(true)
+  expect(nav.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(true)
+  await act(async () => falhar(new Error('Falha temporária.')))
+  expect(screen.getByRole('alert').textContent).toBe('Falha temporária.')
+  expect(screen.queryByText('Aluno 1')).toBeNull()
+  fireEvent.click(nav.getByRole('button', { name: 'Anterior' }))
+  await screen.findByText('Aluno 1')
+})
+
+test('segunda página vazia permite voltar e a troca de avaliação descarta consultas atrasadas', async () => {
+  services.list.mockResolvedValueOnce(tentativas).mockResolvedValueOnce([])
+  const { rerender } = render(<TentativasResponsavelPanel key={assessment} avaliacaoId={assessment} />)
+  await screen.findByText('Aluno 1')
+  fireEvent.click(screen.getByRole('button', { name: 'Próxima' }))
+  await screen.findByText('Nenhuma tentativa nesta página.')
+  expect(screen.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(true)
+  let terminar!: (value: typeof tentativas) => void
+  services.list.mockReturnValueOnce(new Promise(resolve => { terminar = resolve }))
+  fireEvent.click(screen.getByRole('button', { name: 'Anterior' }))
+  const outraAvaliacao = '10000000-0000-0000-0000-000000000002'
+  services.list.mockResolvedValueOnce([])
+  rerender(<TentativasResponsavelPanel key={outraAvaliacao} avaliacaoId={outraAvaliacao} />)
+  await screen.findByText('Nenhum aluno iniciou esta avaliação.')
+  expect(services.list).toHaveBeenLastCalledWith(outraAvaliacao, 0)
+  await act(async () => terminar(tentativas))
+  expect(screen.queryByText('Aluno 1')).toBeNull()
+  expect(screen.getByText('Página 1')).toBeTruthy()
+})
 
 test('responsável consulta tentativa interrompida sem poder reativá-la',async()=>{
   services.list.mockResolvedValue([{...interrupted,retomada_autorizada:true}])

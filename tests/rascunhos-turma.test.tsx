@@ -124,20 +124,96 @@ test.each([
     { ...avaliacao, inicio_em: 'inválido' }, { ...avaliacao, duracao_minutos: '60' }]
     .map((item) => ({ avaliacoes: [item], limite: 50 })),
   { avaliacoes: [avaliacao, avaliacao], limite: 50 },
-  { avaliacoes: Array.from({ length: 51 }, (_, i) => ({ ...avaliacao, id: `30000000-0000-0000-0000-${String(i).padStart(12, '0')}` })), limite: 50 },
+  { avaliacoes: Array.from({ length: 52 }, (_, i) => ({ ...avaliacao, id: `30000000-0000-0000-0000-${String(i).padStart(12, '0')}` })), limite: 50 },
 ])('recusa resposta fora do contrato (%j)', async (result) => {
   mocks.fetch.mockResolvedValueOnce(Response.json(result))
   await expect(listarAvaliacoesRascunho(turma.id)).rejects.toThrow('Não foi possível conferir a lista de rascunhos.')
 })
 
-test('lista 50 registros sem truncamento silencioso e informa o limite', async () => {
+test('lista 50 registros e informa o tamanho da página', async () => {
   const avaliacoes = Array.from({ length: 50 }, (_, i) => ({
     ...avaliacao, id: `30000000-0000-0000-0000-${String(i).padStart(12, '0')}`, titulo: `Rascunho ${i}`,
   }))
   mocks.fetch.mockResolvedValueOnce(Response.json({ avaliacoes, limite: 50 }))
   await abrir()
   expect(within(await screen.findByRole('table')).getAllByRole('row')).toHaveLength(51)
-  expect(screen.getByText(/Até 50 rascunhos mais recentes/)).toBeTruthy()
+  expect(screen.getByText(/50 rascunhos por página/)).toBeTruthy()
+})
+
+test('pagina rascunhos antigos, permite editar na segunda página e reinicia ao atualizar ou trocar de turma', async () => {
+  let registros = Array.from({ length: 103 }, (_, i) => ({ ...avaliacao,
+    id: `30000000-0000-0000-0000-${String(i + 1).padStart(12, '0')}`, titulo: `Rascunho antigo ${i + 1}`,
+  }))
+  mocks.fetch.mockImplementation(async (url: string, options: RequestInit) => {
+    if (options.method === 'PATCH') {
+      const dados = JSON.parse(String(options.body))
+      registros = registros.map(item => item.id === dados.avaliacao_id ? { ...item, ...dados } : item)
+      return Response.json({ avaliacao: registros.find(item => item.id === dados.avaliacao_id) })
+    }
+    const query = new URL(url, 'http://localhost').searchParams
+    const inicio = Number(query.get('pagina') ?? 0) * 50
+    return Response.json({ avaliacoes: query.get('turma_id') === turma.id ? registros.slice(inicio, inicio + 51) : [], limite: 50 })
+  })
+  await abrir()
+  await screen.findByRole('rowheader', { name: 'Rascunho antigo 1' })
+  expect(screen.getAllByRole('rowheader')).toHaveLength(50)
+  expect(screen.queryByRole('rowheader', { name: 'Rascunho antigo 51' })).toBeNull()
+  const nav = within(screen.getByRole('navigation', { name: `Paginação dos rascunhos de ${turma.nome}` }))
+  expect(nav.getByRole('button', { name: 'Anterior' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  await screen.findByRole('rowheader', { name: 'Rascunho antigo 51' })
+  expect(nav.getByText('Página 2')).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Avaliações em rascunho' })).toBe(document.activeElement)
+  fireEvent.click(screen.getByRole('button', { name: 'Editar Rascunho antigo 51' }))
+  expect(nav.getByRole('button', { name: 'Anterior' }).hasAttribute('disabled')).toBe(true)
+  expect(nav.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.change(screen.getByLabelText('Título'), { target: { value: 'Rascunho antigo revisado' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'Editar avaliação em rascunho' }))
+  await screen.findByText('Avaliação “Rascunho antigo revisado” salva.')
+  expect(screen.getByRole('rowheader', { name: 'Rascunho antigo revisado' })).toBeTruthy()
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  await screen.findByRole('rowheader', { name: 'Rascunho antigo 101' })
+  expect(screen.getAllByRole('rowheader')).toHaveLength(3)
+  expect(nav.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(nav.getByRole('button', { name: 'Anterior' }))
+  await screen.findByRole('rowheader', { name: 'Rascunho antigo revisado' })
+  fireEvent.click(screen.getByRole('button', { name: 'Atualizar rascunhos' }))
+  await screen.findByRole('rowheader', { name: 'Rascunho antigo 1' })
+  expect(nav.getByText('Página 1')).toBeTruthy()
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  await screen.findByRole('rowheader', { name: 'Rascunho antigo revisado' })
+  fireEvent.click(screen.getByRole('button', { name: `Rascunhos de ${outra.nome}` }))
+  await screen.findByText('Nenhum rascunho nesta turma.')
+  expect(screen.getByText('Página 1')).toBeTruthy()
+})
+
+test('falha ao paginar esconde registros anteriores e permite voltar ou atualizar', async () => {
+  const registros = Array.from({ length: 51 }, (_, i) => ({ ...avaliacao,
+    id: `30000000-0000-0000-0000-${String(i + 1).padStart(12, '0')}`,
+  }))
+  mocks.fetch.mockResolvedValue(Response.json({ avaliacoes: registros, limite: 50 }))
+  await abrir()
+  await screen.findByRole('table')
+  const nav = within(screen.getByRole('navigation', { name: `Paginação dos rascunhos de ${turma.nome}` }))
+  let rejeitar!: (causa: Error) => void
+  mocks.fetch.mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => { rejeitar = reject }))
+  fireEvent.click(nav.getByRole('button', { name: 'Próxima' }))
+  expect(screen.queryByRole('table')).toBeNull()
+  expect(nav.getByRole('button', { name: 'Anterior' }).hasAttribute('disabled')).toBe(true)
+  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2))
+  await act(async () => rejeitar(new Error('Falha de rede')))
+  await screen.findByRole('alert')
+  expect(nav.getByRole('button', { name: 'Próxima' }).hasAttribute('disabled')).toBe(true)
+  mocks.fetch.mockResolvedValue(Response.json({ avaliacoes: [], limite: 50 }))
+  fireEvent.click(nav.getByRole('button', { name: 'Anterior' }))
+  await screen.findByText('Nenhum rascunho nesta turma.')
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test.each([-1, 0.5, NaN, Infinity, 2147483648])('recusa página inválida %s sem consultar a sessão ou a rede', async pagina => {
+  await expect(listarAvaliacoesRascunho(turma.id, pagina)).rejects.toThrow('Página inválida.')
+  expect(mocks.getSession).not.toHaveBeenCalled()
+  expect(mocks.fetch).not.toHaveBeenCalled()
 })
 
 test('ID inválido não consulta sessão nem rede; erro de sessão não envia requisição', async () => {

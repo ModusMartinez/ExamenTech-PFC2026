@@ -439,10 +439,10 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
           assert.equal(url.searchParams.get('select'), 'id,turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,situacao,criado_em')
           assert.equal(url.searchParams.get('situacao'), 'eq.RASCUNHO')
           assert.equal(url.searchParams.get('order'), 'criado_em.desc,id.desc')
-          assert.equal(url.searchParams.get('limit'), '50')
+          assert.equal(url.searchParams.get('limit'), '51')
           return Response.json((await queryAs(id, `SELECT * FROM public.avaliacoes
-            WHERE turma_id=$1 AND situacao='RASCUNHO' ORDER BY criado_em DESC,id DESC LIMIT 50`,
-          [url.searchParams.get('turma_id')?.slice(3)], aal)).rows)
+            WHERE turma_id=$1 AND situacao='RASCUNHO' ORDER BY criado_em DESC,id DESC LIMIT 51 OFFSET $2`,
+          [url.searchParams.get('turma_id')?.slice(3), Number(url.searchParams.get('offset'))], aal)).rows)
         }
         if (url.pathname === '/rest/v1/rpc/criar_avaliacao_rascunho') {
           const params = await req.json()
@@ -543,7 +543,9 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
       assert.equal((await handler.fetch(request('POST', payload))).status, 400, JSON.stringify(payload))
     }
     for (const query of ['', '?turma_id=', '?turma_id=123', `?turma_id=${turmaId}&turma_id=${turmaId}`,
-      `?turma_id=${turmaId}&professor_id=${colleague}`, `?turma_id=${turmaId}&situacao=INVALIDA`]) {
+      `?turma_id=${turmaId}&professor_id=${colleague}`, `?turma_id=${turmaId}&situacao=INVALIDA`,
+      ...['', '-1', '1.5', '1e2', '01', 'NaN', 'Infinity', '2147483648', '0&pagina=1']
+        .map(pagina => `?turma_id=${turmaId}&pagina=${pagina}`)]) {
       assert.equal((await handler.fetch(request('GET', null, query))).status, 400)
     }
     const noToken = new Request(`http://localhost/api/avaliacoes?turma_id=${turmaId}`)
@@ -565,17 +567,28 @@ test('avaliações em rascunho: regras, RLS e auditoria no PostgreSQL local', as
     assert.equal(transport.mock.callCount(), 0)
   })
 
-  await t.test('API limita aos 50 rascunhos recentes da turma, com desempate por ID', async () => {
+  await t.test('API alcança todos os rascunhos em páginas de 50, com desempate por ID e isolamento', async () => {
+    const turma = (await queryAs<{ id: string }>(professor,
+      "INSERT INTO public.turmas(nome) VALUES ('Turma da paginação') RETURNING id")).rows[0].id
     await db.query(`INSERT INTO public.avaliacoes(turma_id,professor_id,titulo,tipo,inicio_em,fim_em,duracao_minutos,criado_em)
       SELECT $1,$2,'Rascunho ' || n,'PROVA',$3,$4,60,'2026-10-26T12:00:00Z'::timestamptz
-      FROM generate_series(1,55) AS n`, [turmaId, professor, body.inicio_em, body.fim_em])
-    const response = await apiFor(professor).handler.fetch(request())
+      FROM generate_series(1,103) AS n`, [turma, professor, body.inicio_em, body.fim_em])
     const expected = await queryAs(professor,
-      'SELECT id FROM public.avaliacoes WHERE turma_id=$1 ORDER BY criado_em DESC,id DESC LIMIT 50', [turmaId])
-    assert.equal(response.status, 200)
-    const { avaliacoes } = await response.json()
-    assert.equal(avaliacoes.length, 50)
-    assert.deepEqual(avaliacoes.map((item: { id: string }) => ({ id: item.id })), expected.rows)
+      'SELECT id FROM public.avaliacoes WHERE turma_id=$1 ORDER BY criado_em DESC,id DESC', [turma])
+    const listar = async (pagina: number, usuario = professor, aal = 'aal2') => {
+      const response = await apiFor(usuario, aal).handler.fetch(request('GET', null, `?turma_id=${turma}&pagina=${pagina}`))
+      return { status: response.status, ...await response.json() }
+    }
+    const paginas = await Promise.all([listar(0), listar(1), listar(2)])
+    assert.deepEqual(paginas.map(pagina => pagina.status), [200, 200, 200])
+    assert.deepEqual(paginas.map(pagina => pagina.avaliacoes.length), [51, 51, 3])
+    assert.deepEqual(paginas.flatMap(pagina => pagina.avaliacoes.slice(0, 50).map((item: { id: string }) => ({ id: item.id }))), expected.rows)
+    assert.deepEqual((await listar(3)).avaliacoes, [])
+    assert.deepEqual((await listar(2147483647)).avaliacoes, [])
+    assert.equal((await listar(1, colleague)).status, 404)
+    assert.equal((await listar(1, aluno)).status, 403)
+    assert.equal((await listar(1, professor, 'aal1')).status, 403)
+    assert.equal((await listar(2, admin)).avaliacoes.length, 3)
   })
 
   await t.test('API não confirma criação nem retorna lista vazia quando Auth, banco ou contrato falham', async () => {

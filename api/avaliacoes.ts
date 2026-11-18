@@ -26,11 +26,14 @@ export function createAvaliacoesHandler(
       const query = new URL(request.url).searchParams
       const turmaId = query.get('turma_id')?.toLowerCase()
       const situacao = query.get('situacao') ?? 'RASCUNHO'
+      const paginaRecebida = query.get('pagina') ?? '0'
+      const pagina = Number(paginaRecebida)
       if (!listing ? query.size > 0 :
         !turmaId || !UUID_PATTERN.test(turmaId) || query.getAll('turma_id').length !== 1 ||
         query.getAll('situacao').length > 1 || !['RASCUNHO', 'PUBLICADA'].includes(situacao) ||
-        [...query.keys()].some((key) => key !== 'turma_id' && key !== 'situacao')) {
-        return jsonResponse(400, { message: listing ? 'Informe o ID válido da turma e a situação RASCUNHO ou PUBLICADA.' : 'Não envie parâmetros na URL de gravação.' })
+        query.getAll('pagina').length > 1 || !/^(0|[1-9]\d*)$/.test(paginaRecebida) || !Number.isInteger(pagina) || pagina > 2147483647 ||
+        [...query.keys()].some((key) => !['turma_id', 'situacao', 'pagina'].includes(key))) {
+        return jsonResponse(400, { message: listing ? 'Informe a turma, a situação RASCUNHO ou PUBLICADA e uma página válida.' : 'Não envie parâmetros na URL de gravação.' })
       }
       let dados: DadosAvaliacaoRascunho | DadosEdicaoAvaliacaoRascunho | null = null
       if (!listing) {
@@ -101,14 +104,15 @@ export function createAvaliacoesHandler(
         if (!turma.data) return jsonResponse(404, { message: 'Turma não encontrada ou acesso não autorizado.' })
         if (turma.data.id !== turmaId) return jsonResponse(503, { message: 'Não foi possível conferir a turma.' })
         const publicadas = situacao === 'PUBLICADA'
+        // Um item adicional sinaliza a próxima página, como na listagem de tentativas.
         const consulta = supabase.from('avaliacoes')
           .select(AVALIACAO_FIELDS + (publicadas ? ',publicada_em,cancelada_em' : '')).eq('turma_id', turmaId)
         const { data, error } = await (publicadas
           ? consulta.in('situacao', ['PUBLICADA', 'CANCELADA'])
           : consulta.eq('situacao', 'RASCUNHO'))
           .order(publicadas ? 'publicada_em' : 'criado_em', { ascending: false, ...(publicadas ? { nullsFirst: false } : {}) })
-          .order('id', { ascending: false }).limit(50)
-        if (error || !Array.isArray(data) || data.length > 50) {
+          .order('id', { ascending: false }).range(pagina * 50, pagina * 50 + 50)
+        if (error || !Array.isArray(data) || data.length > 51) {
           return jsonResponse(503, { message: 'Não foi possível consultar as avaliações.' })
         }
         const avaliacoes: (AvaliacaoRascunho | AvaliacaoPublicada)[] = []

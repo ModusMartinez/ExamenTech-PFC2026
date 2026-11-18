@@ -37,15 +37,20 @@ function lerResultadoPublicado(value: unknown): ResultadoPublicado | null {
     titulo: value.titulo, turma_nome: value.turma_nome, publicado_em: publicadoEm } : null
 }
 
-export async function listarMeusResultados() {
+export async function listarMeusResultados(pagina = 0) {
+  if (!Number.isInteger(pagina) || pagina < 0 || pagina > 2147483647) throw new Error('Página inválida.')
   const { supabase } = await import('../lib/supabase')
-  const { data, error } = await supabase.rpc('listar_meus_resultados')
-  if (error || !Array.isArray(data) || data.length > 50) throw new Error('Não foi possível consultar seus resultados.')
-  return data.map(item => {
+  const { data, error } = await supabase.rpc('listar_meus_resultados', { p_pagina: pagina })
+  if (error || !Array.isArray(data) || data.length > 51) throw new Error('Não foi possível consultar seus resultados.')
+  const resultados: ResultadoPublicado[] = []
+  for (const item of data) {
     const resultado = lerResultadoPublicado(item)
-    if (!resultado) throw new Error('Não foi possível confirmar seus resultados.')
-    return resultado
-  })
+    if (!resultado || resultados.some(atual => atual.tentativa_id === resultado.tentativa_id)) {
+      throw new Error('Não foi possível confirmar seus resultados.')
+    }
+    resultados.push(resultado)
+  }
+  return resultados
 }
 
 export async function consultarMeuResultado(tentativaId: string): Promise<ResultadoAluno> {
