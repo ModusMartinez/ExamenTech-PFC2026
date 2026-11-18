@@ -1,8 +1,9 @@
-// Identidade e ingresso acompanham 045–048. Aceites anteriores conservam suas versões.
-const env = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env
-const updatedDocuments = env?.VITE_EXAM_PHOTOS_ENABLED === 'true' || env?.VITE_EXAM_MANAGEMENT_ENABLED === 'true'
-export const TERMS_VERSION = updatedDocuments ? '2026-11-12-v11' : '2026-11-12-v12'
-export const PRIVACY_VERSION = updatedDocuments ? '2026-11-12-v8' : '2026-11-12-v9'
+/// <reference types="vite/client" />
+// As versões de cadastro acompanham 061. Aceites anteriores conservam suas versões.
+const updatedDocuments = import.meta.env?.VITE_EXAM_PHOTOS_ENABLED === 'true' ||
+  import.meta.env?.VITE_EXAM_MANAGEMENT_ENABLED === 'true'
+export const TERMS_VERSION = updatedDocuments ? '2026-11-18-v13' : '2026-11-18-v14'
+export const PRIVACY_VERSION = updatedDocuments ? '2026-11-18-v10' : '2026-11-18-v11'
 export const EXAM_NOTICE_VERSION = '2026-11-08-v4'
 export const PROVA_NOTICE_VERSION = '2026-11-16-v6'
 export const EXAM_NOTICE_SUMMARY = 'Use apenas provas de teste e dados fictícios nesta demonstração. A câmera precisa estar disponível durante a prova. Você tem uma única tentativa. Sair, atualizar a página ou perder a conexão encerra seu acesso. A indisponibilidade da câmera é registrada e permite continuar respondendo. Respostas salvas e interrupções ficam no banco. Nesta versão, nenhuma foto, gravação ou áudio é enviado.'
@@ -11,6 +12,8 @@ export const LEGAL_RESPONSIBLE =
   'Equipe responsável pelo ExamenTech: João Pedro Martinez Landeira, Kenny Nascimento Pires e André Kenzo Narawa Nishiguchi, integrantes do PFC de Engenharia de Software da Universidade de Mogi das Cruzes (UMC).'
 export const LEGAL_REVIEW_NOTICE =
   'Uso exclusivo para demonstração do PFC. Esta versão não é um serviço em operação em escolas.'
+
+const descricaoCorrecao = 'As questões objetivas são corrigidas automaticamente, e questões não respondidas valem zero. O professor corrige as respostas dissertativas. O sistema calcula a nota final, e os resultados ficam disponíveis ao aluno após a publicação manual pelo professor.'
 
 export type LegalDocumentType = 'termos' | 'privacidade'
 
@@ -82,7 +85,8 @@ const documentsWithoutPhotos: Record<LegalDocumentType, LegalDocument> = {
         title: '1. Abrangência e responsáveis',
         paragraphs: [
           'Esta política se aplica à demonstração acadêmica do ExamenTech. Os integrantes identificados ao final são responsáveis pelas decisões sobre os dados utilizados nesta etapa. A menção à UMC identifica o vínculo acadêmico, não atribui à universidade a operação do sistema.',
-          'A demonstração não se destina à operação em escolas. Respostas de provas de teste e o histórico das tentativas são armazenados. Fotos, vídeo, áudio, notas e identificação por imagem ainda não são coletados ou calculados nesta versão. Qualquer inclusão dessas funções ou de participantes menores de idade exige revisão prévia dos documentos e dos cuidados aplicáveis.',
+          'A demonstração não se destina à operação em escolas. Respostas de provas de teste e o histórico das tentativas são armazenados. Fotos, vídeo, áudio e identificação por imagem não são coletados nesta versão. Qualquer inclusão dessas funções ou de participantes menores de idade exige revisão prévia dos documentos e dos cuidados aplicáveis.',
+          descricaoCorrecao,
         ],
       },
       {
@@ -147,7 +151,7 @@ function updatedLegalDocuments(): Record<LegalDocumentType, LegalDocument> {
   }
   replace('termos', '4. Provas de teste e câmera', [
     'O aluno com matrícula ativa pode iniciar uma tentativa por prova publicada dentro da janela definida pelo professor. Trocar de aba, perder o foco da janela ou sair da tela cheia pausa a prova e registra o motivo e o horário. O aluno pode continuar na mesma página em tela cheia enquanto houver tempo. Fechar ou atualizar a página ou perder a conexão encerra o acesso à tentativa.',
-    'A câmera deve apresentar imagem antes do início e permanecer disponível. Durante a resolução das questões, uma falha da câmera é registrada e a câmera pode ser reconectada na mesma página. Quando a coleta de fotos está habilitada, a foto inicial precisa ser confirmada antes de liberar as questões. Se essa captura falhar, recupere a câmera e prepare a foto novamente. O prazo continua correndo. Informe uma imagem preta se o navegador não detectar a falha.',
+    'A câmera deve apresentar imagem antes do início e permanecer disponível. Durante a resolução das questões, uma falha da câmera é registrada e a câmera pode ser reconectada na mesma página. Quando a coleta de fotos está habilitada, o cronômetro começa e as questões são liberadas somente após o servidor confirmar o recebimento da foto inicial. O horário final definido pelo professor continua valendo, inclusive durante a preparação da foto. Se essa captura falhar, recupere a câmera e prepare a foto novamente. Informe uma imagem preta se o navegador não detectar a falha.',
     'A tentativa só pode ser executada na sessão e na página que a iniciaram. As respostas recebidas e a ordem das questões ficam no histórico após a interrupção. A tentativa não pode ser reaberta.',
     'Quando o aviso antes da prova informar que a coleta de fotografias está habilitada, será solicitada concordância específica para uma foto inicial e três fotos em momentos aleatórios da tentativa. Não há gravação de vídeo ou áudio nem comparação facial automática. O professor responsável e o ADM da organização podem analisar as imagens manualmente. As fotos não comprovam identidade ou fraude sozinhas. O encerramento da tentativa cancela as capturas futuras.',
     'Esta é uma demonstração voluntária, destinada a participantes adultos, sem aplicação de avaliações escolares oficiais. Sem concordar com as fotos, o participante pode cancelar a preparação e continuar usando o painel. A permissão da câmera no navegador não substitui o consentimento específico. Respostas não salvas e capturas cujo envio não foi confirmado podem se perder em uma falha; falha de rede no envio não é classificada como falha da câmera.',
@@ -159,7 +163,8 @@ function updatedLegalDocuments(): Record<LegalDocumentType, LegalDocument> {
   ])
   replace('privacidade', '1. Abrangência e responsáveis', [
     'Esta política se aplica à demonstração acadêmica voluntária do ExamenTech, destinada a participantes adultos. Os integrantes identificados ao final decidem sobre os dados nesta etapa. A menção à UMC identifica o vínculo acadêmico; não atribui à universidade a operação do sistema.',
-    'A demonstração não se destina a avaliações oficiais em escolas nem à participação de menores de idade. Guarda respostas de teste e histórico de tentativas. A coleta de fotos, quando habilitada, é informada antes da prova e depende de concordância específica; sem esse aviso e concordância não ocorre envio. Não há gravação de vídeo ou áudio, notas automáticas ou reconhecimento facial.',
+    'A demonstração não se destina a avaliações oficiais em escolas nem à participação de menores de idade. Guarda respostas de teste e histórico de tentativas. A coleta de fotos, quando habilitada, é informada antes da prova e depende de concordância específica; sem esse aviso e concordância não ocorre envio. Não há gravação de vídeo ou áudio nem reconhecimento facial.',
+    descricaoCorrecao,
   ])
   const dataSection = documents.privacidade.sections.find(item => item.title === '2. Dados utilizados')
   if (dataSection) dataSection.paragraphs = dataSection.paragraphs.slice(0, 4).concat([
