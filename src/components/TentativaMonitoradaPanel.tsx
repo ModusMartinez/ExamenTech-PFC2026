@@ -138,6 +138,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
   const examHeading = useRef<HTMLHeadingElement>(null)
   const prova = avaliacao.tipo === 'PROVA'
   const withPhotos = prova && photosEnabled()
+  const aguardandoFoto = withPhotos && tentativa?.cronometro_iniciado_em === null
   const allAcknowledged = noticeAcknowledged && (!prova || photosAcknowledged)
   const podeIniciar = allAcknowledged && (!prova || (withPhotos && cameraStatus === 'ready'))
   const photos = useExamPhotos(videoRef, reportNoImage, handleExecutionFailure)
@@ -378,11 +379,8 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       setNow(() => Date.now())
       setPhase('em-andamento')
       for (const motivo of motivosPausa.current) ocorrencias.registrarPausa(started.id, motivo)
-      if (withPhotos) {
-        const ready = await photos.prepare(started.id, chaveExecucao)
-        if (!activeRef.current || blockedRef.current || !ready) return
-      }
-      void loadContent(started)
+      const ready = withPhotos ? await preparePhotos(started) : started
+      if (ready) void loadContent(ready)
     } catch (cause) {
       handleExecutionFailure(cause)
       if (activeRef.current && !blockedRef.current) {
@@ -399,13 +397,26 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     }
   }
 
+  async function preparePhotos(current: TentativaIniciada) {
+    const confirmed = await photos.prepare(current.id, chaveExecucao)
+    if (!activeRef.current || blockedRef.current || !confirmed) return false
+    if (confirmed.id !== current.id || confirmed.avaliacao_id !== current.avaliacao_id ||
+        confirmed.aluno_id !== current.aluno_id || confirmed.iniciada_em !== current.iniciada_em) {
+      throw new Error('A confirmação da foto não corresponde à tentativa preparada.')
+    }
+    attemptRef.current = confirmed
+    setTentativa(confirmed)
+    setNow(Date.now())
+    return confirmed
+  }
+
   async function retryPhotos() {
     const current = attemptRef.current
     if (!current || blockedRef.current || motivosPausa.current.size) return
     setError('')
     try {
-      const ready = await photos.prepare(current.id, chaveExecucao)
-      if (ready && activeRef.current && !blockedRef.current && !conteudo) await loadContent(current)
+      const ready = await preparePhotos(current)
+      if (ready && !conteudo) await loadContent(ready)
     } catch (cause) {
       handleExecutionFailure(cause)
       if (activeRef.current && !blockedRef.current) setError('Não foi possível preparar o envio das fotos. Tente novamente nesta página.')
@@ -606,7 +617,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     {prova && phase === 'em-andamento' && !pausada && <>
       {cameraStatus !== 'ready' && <div className="provas-aviso">
         <p>{withPhotos && !photos.initialReady
-          ? 'Reconecte a câmera para obter a foto inicial. O prazo continua correndo.'
+          ? 'Reconecte a câmera para obter a foto inicial. O tempo da prova começa após a confirmação da foto.'
           : 'A câmera está indisponível. Você pode continuar respondendo e enviar a prova.'}</p>
         <button type="button" className="turmas-refresh" disabled={busy || cameraStatus === 'requesting'}
           onClick={() => void start()}>Reconectar câmera</button>
@@ -652,12 +663,14 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
     </form>}
     {phase === 'iniciando' && <p role="status">Confirmando início da tentativa...</p>}
     {phase === 'falhou' && <button type="button" className="turmas-refresh" onClick={() => { stop(); onCancelar() }}>Voltar às avaliações</button>}
-    {phase === 'em-andamento' && tentativa && <p className="tentativa-prazo" role="timer">Tempo restante: {relogio(remaining)}</p>}
+    {phase === 'em-andamento' && tentativa && !aguardandoFoto && <p className="tentativa-prazo" role="timer">Tempo restante: {relogio(remaining)}</p>}
     {phase !== 'bloqueada' && !pausada && error && <p className="alert error" role="alert">{error}</p>}
     {!pausada && notice && <p className="alert success" role="status">{notice}</p>}
     {withPhotos && phase === 'em-andamento' && !pausada && <div className="provas-fotos-status">
-      <p role="status">{photos.message || (photos.initialReady ? 'Foto inicial recebida. As próximas capturas acontecem durante a prova.' : 'Aguardando confirmação da foto inicial antes de mostrar as questões.')}</p>
-      {(photos.pending > 0 || !photos.initialReady) && <button type="button" className="turmas-refresh"
+      <p role="status">{photos.message || (aguardandoFoto
+        ? 'Confirmando a foto inicial e o início do tempo da prova.'
+        : 'Foto inicial recebida. As próximas capturas acontecem durante a prova.')}</p>
+      {(photos.pending > 0 || !photos.initialReady || aguardandoFoto) && <button type="button" className="turmas-refresh"
         disabled={busy || photos.preparing || (photos.pending === 0 && cameraStatus !== 'ready')} onClick={() => void retryPhotos()}>
         {photos.pending > 0 ? `Reenviar fotos (${photos.pending})` : 'Preparar envio das fotos'}
       </button>}
@@ -666,7 +679,8 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
 
     {pausada && phase !== 'bloqueada' && <section className="provas-aviso" aria-labelledby={`${noticeId}-pausa`}>
       <h2 id={`${noticeId}-pausa`} ref={pauseHeading} tabIndex={-1}>Prova pausada</h2>
-      <p>Volte para esta aba e continue em tela cheia. O tempo da prova continua correndo.</p>
+      <p>Volte para esta aba e continue em tela cheia. {aguardandoFoto
+        ? 'O cronômetro começa após a confirmação da foto inicial.' : 'O tempo da prova continua correndo.'}</p>
       {pausaError && <p role="alert">{pausaError}</p>}
       {ocorrencias.pending > 0 && ocorrencias.message && <p role="status">{ocorrencias.message}</p>}
       <button type="button" className="btn-primary" disabled={phase !== 'em-andamento' || continuando || busy}
@@ -683,7 +697,7 @@ export function TentativaMonitoradaPanel({ avaliacao, onCancelar, onLeave, onAct
       </div>
     </div>}
 
-    {phase === 'em-andamento' && !pausada && (!withPhotos || photos.initialReady) && <>
+    {phase === 'em-andamento' && !pausada && !aguardandoFoto && (!withPhotos || photos.initialReady) && <>
       {loadingContent && <p role="status">Carregando questões...</p>}
       {!loadingContent && !conteudo && error && tentativa && <button type="button" className="turmas-refresh"
         onClick={() => void loadContent(tentativa)}>Tentar carregar questões</button>}

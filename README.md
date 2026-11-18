@@ -82,6 +82,7 @@ Arquivos SQL no repositório não são executados pelo Git nem pelo Vite. Em ban
 | Versões anteriores dos documentos com fotos | `database/032_documentos_fotos.sql`. |
 | Execução segura e ocorrências de prova | `database/043_execucao_segura_prova.sql`, após a 042. |
 | Pausa da prova e registro na linha do tempo | `database/052_pausa_prova.sql`, após a 051 e antes de publicar a interface do RF32. |
+| Confirmação de e-mail antes de ativar o perfil | `database/056_confirmacao_email_perfis.sql`, após a 055. Confira a conciliação de contas antigas no [roteiro de identidade](docs/identidade-e-acesso-1211.md#confirmação-de-e-mail). |
 
 O bucket usado é **`examentech-evidencias`**, privado, somente `image/jpeg`, até 1 MiB. O banco mantém a coleta desligada ao aplicar 031. A ativação depende de conferir o bucket, a função de limpeza, o agendamento e os avisos.
 

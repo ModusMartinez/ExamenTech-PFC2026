@@ -30,7 +30,7 @@ for (const [profileCode, expectedProfile] of [
   })
 }
 
-for (const status of ['INATIVO', 'PENDENTE', 'DESCONHECIDO']) {
+for (const status of ['INATIVO', 'DESCONHECIDO']) {
   test(`perfil com situação ${status} não libera acesso`, () => {
     const record = { ...activeStudent, situacao: status }
 
@@ -41,6 +41,12 @@ for (const status of ['INATIVO', 'PENDENTE', 'DESCONHECIDO']) {
     })
   })
 }
+
+test('aluno pendente recebe orientação para confirmar o e-mail', () => {
+  assert.deepEqual(decideProfileAccess({ ...activeStudent, situacao: 'PENDENTE' }), {
+    kind: 'denied', message: 'Confirme seu e-mail para liberar o acesso.',
+  })
+})
 
 for (const profileCode of ['SUPERADMIN', '__proto__']) {
   test(`perfil desconhecido ${profileCode} não libera acesso`, () => {

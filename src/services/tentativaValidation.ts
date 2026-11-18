@@ -29,6 +29,7 @@ export type TentativaIniciada = {
   situacao: 'EM_ANDAMENTO'
   iniciada_em: string
   limite_em: string
+  cronometro_iniciado_em?: string | null
 }
 
 export function lerTentativaIniciada(value: unknown): TentativaIniciada | null {
@@ -40,9 +41,14 @@ export function lerTentativaIniciada(value: unknown): TentativaIniciada | null {
   const iniciadaEm = lerDataComFuso('iniciada_em' in value ? value.iniciada_em : null)
   const limiteEm = lerDataComFuso('limite_em' in value ? value.limite_em : null)
   if (!iniciadaEm || !limiteEm || Date.parse(limiteEm) <= Date.parse(iniciadaEm)) return null
+  const inicioCronometro = 'cronometro_iniciado_em' in value ? value.cronometro_iniciado_em : undefined
+  const cronometro = lerDataComFuso(inicioCronometro)
+  if (inicioCronometro !== undefined && inicioCronometro !== null &&
+      (!cronometro || Date.parse(cronometro) >= Date.parse(limiteEm))) return null
   return {
     id: value.id.toLowerCase(), avaliacao_id: value.avaliacao_id.toLowerCase(), aluno_id: value.aluno_id.toLowerCase(),
     situacao: 'EM_ANDAMENTO', iniciada_em: iniciadaEm, limite_em: limiteEm,
+    ...(inicioCronometro !== undefined ? { cronometro_iniciado_em: cronometro } : {}),
   }
 }
 

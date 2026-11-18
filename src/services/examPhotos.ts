@@ -1,11 +1,12 @@
 import { lerDataComFuso, UUID_PATTERN } from './avaliacaoValidation'
 import type { PhotoMoment } from './photoEvidence'
-import { ErroAcessoTentativa, ErroConexaoTentativa, EXECUCAO_HEADER, lerChaveExecucao } from './tentativaValidation'
+import { ErroAcessoTentativa, ErroConexaoTentativa, EXECUCAO_HEADER, lerChaveExecucao, lerTentativaIniciada } from './tentativaValidation'
+import type { TentativaIniciada } from './tentativaValidation'
 
 export const PHOTO_NOTICE_VERSION = '2026-11-08-fotos-v1'
 export const PHOTO_NOTICE = 'Uma foto inicial e três fotos em momentos aleatórios da tentativa serão enviadas ao armazenamento privado. O professor responsável e o ADM da sua organização poderão consultá-las para análise manual. O prazo máximo é de 90 dias por foto, com exclusão automática. Não há gravação de vídeo ou áudio, comparação facial nem identificação automática de fraude. Se a tentativa terminar antes dos horários sorteados, as fotos futuras não serão tiradas.'
 export type PhotoSlot = { id: string; momento: PhotoMoment; agendada_em: string; recebida_em: string | null }
-export type PhotoPlan = { tentativa_id: string; ciclo: number; servidor_em: string; capturas: PhotoSlot[] }
+export type PhotoPlan = { tentativa_id: string; tentativa: TentativaIniciada; ciclo: number; servidor_em: string; capturas: PhotoSlot[] }
 export type ResponsiblePhoto = PhotoSlot & { ciclo: number; expira_em: string | null; situacao: 'PENDENTE' | 'ENVIANDO' | 'DISPONIVEL' | 'EXCLUIDA' }
 const moments: PhotoMoment[] = ['INICIAL', 'PROVA_1', 'PROVA_2', 'PROVA_3']
 
@@ -31,14 +32,17 @@ export async function consultarPlanoFotos(tentativaId: string, chaveExecucao: st
   if (status === 0) throw new ErroConexaoTentativa('A conexão foi perdida ao consultar os horários das fotos.')
   if (error?.code === '42501' || status === 401) throw new ErroAcessoTentativa('A tentativa não está disponível nesta sessão.')
   if (error || !record(data) || data.tentativa_id !== tentativaId || !Number.isSafeInteger(data.ciclo) ||
-      (data.ciclo as number) < 1 || data.retencao_dias !== 90 || !Array.isArray(data.capturas) || data.capturas.length !== 4) {
+      (data.ciclo as number) < 1 || data.retencao_dias !== 90 || !Array.isArray(data.capturas)) {
     throw new Error('Não foi possível consultar os horários das fotos. Tente novamente nesta página.')
   }
   const serverTime = lerDataComFuso(data.servidor_em)
+  const tentativa = lerTentativaIniciada(data.tentativa)
   const captures = data.capturas.map(slot)
-  if (!serverTime || captures.some((item, i) => !item || item.momento !== moments[i]) ||
-      new Set(captures.map(item => item?.id)).size !== 4) throw new Error('O plano das fotos não pôde ser confirmado.')
-  return { tentativa_id: tentativaId, ciclo: data.ciclo as number, servidor_em: serverTime, capturas: captures as PhotoSlot[] }
+  const total = tentativa?.cronometro_iniciado_em === null ? 1 : 4
+  if (!serverTime || !tentativa || tentativa.id !== tentativaId || captures.length !== total ||
+      captures.some((item, i) => !item || item.momento !== moments[i]) ||
+      new Set(captures.map(item => item?.id)).size !== total) throw new Error('O plano das fotos não pôde ser confirmado.')
+  return { tentativa_id: tentativaId, tentativa, ciclo: data.ciclo as number, servidor_em: serverTime, capturas: captures as PhotoSlot[] }
 }
 
 async function sessionToken() {

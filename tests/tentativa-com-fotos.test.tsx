@@ -45,14 +45,50 @@ beforeEach(()=>{
   services.answers.mockResolvedValue([{id:'80000000-0000-0000-0000-000000000001',tentativa_id:attempt.id,
     questao_id:question.id,alternativa_id:question.alternativas[1].id,texto:null,versao:2,
     criado_em:'2026-11-08T12:00:00Z',atualizado_em:'2026-11-08T12:00:00Z'}])
-  services.plan.mockImplementation(async()=>({tentativa_id:attempt.id,ciclo:1,servidor_em:new Date().toISOString(),
+  services.plan.mockImplementation(async()=>({tentativa_id:attempt.id,tentativa:attempt,ciclo:1,servidor_em:new Date().toISOString(),
     capturas:['INICIAL','PROVA_1','PROVA_2','PROVA_3'].map((momento,i)=>({id:`70000000-0000-0000-0000-00000000000${i+1}`,
       momento,agendada_em:new Date(Date.now()+i*600000).toISOString(),recebida_em:null}))}))
   services.capture.mockResolvedValue({moment:'INICIAL',blob:new Blob(['photo'],{type:'image/jpeg'}),width:640,height:480,capturedAt:new Date().toISOString()})
   services.send.mockResolvedValue(undefined)
   services.end.mockResolvedValue({id:attempt.id,situacao:'FINALIZADA',encerrada_em:'2026-11-08T12:00:00Z',falhas_camera:0})
 })
-afterEach(()=>{cleanup();telaCheia.restaurar();vi.restoreAllMocks()})
+afterEach(()=>{cleanup();telaCheia.restaurar();vi.restoreAllMocks();vi.useRealTimers()})
+
+test('o tempo só aparece após confirmar a foto e usa a duração recebida do servidor', async () => {
+  const preparada = { ...attempt, cronometro_iniciado_em: null }
+  const inicial = { id: '70000000-0000-0000-0000-000000000001', momento: 'INICIAL',
+    agendada_em: new Date().toISOString(), recebida_em: null }
+  services.start.mockResolvedValue(preparada)
+  services.plan.mockResolvedValueOnce({ tentativa_id: attempt.id, tentativa: preparada, ciclo: 1,
+    servidor_em: new Date().toISOString(), capturas: [inicial] })
+  let confirmarFoto!: () => void
+  services.send.mockReturnValueOnce(new Promise<void>(resolve => { confirmarFoto = resolve }))
+  render(<TentativaMonitoradaPanel avaliacao={assessment} onCancelar={vi.fn()} onLeave={vi.fn()} onActiveChange={vi.fn()} />)
+  fireEvent.click(screen.getByRole('checkbox', { name: /Li o aviso da prova/ }))
+  fireEvent.click(screen.getByRole('checkbox', { name: /Autorizo especificamente/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar início' }))
+  await waitFor(() => expect(services.send).toHaveBeenCalledTimes(1))
+  vi.useFakeTimers()
+  await act(() => vi.advanceTimersByTimeAsync(5 * 60 * 1000))
+  expect(screen.queryByRole('timer')).toBeNull()
+  expect(services.content).not.toHaveBeenCalled()
+  expect(services.capture).toHaveBeenCalledTimes(1)
+
+  const confirmada = { ...attempt, cronometro_iniciado_em: new Date().toISOString(),
+    limite_em: new Date(Date.now() + 60 * 60 * 1000).toISOString() }
+  services.plan.mockResolvedValueOnce({ tentativa_id: attempt.id, tentativa: confirmada, ciclo: 1,
+    servidor_em: new Date().toISOString(), capturas: [inicial, ...['PROVA_1', 'PROVA_2', 'PROVA_3'].map((momento, index) => ({
+      id: `70000000-0000-0000-0000-00000000000${index + 2}`, momento,
+      agendada_em: new Date(Date.now() + (index + 1) * 600000).toISOString(), recebida_em: null,
+    }))] })
+  services.content.mockResolvedValue({ tentativa_id: attempt.id, avaliacao_id: assessment.id, titulo: assessment.titulo,
+    tipo: 'PROVA', iniciada_em: confirmada.iniciada_em, limite_em: confirmada.limite_em, questoes: [question] })
+  await act(async () => confirmarFoto())
+  expect(screen.getByRole('timer').textContent).toContain('01:00:00')
+  expect(screen.getByText(question.enunciado)).toBeTruthy()
+  expect(services.start).toHaveBeenCalledTimes(1)
+  expect(services.plan).toHaveBeenCalledTimes(2)
+})
 
 test('foto inicial é confirmada antes das questões e a consulta carrega a resposta salva da mesma execução',async()=>{
   let confirmUpload:()=>void=()=>undefined

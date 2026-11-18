@@ -4,10 +4,11 @@ import { capturePhotoFrame } from '../services/photoEvidence'
 import { consultarPlanoFotos, enviarFoto } from '../services/examPhotos'
 import type { PhotoPlan, PhotoSlot } from '../services/examPhotos'
 import { ErroAcessoTentativa, ErroConexaoTentativa } from '../services/tentativaValidation'
+import type { TentativaIniciada } from '../services/tentativaValidation'
 
 type Pending = { slot: PhotoSlot; blob: Blob | null; uploadId: string; sending?: Promise<boolean> }
 type Session = { active: boolean; chaveExecucao: string; plan: PhotoPlan; offset: number; captured: Set<string>; failed: Set<string>; pending: Map<string, Pending>;
-  timers: number[]; abort: AbortController }
+  timers: number[]; abort: AbortController; scheduled: boolean }
 
 export function useExamPhotos(
   video: RefObject<HTMLVideoElement | null>,
@@ -23,7 +24,7 @@ export function useExamPhotos(
   const [initialReady, setInitialReady] = useState(false)
   const [message, setMessage] = useState('')
   const [toast, setToast] = useState('')
-  const preparation = useRef<Promise<boolean> | null>(null)
+  const preparation = useRef<Promise<TentativaIniciada | false> | null>(null)
   const [preparing, setPreparing] = useState(false)
   useEffect(() => { callback.current = onCaptureFailure }, [onCaptureFailure])
   useEffect(() => { reportFailure.current = onExecutionFailure }, [onExecutionFailure])
@@ -104,7 +105,27 @@ export function useExamPhotos(
     }
   }
 
-  async function initialize(tentativaId: string, chaveExecucao: string) {
+  async function completePreparation(current: Session): Promise<TentativaIniciada | false> {
+    if (!await capture(current, current.plan.capturas[0]) || !current.active) return false
+    if (!current.scheduled) {
+      if (current.plan.tentativa.cronometro_iniciado_em === null) {
+        const plan = await consultarPlanoFotos(current.plan.tentativa_id, current.chaveExecucao)
+        if (!current.active) return false
+        if (plan.tentativa.cronometro_iniciado_em === null) throw new Error('O início do tempo da prova ainda não foi confirmado.')
+        current.plan = plan
+        current.offset = Date.parse(plan.servidor_em) - Date.now()
+      }
+      for (const slot of current.plan.capturas.slice(1)) {
+        if (slot.recebida_em) continue
+        current.timers.push(window.setTimeout(() => { void capture(current, slot) },
+          Math.max(0, Date.parse(slot.agendada_em) - (Date.now() + current.offset))))
+      }
+      current.scheduled = true
+    }
+    return current.plan.tentativa
+  }
+
+  async function initialize(tentativaId: string, chaveExecucao: string): Promise<TentativaIniciada | false> {
     dispose()
     const currentGeneration = generation.current
     setInitialReady(false)
@@ -115,15 +136,10 @@ export function useExamPhotos(
     if (!mounted.current || generation.current !== currentGeneration) return false
     const current: Session = { active: true, chaveExecucao, plan, offset: Date.parse(plan.servidor_em) - Date.now(),
       captured: new Set(plan.capturas.filter(slot => slot.recebida_em).map(slot => slot.id)),
-      failed: new Set(), pending: new Map(), timers: [], abort: new AbortController() }
+      failed: new Set(), pending: new Map(), timers: [], abort: new AbortController(), scheduled: false }
     session.current = current
     setInitialReady(Boolean(plan.capturas[0].recebida_em))
-    for (const slot of plan.capturas.slice(1)) {
-      if (slot.recebida_em) continue
-      current.timers.push(window.setTimeout(() => { void capture(current, slot) },
-        Math.max(0, Date.parse(slot.agendada_em) - (Date.now() + current.offset))))
-    }
-    return capture(current, plan.capturas[0])
+    return completePreparation(current)
   }
 
   async function retry() {
@@ -133,15 +149,14 @@ export function useExamPhotos(
     return results.every(Boolean)
   }
 
-  function prepare(tentativaId: string, chaveExecucao: string): Promise<boolean> {
+  function prepare(tentativaId: string, chaveExecucao: string): Promise<TentativaIniciada | false> {
     if (preparation.current) return preparation.current
     setPreparing(true)
     const request = (async () => {
       const current = session.current
       if (!current?.active || current.plan.tentativa_id !== tentativaId) return initialize(tentativaId, chaveExecucao)
       await retry()
-      // Reconectar não consulta outro plano nem duplica os horários já agendados.
-      return capture(current, current.plan.capturas[0])
+      return completePreparation(current)
     })()
     preparation.current = request.finally(() => {
       preparation.current = null

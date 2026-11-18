@@ -2,17 +2,21 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { StrictMode, useRef } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { useExamPhotos } from '../src/hooks/useExamPhotos'
+import type { TentativaIniciada } from '../src/services/tentativaValidation'
 
 const services = vi.hoisted(() => ({ plan: vi.fn(), send: vi.fn(), capture: vi.fn(), cameraFailure: vi.fn(), executionFailure: vi.fn() }))
 vi.mock('../src/services/examPhotos', () => ({ consultarPlanoFotos: services.plan, enviarFoto: services.send }))
 vi.mock('../src/services/photoEvidence', () => ({ capturePhotoFrame: services.capture }))
 const attempt = '10000000-0000-0000-0000-000000000001'
+const tentativa: TentativaIniciada = { id: attempt, avaliacao_id: '40000000-0000-0000-0000-000000000001',
+  aluno_id: '50000000-0000-0000-0000-000000000001', situacao: 'EM_ANDAMENTO',
+  iniciada_em: '2026-01-01T00:00:00.000Z', limite_em: '2099-01-01T00:00:00.000Z' }
 const chaveExecucao = '30000000-0000-4000-8000-000000000001'
-let initialize: () => Promise<boolean>
+let initialize: () => Promise<TentativaIniciada | false>
 let retry: () => Promise<boolean>
 let flush: () => Promise<boolean>
 let dispose: () => void
-let prepare: () => Promise<boolean>
+let prepare: () => Promise<TentativaIniciada | false>
 function Harness() {
   const video = useRef<HTMLVideoElement>(null)
   const photos = useExamPhotos(video, services.cameraFailure, services.executionFailure)
@@ -28,7 +32,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.resetAllMocks()
   const serverTime = new Date().toISOString()
-  services.plan.mockResolvedValue({ tentativa_id: attempt, ciclo: 1, servidor_em: serverTime,
+  services.plan.mockResolvedValue({ tentativa_id: attempt, tentativa, ciclo: 1, servidor_em: serverTime,
     capturas: ['INICIAL','PROVA_1','PROVA_2','PROVA_3'].map((momento, i) => ({
       id: `20000000-0000-0000-0000-00000000000${i+1}`, momento,
       agendada_em: new Date(Date.now()+i*10000).toISOString(), recebida_em: null,
@@ -41,7 +45,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
 
 test('captura inicial e três horários do servidor, com aviso sem mudar o foco; não aguarda capturas futuras no envio', async () => {
   render(<StrictMode><Harness /></StrictMode>)
-  await act(async () => { expect(await initialize()).toBe(true) })
+  await act(async () => { expect(await initialize()).toEqual(tentativa) })
   expect(screen.getByLabelText('Inicial pronta').textContent).toBe('true')
   expect(services.capture).toHaveBeenCalledTimes(1)
   let finished = false
@@ -63,7 +67,7 @@ test('captura inicial e três horários do servidor, com aviso sem mudar o foco;
 test('rede falha sem penalizar a câmera e repete o mesmo arquivo e identificador de envio', async () => {
   services.send.mockRejectedValueOnce(new Error('Rede')).mockRejectedValueOnce(new Error('Rede')).mockRejectedValueOnce(new Error('Rede'))
   render(<Harness />)
-  let initialization: Promise<boolean>
+  let initialization: Promise<TentativaIniciada | false>
   await act(async () => { initialization = initialize() })
   await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
   await act(async () => { expect(await initialization!).toBe(false) })
@@ -96,7 +100,7 @@ test('resposta atrasada do plano após desmontar não abre capturas nem envia ar
   let resolvePlan: (value: unknown) => void = () => undefined
   services.plan.mockImplementation(() => new Promise(resolve => { resolvePlan = resolve }))
   const {unmount} = render(<Harness />)
-  let initialization: Promise<boolean>
+  let initialization: Promise<TentativaIniciada | false>
   await act(async () => { initialization = initialize() })
   unmount()
   await act(async () => { resolvePlan(originalPlan); expect(await initialization!).toBe(false) })
@@ -108,8 +112,8 @@ test('recuperação da captura inicial não duplica plano, timers ou uma foto j�
   services.capture.mockRejectedValueOnce(new Error('Sem imagem'))
   render(<Harness />)
   await act(async () => { expect(await prepare()).toBe(false) })
-  await act(async () => { expect(await prepare()).toBe(true) })
-  await act(async () => { expect(await prepare()).toBe(true) })
+  await act(async () => { expect(await prepare()).toEqual(tentativa) })
+  await act(async () => { expect(await prepare()).toEqual(tentativa) })
   expect(services.plan).toHaveBeenCalledTimes(1)
   expect(services.capture).toHaveBeenCalledTimes(2)
   expect(services.send).toHaveBeenCalledTimes(1)
@@ -135,10 +139,25 @@ test('cliques durante a foto inicial compartilham a preparação e o mesmo envio
   let confirmar!: () => void
   services.send.mockReturnValueOnce(new Promise<void>(resolve => { confirmar = resolve }))
   render(<Harness />)
-  let first!: Promise<boolean>
+  let first!: Promise<TentativaIniciada | false>
   await act(async () => { first = prepare(); expect(prepare()).toBe(first) })
   expect(services.plan).toHaveBeenCalledTimes(1)
   expect(services.capture).toHaveBeenCalledTimes(1)
-  await act(async () => { confirmar(); expect(await first).toBe(true) })
+  await act(async () => { confirmar(); expect(await first).toEqual(tentativa) })
   expect(services.send).toHaveBeenCalledTimes(1)
+})
+
+test('falha ao consultar o prazo após a foto permite repetir sem outra captura ou outro envio', async () => {
+  const plan = await services.plan()
+  services.plan.mockResolvedValueOnce({ ...plan, tentativa: { ...tentativa, cronometro_iniciado_em: null },
+    capturas: [plan.capturas[0]] })
+    .mockRejectedValueOnce(new Error('Prazo indisponível.'))
+  render(<Harness />)
+  await act(async () => { await expect(prepare()).rejects.toThrow('Prazo indisponível.') })
+  expect(screen.getByLabelText('Inicial pronta').textContent).toBe('true')
+  await act(async () => { expect(await prepare()).toEqual(tentativa) })
+  expect(services.capture).toHaveBeenCalledTimes(1)
+  expect(services.send).toHaveBeenCalledTimes(1)
+  await act(() => vi.advanceTimersByTimeAsync(30000))
+  expect(services.capture).toHaveBeenCalledTimes(4)
 })

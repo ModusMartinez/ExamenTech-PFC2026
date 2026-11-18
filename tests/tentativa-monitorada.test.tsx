@@ -20,7 +20,7 @@ vi.mock('../src/services/tentativas', () => services)
 vi.mock('../src/services/examFeatures', () => ({ photosEnabled: () => true, examManagementEnabled: () => false }))
 vi.mock('../src/hooks/useExamPhotos', () => ({ useExamPhotos: () => ({
   initialReady: true, pending: 0, message: '', toast: '', preparing: false,
-  dispose: () => undefined, prepare: async () => true, flush: async () => true,
+  dispose: () => undefined, prepare: async () => tentativa, flush: async () => true,
 }) }))
 vi.mock('../src/services/respostasTentativa', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/respostasTentativa')>(),

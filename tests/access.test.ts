@@ -149,7 +149,9 @@ for (const status of ['PENDENTE', 'INATIVO']) {
     const result = await resolveAccess(client)
 
     assert.deepEqual(result, {
-      kind: 'denied', message: 'Sua conta não está ativa. Procure o administrador.',
+      kind: 'denied', message: status === 'PENDENTE'
+        ? 'Confirme seu e-mail para liberar o acesso.'
+        : 'Sua conta não está ativa. Procure o administrador.',
     })
     assert.equal(registerAccess.mock.callCount(), 1)
     assert.deepEqual(registerAccess.mock.calls[0].arguments, ['registrar_acesso'])

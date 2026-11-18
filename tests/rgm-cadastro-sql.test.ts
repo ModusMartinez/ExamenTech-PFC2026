@@ -13,9 +13,9 @@ test('045: RGM fica vinculado ao ticket e protege novos cadastros sem modificar 
     CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS; CREATE ROLE supabase_auth_admin;
     CREATE SCHEMA auth;
     GRANT USAGE ON SCHEMA auth TO anon,authenticated,supabase_auth_admin;
-    CREATE TABLE auth.users(id UUID PRIMARY KEY,email TEXT,raw_user_meta_data JSONB DEFAULT '{}');
+    CREATE TABLE auth.users(id UUID PRIMARY KEY,email TEXT,email_confirmed_at TIMESTAMPTZ,raw_user_meta_data JSONB DEFAULT '{}');
     CREATE TABLE auth.sessions(id UUID PRIMARY KEY,user_id UUID REFERENCES auth.users(id));
-    GRANT INSERT,SELECT ON auth.users TO supabase_auth_admin;
+    GRANT INSERT,SELECT,UPDATE ON auth.users TO supabase_auth_admin;
     CREATE FUNCTION auth.jwt() RETURNS JSONB LANGUAGE sql STABLE AS $$
       SELECT COALESCE(NULLIF(current_setting('request.jwt.claims',true),'')::JSONB,'{}') $$;
     CREATE FUNCTION auth.uid() RETURNS UUID LANGUAGE sql STABLE AS $$ SELECT NULLIF(auth.jwt()->>'sub','')::UUID $$;
@@ -65,16 +65,23 @@ test('045: RGM fica vinculado ao ticket e protege novos cadastros sem modificar 
       return result.rows[0].result.ticket
     })
   }
-  async function signup(email: string, ticket: string, extra: object = {}) {
+  async function signup(email: string, ticket: string, extra: object = {}, confirmed = false) {
     const id = randomUUID()
     await db.transaction(async (tx) => {
       await tx.exec('SET LOCAL ROLE supabase_auth_admin')
-      await tx.query('INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES($1,$2,$3)',[id,email,JSON.stringify({
+      await tx.query('INSERT INTO auth.users(id,email,raw_user_meta_data,email_confirmed_at) VALUES($1,$2,$3,$4)',[id,email,JSON.stringify({
         nome:'Aluno',ticket_cadastro:ticket,termos_aceitos:true,termos_versao:'2026-09-27-v2',privacidade_versao:'2026-09-27',...extra,
-      })])
+      }), confirmed ? new Date().toISOString() : null])
     })
     return id
   }
+
+  const executar = (sql: string, params: unknown[] = [], sub = admin, sessao = adminSession, aal = 'aal2') =>
+    db.transaction(async tx => {
+      await tx.query("SELECT set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub, aal, session_id: sessao })])
+      await tx.exec('SET LOCAL ROLE authenticated')
+      return tx.query(sql, params)
+    })
 
   const invitation = await issue('aluno@example.test')
   for (const [rgm, expected] of [['','P2010'],['12 34','P2011'],['A'.repeat(51),'P2011']]) {
@@ -159,12 +166,6 @@ test('045: RGM fica vinculado ao ticket e protege novos cadastros sem modificar 
     })
     const sessaoProfessor = randomUUID()
     await db.query('INSERT INTO auth.sessions(id,user_id) VALUES($1,$2)', [sessaoProfessor, professor])
-    const executar = (sql: string, params: unknown[] = [], sub = admin, sessao = adminSession, aal = 'aal2') =>
-      db.transaction(async tx => {
-        await tx.query("SELECT set_config('request.jwt.claims',$1,true)", [JSON.stringify({ sub, aal, session_id: sessao })])
-        await tx.exec('SET LOCAL ROLE authenticated')
-        return tx.query(sql, params)
-      })
     const listar = 'SELECT public.listar_professores_pendentes() AS pendentes'
     const aprovar = 'SELECT public.aprovar_professor($1) AS aprovado'
     const acessar = () => executar("SELECT public.registrar_acesso()->>'situacao' AS situacao", [], professor, sessaoProfessor)
@@ -182,6 +183,102 @@ test('045: RGM fica vinculado ao ticket e protege novos cadastros sem modificar 
     assert.deepEqual((await db.query(
       "SELECT usuario_id FROM public.eventos_seguranca WHERE evento='PROFESSOR_APROVADO' AND recurso_id=$1", [professor]
     )).rows, [{ usuario_id: admin }])
+  })
+
+  await t.test('RF03 condiciona a ativação à confirmação do Auth e mantém a aprovação de professores', async t => {
+    // Contas com e-mail confirmado e inativas compõem os casos legados da implantação.
+    await db.query('UPDATE auth.users SET email_confirmed_at=now() WHERE id IN ($1,$2)', [admin, teacherId])
+    await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [secondId])
+    await db.query("UPDATE public.perfis SET situacao='PENDENTE' WHERE id=$1", [historicalB])
+    await db.query('UPDATE auth.users SET email_confirmed_at=now() WHERE id=$1', [historicalB])
+    const adminBefore = (await db.query('SELECT * FROM public.perfis WHERE id=$1', [admin])).rows
+    await migrate('056_confirmacao_email_perfis.sql')
+    const documents = { termos_versao: '2026-11-12-v11', privacidade_versao: '2026-11-12-v8' }
+    async function confirmar(userId: string) {
+      await db.transaction(async tx => {
+        await tx.exec('SET LOCAL ROLE supabase_auth_admin')
+        await tx.query('UPDATE auth.users SET email_confirmed_at=clock_timestamp() WHERE id=$1', [userId])
+      })
+    }
+    async function situacao(userId: string) {
+      return (await db.query<{ situacao: string }>('SELECT situacao FROM public.perfis WHERE id=$1', [userId])).rows[0].situacao
+    }
+
+    await t.test('concilia contas antigas e mantém contas confirmadas e inativas', async () => {
+      assert.equal(await situacao(id), 'PENDENTE')
+      assert.equal(await situacao(teacherId), 'ATIVO')
+      assert.equal(await situacao(secondId), 'INATIVO')
+      assert.equal(await situacao(historicalB), 'ATIVO')
+      assert.deepEqual((await db.query('SELECT * FROM public.perfis WHERE id=$1', [admin])).rows, adminBefore)
+      const invalid = await db.query<{ total: number }>(`SELECT count(*)::INT AS total
+        FROM public.perfis p JOIN auth.users u ON u.id=p.id
+        WHERE p.situacao='ATIVO' AND u.email_confirmed_at IS NULL`)
+      assert.equal(invalid.rows[0].total, 0)
+      await confirmar(id)
+      assert.equal(await situacao(id), 'ATIVO')
+      await confirmar(secondId)
+      assert.equal(await situacao(secondId), 'INATIVO')
+    })
+
+    await t.test('aluno novo espera a confirmação real e não pode simular a ativação', async () => {
+      const email = 'email-pendente@example.test'
+      const invitation = await issue(email)
+      const aluno = await signup(email, await prepare(email, invitation, 'RF03-ALUNO'), {
+        ...documents, email_confirmed_at: '2026-11-17T12:00:00Z',
+      })
+      assert.equal(await situacao(aluno), 'PENDENTE')
+      await assert.rejects(db.query("UPDATE public.perfis SET situacao='ATIVO' WHERE id=$1", [aluno]), { code: '23514' })
+      await assert.rejects(executar('UPDATE auth.users SET email_confirmed_at=now() WHERE id=$1', [aluno]), { code: '42501' })
+      await confirmar(aluno)
+      assert.equal(await situacao(aluno), 'ATIVO')
+      await db.query('UPDATE auth.users SET email_confirmed_at=NULL WHERE id=$1', [aluno])
+      assert.equal(await situacao(aluno), 'PENDENTE')
+      await confirmar(aluno)
+      assert.equal(await situacao(aluno), 'ATIVO')
+      await db.query("UPDATE public.perfis SET situacao='INATIVO' WHERE id=$1", [aluno])
+      await confirmar(aluno)
+      assert.equal(await situacao(aluno), 'INATIVO')
+    })
+
+    await t.test('professor só aparece para aprovação depois de confirmar o e-mail', async () => {
+      const email = 'professor-rf03@example.test'
+      const invitation = await issue(email, 'PROFESSOR')
+      const professor = await signup(email, await prepare(email, invitation, ''), documents)
+      const aprovar = 'SELECT public.aprovar_professor($1) AS aprovado'
+      const listar = 'SELECT public.listar_professores_pendentes() AS pendentes'
+      assert.equal(await situacao(professor), 'PENDENTE')
+      assert.deepEqual((await executar(listar)).rows, [{ pendentes: [] }])
+      assert.deepEqual((await executar(aprovar, [professor])).rows, [{ aprovado: false }])
+      await confirmar(professor)
+      assert.equal(await situacao(professor), 'PENDENTE')
+      const [{ pendentes }] = (await executar(listar)).rows as { pendentes: { id: string }[] }[]
+      assert.deepEqual(pendentes.map(item => item.id), [professor])
+      await assert.rejects(executar(aprovar, [professor], admin, adminSession, 'aal1'), { code: '42501' })
+      assert.deepEqual((await executar(aprovar, [professor])).rows, [{ aprovado: true }])
+      assert.equal(await situacao(professor), 'ATIVO')
+      assert.deepEqual((await executar(aprovar, [professor])).rows, [{ aprovado: false }])
+      const audit = await db.query<{ total: number }>(
+        "SELECT count(*)::INT AS total FROM public.eventos_seguranca WHERE evento='PROFESSOR_APROVADO' AND recurso_id=$1", [professor])
+      assert.equal(audit.rows[0].total, 1)
+    })
+
+    await t.test('cadastro já confirmado ativa aluno e mantém professor sujeito à aprovação', async () => {
+      for (const profile of ['ALUNO', 'PROFESSOR']) {
+        const email = `${profile.toLowerCase()}-confirmado@example.test`
+        const invitation = await issue(email, profile)
+        const userId = await signup(email, await prepare(email, invitation, profile === 'ALUNO' ? 'RF03-CONFIRMADO' : ''), documents, true)
+        assert.equal(await situacao(userId), profile === 'ALUNO' ? 'ATIVO' : 'PENDENTE')
+      }
+    })
+
+    await t.test('reaplicação preserva os estados e gatilhos sem acesso direto pelo navegador', async () => {
+      const before = (await db.query('SELECT * FROM public.perfis ORDER BY id')).rows
+      await migrate('056_confirmacao_email_perfis.sql')
+      assert.deepEqual((await db.query('SELECT * FROM public.perfis ORDER BY id')).rows, before)
+      const permissions = await db.query<{ allowed: boolean }>(`SELECT has_function_privilege(
+        'authenticated', 'examentech_private.sincronizar_confirmacao_email()', 'EXECUTE') AS allowed`)
+      assert.equal(permissions.rows[0].allowed, false)
+    })
   })
 
 })

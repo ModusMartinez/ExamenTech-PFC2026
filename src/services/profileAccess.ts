@@ -18,6 +18,10 @@ export type ProfileDecision =
   | { kind: 'ready'; user: AccessUser }
 
 export function decideProfileAccess(record: ProfileRecord): ProfileDecision {
+  if (record.perfil === 'ALUNO' && record.situacao === 'PENDENTE') {
+    return { kind: 'denied', message: 'Confirme seu e-mail para liberar o acesso.' }
+  }
+
   if (record.situacao !== 'ATIVO') {
     return {
       kind: 'denied',
