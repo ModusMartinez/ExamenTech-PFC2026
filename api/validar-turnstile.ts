@@ -54,10 +54,11 @@ function getTurnstileSecret(env: Environment) {
     return env.TURNSTILE_SECRET_KEY
   }
 
-  const isProduction =
-    env.VERCEL_ENV === 'production' || env.NODE_ENV === 'production'
+  const isLocalDevelopment =
+    !env.VERCEL_ENV &&
+    env.NODE_ENV === 'development'
 
-  return isProduction ? null : TEST_SECRET_KEY
+  return isLocalDevelopment ? TEST_SECRET_KEY : null
 }
 
 function getSupabaseConfiguration(env: Environment) {

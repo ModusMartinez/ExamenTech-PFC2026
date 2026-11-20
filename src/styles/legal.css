@@ -1,0 +1,264 @@
+.site-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.site-layout > .app-container,
+.site-layout > .dashboard-container,
+.site-layout > .auth-loading {
+  flex: 1;
+  min-height: 0;
+}
+
+.legal-footer {
+  padding: 16px 20px;
+  background: var(--background);
+}
+
+.legal-links {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.legal-links a {
+  padding: 4px 0;
+  color: #536b80;
+  text-underline-offset: 3px;
+}
+
+.legal-links a:hover {
+  color: var(--dark-blue);
+}
+
+.legal-page {
+  flex: 1;
+  width: min(800px, 100%);
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.legal-home-link {
+  display: inline-block;
+  margin-bottom: 32px;
+}
+
+.legal-page .overline {
+  color: var(--blue);
+}
+
+.legal-page h1 {
+  margin: 12px 0;
+  color: var(--dark-blue);
+  font-size: clamp(1.8rem, 5vw, 2.4rem);
+}
+
+.legal-page header {
+  margin-bottom: 28px;
+}
+
+.legal-document-content {
+  font-size: 0.94rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.legal-document-content h2,
+.legal-document-content h3 {
+  margin: 26px 0 8px;
+  color: var(--dark-blue);
+  font-size: 1rem;
+}
+
+.legal-document-content p {
+  margin: 0 0 12px;
+}
+
+.legal-document-content a,
+.legal-home-link {
+  color: var(--blue);
+  text-underline-offset: 3px;
+}
+
+.legal-footer a:focus-visible,
+.legal-page a:focus-visible {
+  outline: 3px solid #69a4d3;
+  outline-offset: 3px;
+}
+
+.legal-modal {
+  width: min(720px, calc(100% - 32px));
+  max-height: min(88dvh, 820px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid #dce5ee;
+  border-radius: 14px;
+  background: white;
+  color: var(--text);
+  box-shadow: 0 24px 70px rgb(11 31 51 / 25%);
+  overflow: hidden;
+}
+
+.legal-modal[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.legal-modal::backdrop {
+  background: rgb(11 31 51 / 65%);
+}
+
+.legal-modal-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 28px 18px;
+  border-bottom: 1px solid #dce5ee;
+}
+
+.legal-modal-header .overline {
+  color: var(--blue);
+  font-size: 0.65rem;
+}
+
+.legal-modal h2 {
+  margin: 8px 0;
+  color: var(--dark-blue);
+  font-size: 1.75rem;
+}
+
+.legal-version {
+  margin: 0;
+  color: #536b80;
+  font-size: 0.8rem;
+}
+
+.legal-close {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: #f1f5f8;
+  color: var(--dark-blue);
+  font-size: 1.6rem;
+  cursor: pointer;
+}
+
+.legal-modal-body {
+  min-height: 0;
+  padding: 24px 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  line-height: 1.65;
+  font-size: 0.94rem;
+}
+
+.legal-modal-body h3 {
+  margin: 26px 0 8px;
+  color: var(--dark-blue);
+  font-size: 1rem;
+}
+
+.legal-modal-body p {
+  margin: 0 0 12px;
+}
+
+.legal-review-note {
+  padding: 12px 14px;
+  border-left: 3px solid #a36c16;
+  border-radius: 4px;
+  background: #fffbeb;
+  color: #714d10;
+  font-size: 0.83rem;
+}
+
+.legal-document-link {
+  margin: 8px 0 20px;
+  padding: 0;
+  text-align: left;
+}
+
+.legal-acceptance {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid #cbddec;
+  border-radius: 8px;
+  background: #f4f8fb;
+  color: var(--dark-blue);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.legal-acceptance input {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: var(--blue);
+}
+
+.legal-modal-footer {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 18px 28px;
+  border-top: 1px solid #dce5ee;
+}
+
+.legal-modal-footer .btn-primary {
+  width: auto;
+  margin: 0;
+  padding: 0 20px;
+}
+
+.legal-secondary {
+  height: 48px;
+  padding: 0 18px;
+  border: 1px solid #ccd8e3;
+  border-radius: 7px;
+  background: white;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.legal-close:focus-visible,
+.legal-secondary:focus-visible,
+.legal-acceptance input:focus-visible,
+.legal-modal-body:focus-visible {
+  outline: 3px solid #69a4d3;
+  outline-offset: 2px;
+}
+
+@media (max-width: 500px) {
+  .legal-modal {
+    width: calc(100% - 20px);
+    max-height: 92dvh;
+  }
+
+  .legal-modal-header,
+  .legal-modal-body,
+  .legal-modal-footer {
+    padding: 18px;
+  }
+
+  .legal-modal h2 {
+    font-size: 1.4rem;
+  }
+
+  .legal-modal-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+}

@@ -1,0 +1,317 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_Process_Acs_Identidade202611" targetNamespace="https://examentech.example/bpmn/identidade-acesso">
+  <bpmn:collaboration id="Collaboration_Acs">
+    <bpmn:participant id="Participant_Acs" name="ExamenTech · Login e controle de acesso" processRef="Process_Acs"/>
+  </bpmn:collaboration>
+  <bpmn:process id="Process_Acs" name="Login e controle de acesso" isExecutable="false">
+    <bpmn:documentation>Fluxo de acesso com senha, Turnstile e TOTP. Após o MFA, registrar_acesso consulta o perfil e registra o resultado da validação. Para aluno ativo, consultar_ingresso_aluno exige organização ativa, sessão válida e ao menos uma matrícula já aprovada na organização para liberar o painel. A aprovação anterior continua contando quando o vínculo é inativado. Enquanto aguarda, o aluno pode solicitar ou acompanhar matrícula e usar Verificar liberação para uma nova consulta.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_Acs">
+      <bpmn:lane id="Lane_Usuario" name="Usuário">
+        <bpmn:flowNodeRef>Start_Login</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_InformarLogin</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_InformarTotp</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_IngressoAluno</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Painel</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_Acesso</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Auth" name="Aplicação / Supabase Auth">
+        <bpmn:flowNodeRef>Task_ValidarLogin</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Login</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_LoginRecusado</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_IdentificarMfa</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_VerificarTotp</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Mfa</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_ConsultarIngresso</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Ingresso</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Banco" name="Banco / auditoria">
+        <bpmn:flowNodeRef>Task_RegistrarAcesso</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Perfil</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_AcessoNegado</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Login" name="Início">
+      <bpmn:outgoing>Flow_Process_Acs_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_InformarLogin" name="Informar e-mail e senha e concluir o Turnstile">
+      <bpmn:incoming>Flow_Process_Acs_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_ValidarLogin" name="Validar credenciais e Turnstile no Auth">
+      <bpmn:incoming>Flow_Process_Acs_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Login" name="Login aceito?" gatewayDirection="Diverging">
+      <bpmn:incoming>Flow_Process_Acs_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Process_Acs_5</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_LoginRecusado" name="Login recusado">
+      <bpmn:incoming>Flow_Process_Acs_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_IdentificarMfa" name="Consultar fator TOTP ou iniciar configuração">
+      <bpmn:incoming>Flow_Process_Acs_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Task_InformarTotp" name="Configurar TOTP ou informar o código do autenticador">
+      <bpmn:incoming>Flow_Process_Acs_6</bpmn:incoming>
+      <bpmn:incoming>Flow_Process_Acs_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_7</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_VerificarTotp" name="Verificar o código TOTP no Supabase Auth">
+      <bpmn:incoming>Flow_Process_Acs_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Mfa" name="MFA válido?" gatewayDirection="Diverging">
+      <bpmn:incoming>Flow_Process_Acs_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_9</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Process_Acs_10</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_RegistrarAcesso" name="Consultar perfil e registrar resultado do acesso após MFA">
+      <bpmn:incoming>Flow_Process_Acs_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Perfil" name="Perfil ativo e válido?" gatewayDirection="Diverging">
+      <bpmn:incoming>Flow_Process_Acs_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_12</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Process_Acs_13</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_AcessoNegado" name="Acesso negado">
+      <bpmn:incoming>Flow_Process_Acs_12</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_ConsultarIngresso" name="Para aluno, consultar primeira aprovação na organização">
+      <bpmn:incoming>Flow_Process_Acs_13</bpmn:incoming>
+      <bpmn:incoming>Flow_Process_Acs_16</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Ingresso" name="Aluno sem primeira aprovação?" gatewayDirection="Diverging">
+      <bpmn:incoming>Flow_Process_Acs_14</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_15</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Process_Acs_17</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Task_IngressoAluno" name="Solicitar ou acompanhar a primeira matrícula">
+      <bpmn:incoming>Flow_Process_Acs_15</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_16</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_Painel" name="Abrir o painel conforme o perfil">
+      <bpmn:incoming>Flow_Process_Acs_17</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_18</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="End_Acesso" name="Painel liberado">
+      <bpmn:incoming>Flow_Process_Acs_18</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_1" sourceRef="Start_Login" targetRef="Task_InformarLogin"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_2" sourceRef="Task_InformarLogin" targetRef="Task_ValidarLogin"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_3" sourceRef="Task_ValidarLogin" targetRef="Gateway_Login"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_4" sourceRef="Gateway_Login" targetRef="End_LoginRecusado" name="Não"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_5" sourceRef="Gateway_Login" targetRef="Task_IdentificarMfa" name="Sim"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_6" sourceRef="Task_IdentificarMfa" targetRef="Task_InformarTotp"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_7" sourceRef="Task_InformarTotp" targetRef="Task_VerificarTotp"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_8" sourceRef="Task_VerificarTotp" targetRef="Gateway_Mfa"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_9" sourceRef="Gateway_Mfa" targetRef="Task_InformarTotp" name="Não"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_10" sourceRef="Gateway_Mfa" targetRef="Task_RegistrarAcesso" name="Sim"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_11" sourceRef="Task_RegistrarAcesso" targetRef="Gateway_Perfil"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_12" sourceRef="Gateway_Perfil" targetRef="End_AcessoNegado" name="Não"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_13" sourceRef="Gateway_Perfil" targetRef="Task_ConsultarIngresso" name="Sim"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_14" sourceRef="Task_ConsultarIngresso" targetRef="Gateway_Ingresso"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_15" sourceRef="Gateway_Ingresso" targetRef="Task_IngressoAluno" name="Sim"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_16" sourceRef="Task_IngressoAluno" targetRef="Task_ConsultarIngresso" name="Verificar liberação"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_17" sourceRef="Gateway_Ingresso" targetRef="Task_Painel" name="Não"/>
+    <bpmn:sequenceFlow id="Flow_Process_Acs_18" sourceRef="Task_Painel" targetRef="End_Acesso"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_Process_Acs">
+    <bpmndi:BPMNPlane id="Plane_Process_Acs" bpmnElement="Collaboration_Acs">
+      <bpmndi:BPMNShape id="Shape_Participant_Acs" bpmnElement="Participant_Acs" isHorizontal="false">
+        <dc:Bounds x="16" y="76" width="928" height="1204"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Usuario" bpmnElement="Lane_Usuario" isHorizontal="false">
+        <dc:Bounds x="16" y="111" width="324" height="1169"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Auth" bpmnElement="Lane_Auth" isHorizontal="false">
+        <dc:Bounds x="340" y="111" width="310" height="1169"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Banco" bpmnElement="Lane_Banco" isHorizontal="false">
+        <dc:Bounds x="650" y="111" width="294" height="1169"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Start_Login" bpmnElement="Start_Login">
+        <dc:Bounds x="161" y="162" width="34" height="34"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="203" y="165" width="66" height="28"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_InformarLogin" bpmnElement="Task_InformarLogin">
+        <dc:Bounds x="47" y="226" width="262" height="76"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_ValidarLogin" bpmnElement="Task_ValidarLogin">
+        <dc:Bounds x="371" y="226" width="248" height="76"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Gateway_Login" bpmnElement="Gateway_Login" isMarkerVisible="true">
+        <dc:Bounds x="468" y="329" width="54" height="54"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="522" y="305" width="121" height="26"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_End_LoginRecusado" bpmnElement="End_LoginRecusado">
+        <dc:Bounds x="597" y="339" width="34" height="34"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="561" y="384" width="84" height="45"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_IdentificarMfa" bpmnElement="Task_IdentificarMfa">
+        <dc:Bounds x="371" y="442" width="248" height="76"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_InformarTotp" bpmnElement="Task_InformarTotp">
+        <dc:Bounds x="53" y="437" width="250" height="86"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_VerificarTotp" bpmnElement="Task_VerificarTotp">
+        <dc:Bounds x="365" y="550" width="260" height="76"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Gateway_Mfa" bpmnElement="Gateway_Mfa" isMarkerVisible="true">
+        <dc:Bounds x="468" y="647" width="54" height="54"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="524" y="631" width="116" height="26"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_RegistrarAcesso" bpmnElement="Task_RegistrarAcesso">
+        <dc:Bounds x="682" y="632" width="232" height="84"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Gateway_Perfil" bpmnElement="Gateway_Perfil" isMarkerVisible="true">
+        <dc:Bounds x="771" y="780" width="54" height="54"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="831" y="737" width="111" height="47"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_End_AcessoNegado" bpmnElement="End_AcessoNegado">
+        <dc:Bounds x="889" y="790" width="34" height="34"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="866" y="835" width="75" height="45"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_ConsultarIngresso" bpmnElement="Task_ConsultarIngresso">
+        <dc:Bounds x="371" y="763" width="248" height="88"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Gateway_Ingresso" bpmnElement="Gateway_Ingresso" isMarkerVisible="true">
+        <dc:Bounds x="468" y="925" width="54" height="54"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="522" y="875" width="125" height="66"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_IngressoAluno" bpmnElement="Task_IngressoAluno">
+        <dc:Bounds x="45" y="908" width="266" height="88"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Task_Painel" bpmnElement="Task_Painel">
+        <dc:Bounds x="55" y="1090" width="246" height="72"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_End_Acesso" bpmnElement="End_Acesso">
+        <dc:Bounds x="161" y="1196" width="34" height="34"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="68" y="1238" width="220" height="27"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_1" bpmnElement="Flow_Process_Acs_1">
+        <di:waypoint x="178" y="196"/>
+        <di:waypoint x="178" y="226"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_2" bpmnElement="Flow_Process_Acs_2">
+        <di:waypoint x="309" y="264"/>
+        <di:waypoint x="371" y="264"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_3" bpmnElement="Flow_Process_Acs_3">
+        <di:waypoint x="495" y="302"/>
+        <di:waypoint x="495" y="329"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_4" bpmnElement="Flow_Process_Acs_4">
+        <di:waypoint x="522" y="356"/>
+        <di:waypoint x="597" y="356"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="530" y="327" width="54" height="25"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_5" bpmnElement="Flow_Process_Acs_5">
+        <di:waypoint x="495" y="383"/>
+        <di:waypoint x="495" y="442"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="508" y="396" width="54" height="25"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_6" bpmnElement="Flow_Process_Acs_6">
+        <di:waypoint x="371" y="480"/>
+        <di:waypoint x="303" y="480"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_7" bpmnElement="Flow_Process_Acs_7">
+        <di:waypoint x="178" y="523"/>
+        <di:waypoint x="178" y="588"/>
+        <di:waypoint x="365" y="588"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_8" bpmnElement="Flow_Process_Acs_8">
+        <di:waypoint x="495" y="626"/>
+        <di:waypoint x="495" y="647"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_9" bpmnElement="Flow_Process_Acs_9">
+        <di:waypoint x="468" y="674"/>
+        <di:waypoint x="34" y="674"/>
+        <di:waypoint x="34" y="480"/>
+        <di:waypoint x="53" y="480"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="259" y="647" width="53" height="25"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_10" bpmnElement="Flow_Process_Acs_10">
+        <di:waypoint x="522" y="674"/>
+        <di:waypoint x="682" y="674"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="578" y="647" width="54" height="25"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_11" bpmnElement="Flow_Process_Acs_11">
+        <di:waypoint x="798" y="716"/>
+        <di:waypoint x="798" y="780"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_12" bpmnElement="Flow_Process_Acs_12">
+        <di:waypoint x="825" y="807"/>
+        <di:waypoint x="889" y="807"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="830" y="780" width="54" height="25"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_13" bpmnElement="Flow_Process_Acs_13">
+        <di:waypoint x="771" y="807"/>
+        <di:waypoint x="619" y="807"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="665" y="782" width="54" height="25"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_14" bpmnElement="Flow_Process_Acs_14">
+        <di:waypoint x="495" y="851"/>
+        <di:waypoint x="495" y="925"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_15" bpmnElement="Flow_Process_Acs_15">
+        <di:waypoint x="468" y="952"/>
+        <di:waypoint x="311" y="952"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="355" y="924" width="54" height="25"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_16" bpmnElement="Flow_Process_Acs_16">
+        <di:waypoint x="178" y="908"/>
+        <di:waypoint x="178" y="807"/>
+        <di:waypoint x="371" y="807"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="178" y="776" width="157" height="29"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_17" bpmnElement="Flow_Process_Acs_17">
+        <di:waypoint x="495" y="979"/>
+        <di:waypoint x="495" y="1126"/>
+        <di:waypoint x="301" y="1126"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="505" y="997" width="54" height="25"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Process_Acs_18" bpmnElement="Flow_Process_Acs_18">
+        <di:waypoint x="178" y="1162"/>
+        <di:waypoint x="178" y="1196"/>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

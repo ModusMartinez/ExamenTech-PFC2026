@@ -1,0 +1,200 @@
+import { useEffect, useRef, useState } from 'react'
+import { cancelarAvaliacao, listarAvaliacoesRascunho } from '../services/avaliacoes'
+import type { AvaliacaoRascunho } from '../services/avaliacaoValidation'
+import { EditarAvaliacaoForm } from './EditarAvaliacaoForm'
+import { NovaQuestaoForm } from './NovaQuestaoForm'
+import { QuestoesAvaliacaoPanel } from './QuestoesAvaliacaoPanel'
+import { PublicarAvaliacaoForm } from './PublicarAvaliacaoForm'
+import { Paginacao } from './Paginacao'
+
+export function RascunhosTurmaPanel({ turmaId, turmaNome, podeEditar, podeCancelar, onAtualizarPublicadas }: {
+  turmaId: string; turmaNome: string; podeEditar: boolean; podeCancelar: boolean; onAtualizarPublicadas: () => void
+}) {
+  const [avaliacoes, setAvaliacoes] = useState<AvaliacaoRascunho[]>([])
+  const [pagina, setPagina] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [refresh, setRefresh] = useState(0)
+  const [editando, setEditando] = useState<AvaliacaoRascunho | null>(null)
+  const [novaQuestao, setNovaQuestao] = useState<AvaliacaoRascunho | null>(null)
+  const [questoesAbertas, setQuestoesAbertas] = useState<string | null>(null)
+  const [publicando, setPublicando] = useState<AvaliacaoRascunho | null>(null)
+  const [confirmando, setConfirmando] = useState<AvaliacaoRascunho | null>(null)
+  const [cancelando, setCancelando] = useState(false)
+  const [erroCancelamento, setErroCancelamento] = useState('')
+  const manterRascunho = useRef<HTMLButtonElement>(null)
+  const [success, setSuccess] = useState('')
+  const actionButton = useRef<HTMLButtonElement | null>(null)
+  const notice = useRef<HTMLParagraphElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
+  const formularioAberto = Boolean(editando || novaQuestao || publicando || confirmando)
+  const navegacaoBloqueada = loading || formularioAberto
+  const avaliacaoAberta = avaliacoes.find((avaliacao) => avaliacao.id === questoesAbertas)
+
+  function mudarPagina(numero: number) {
+    setSuccess('')
+    setQuestoesAbertas(null)
+    setLoading(true)
+    setPagina(numero)
+    heading.current?.focus()
+  }
+
+  useEffect(() => {
+    if (confirmando) manterRascunho.current?.focus()
+    else if (!editando && !novaQuestao && !publicando) (success ? notice.current : actionButton.current)?.focus()
+  }, [editando, novaQuestao, publicando, confirmando, success])
+
+  useEffect(() => {
+    let active = true
+    async function load() {
+      setLoading(true)
+      setError('')
+      try {
+        const result = await listarAvaliacoesRascunho(turmaId, pagina)
+        if (active) setAvaliacoes(result)
+      } catch (error) {
+        if (active) setError(error instanceof Error ? error.message : 'Não foi possível carregar os rascunhos.')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    void load()
+    return () => { active = false }
+  }, [turmaId, pagina, refresh])
+
+  async function confirmarCancelamento() {
+    if (!confirmando || cancelando) return
+    setCancelando(true)
+    setErroCancelamento('')
+    try {
+      await cancelarAvaliacao(confirmando.id)
+      setAvaliacoes(atuais => atuais.filter(item => item.id !== confirmando.id))
+      setSuccess(`Avaliação “${confirmando.titulo}” cancelada.`)
+      setConfirmando(null)
+      if (avaliacoes.length > 50) {
+        setLoading(true)
+        setRefresh(current => current + 1)
+      }
+      onAtualizarPublicadas()
+    } catch (error) {
+      setErroCancelamento(error instanceof Error ? error.message : 'Não foi possível cancelar o rascunho.')
+    } finally {
+      setCancelando(false)
+    }
+  }
+
+  return (
+    <section id={`rascunhos-${turmaId}`} className="rascunhos-turma" aria-label={`Rascunhos de ${turmaNome}`}>
+      <div className="turmas-list-heading">
+        <h4 ref={heading} tabIndex={-1}>Avaliações em rascunho</h4>
+        <button type="button" className="turmas-refresh" disabled={navegacaoBloqueada}
+          onClick={() => { mudarPagina(0); setRefresh((current) => current + 1) }}>Atualizar rascunhos</button>
+      </div>
+      <p className="turmas-note">50 rascunhos por página, dos mais recentes aos antigos. Horários: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
+      {success && <p ref={notice} tabIndex={-1} className="alert success" role="status">{success}</p>}
+      {loading && <p role="status">Carregando rascunhos...</p>}
+      {error && <p className="alert error" role="alert">{error}</p>}
+      {!loading && !error && avaliacoes.length === 0 && <p role="status">{pagina === 0 ? 'Nenhum rascunho nesta turma.' : 'Nenhum rascunho nesta página.'}</p>}
+      {!loading && !error && avaliacoes.length > 0 && (
+        <div className="rascunhos-tabela" role="region" aria-label="Tabela de avaliações" tabIndex={0}>
+          <table aria-label={`Avaliações em rascunho de ${turmaNome}`}>
+            <thead><tr>
+              <th scope="col">Título</th><th scope="col">Tipo</th><th scope="col">Início</th>
+              <th scope="col">Fim</th><th scope="col">Duração</th><th scope="col">Situação</th>
+              <th scope="col" className="rascunhos-coluna-acoes">Ações</th>
+            </tr></thead>
+            <tbody>
+              {avaliacoes.slice(0, 50).map((avaliacao) => (
+                <tr key={avaliacao.id}>
+                  <th scope="row">{avaliacao.titulo}</th>
+                  <td>{avaliacao.tipo === 'PROVA' ? 'Prova' : 'Atividade'}</td>
+                  <td><time dateTime={avaliacao.inicio_em}>
+                    {new Date(avaliacao.inicio_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                  </time></td>
+                  <td><time dateTime={avaliacao.fim_em}>
+                    {new Date(avaliacao.fim_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                  </time></td>
+                  <td>{avaliacao.duracao_minutos} min</td>
+                  <td>Rascunho</td>
+                  <td><div className="rascunhos-acoes">
+                    <button type="button" className="turmas-refresh" disabled={formularioAberto}
+                      aria-expanded={questoesAbertas === avaliacao.id} aria-controls={`questoes-${avaliacao.id}`}
+                      aria-label={`Questões de ${avaliacao.titulo}`}
+                      onClick={() => setQuestoesAbertas((current) => current === avaliacao.id ? null : avaliacao.id)}>Questões</button>
+                    {podeEditar && <>
+                    <button type="button" className="turmas-refresh" disabled={formularioAberto}
+                    aria-label={`Editar ${avaliacao.titulo}`} onClick={(event) => {
+                      actionButton.current = event.currentTarget
+                      setSuccess('')
+                      setQuestoesAbertas(null)
+                      setEditando(avaliacao)
+                    }}>Editar</button>
+                    <button type="button" className="turmas-refresh" disabled={formularioAberto}
+                      aria-label={`Nova questão em ${avaliacao.titulo}`} onClick={(event) => {
+                        actionButton.current = event.currentTarget
+                        setSuccess('')
+                        setQuestoesAbertas(null)
+                        setNovaQuestao(avaliacao)
+                      }}>Nova questão</button>
+                    <button type="button" className="turmas-refresh" disabled={formularioAberto}
+                      aria-label={`Publicar ${avaliacao.titulo}`} onClick={(event) => {
+                        actionButton.current = event.currentTarget
+                        setSuccess('')
+                        setQuestoesAbertas(null)
+                        setPublicando(avaliacao)
+                      }}>Publicar</button>
+                    </>}
+                    {podeCancelar && <button type="button" className="turmas-refresh" disabled={formularioAberto}
+                      aria-label={`Cancelar rascunho ${avaliacao.titulo}`} onClick={(event) => {
+                        actionButton.current = event.currentTarget
+                        setSuccess('')
+                        setErroCancelamento('')
+                        setQuestoesAbertas(null)
+                        setConfirmando(avaliacao)
+                      }}>Cancelar</button>}
+                  </div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Paginacao pagina={pagina} temProxima={!error && avaliacoes.length > 50} desabilitada={navegacaoBloqueada || questoesAbertas !== null}
+        rotulo={`Paginação dos rascunhos de ${turmaNome}`} onMudarPagina={mudarPagina} />
+      {!loading && !error && avaliacaoAberta && <QuestoesAvaliacaoPanel key={avaliacaoAberta.id}
+        avaliacaoId={avaliacaoAberta.id} avaliacaoTitulo={avaliacaoAberta.titulo} podeEditar={podeEditar} />}
+      {confirmando && <div className="provas-aviso" role="group" aria-label="Confirmar cancelamento do rascunho">
+        <p>Cancelar “{confirmando.titulo}” impedirá editar ou publicar a avaliação.</p>
+        {erroCancelamento && <p className="alert error" role="alert">{erroCancelamento}</p>}
+        <div className="avaliacao-form-actions">
+          <button type="button" className="turmas-refresh" ref={manterRascunho} disabled={cancelando}
+            onClick={() => setConfirmando(null)}>Manter avaliação</button>
+          <button type="button" className="turmas-refresh" disabled={cancelando}
+            onClick={() => void confirmarCancelamento()}>{cancelando ? 'Cancelando...' : 'Confirmar cancelamento'}</button>
+        </div>
+      </div>}
+      {podeEditar && editando && <EditarAvaliacaoForm key={editando.id} avaliacao={editando}
+        onCancelar={() => setEditando(null)} onSalvo={(atualizada) => {
+          setAvaliacoes((current) => current.map((item) => item.id === atualizada.id ? atualizada : item))
+          setEditando(null)
+          setSuccess(`Avaliação “${atualizada.titulo}” salva.`)
+        }} />}
+      {podeEditar && novaQuestao && <NovaQuestaoForm key={novaQuestao.id} avaliacao={novaQuestao}
+        onCancelar={() => setNovaQuestao(null)} onCriada={(questao) => {
+          setSuccess(`Questão ${questao.ordem} criada em “${novaQuestao.titulo}”.`)
+          setNovaQuestao(null)
+        }} />}
+      {podeEditar && publicando && <PublicarAvaliacaoForm key={publicando.id} avaliacao={publicando}
+        onCancelar={() => setPublicando(null)} onPublicada={() => {
+          setAvaliacoes((current) => current.filter((item) => item.id !== publicando.id))
+          setSuccess(`Avaliação “${publicando.titulo}” publicada.`)
+          setPublicando(null)
+          if (avaliacoes.length > 50) {
+            setLoading(true)
+            setRefresh(current => current + 1)
+          }
+          onAtualizarPublicadas()
+        }} />}
+    </section>
+  )
+}

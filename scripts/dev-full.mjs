@@ -1,13 +1,20 @@
 import { spawn } from 'node:child_process'
 
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const npmCli = process.env.npm_execpath
+const npmCommand = npmCli ? process.execPath : process.platform === 'win32' ? 'cmd.exe' : 'npm'
+const npmArgs = (script) =>
+  npmCli
+    ? [npmCli, 'run', script]
+    : process.platform === 'win32'
+      ? ['/d', '/s', '/c', `npm.cmd run ${script}`]
+      : ['run', script]
 const usesProcessGroups = process.platform !== 'win32'
 const processes = [
-  spawn(npmCommand, ['run', 'dev:web'], {
+  spawn(npmCommand, npmArgs('dev:web'), {
     stdio: 'inherit',
     detached: usesProcessGroups,
   }),
-  spawn(npmCommand, ['run', 'dev:api'], {
+  spawn(npmCommand, npmArgs('dev:api'), {
     stdio: 'inherit',
     detached: usesProcessGroups,
   }),

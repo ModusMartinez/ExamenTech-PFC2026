@@ -119,6 +119,51 @@ test('aceita a resposta simplificada da chave oficial de teste local', async () 
   assert.equal(response.status, 200)
 })
 
+test('não usa chave de teste em ambientes de preview', async () => {
+  let externalCalls = 0
+
+  const handler = createTurnstileHandler({
+    env: {
+      VERCEL_ENV: 'preview',
+      SUPABASE_URL: environment.SUPABASE_URL,
+      SUPABASE_SECRET_KEY: 'sb_secret_chave-de-teste',
+    },
+    fetchImplementation: async () => {
+      externalCalls += 1
+      return Response.json({ success: true })
+    },
+    createRequestId: () => requestId,
+  })
+
+  const response = await handler.fetch(createRequest('token-de-teste'))
+  const payload = (await response.json()) as Record<string, unknown>
+
+  assert.equal(response.status, 500)
+  assert.equal(payload.code, 'SERVICO_NAO_CONFIGURADO')
+  assert.equal(externalCalls, 0)
+})
+
+test('não presume ambiente local quando NODE_ENV não está definido', async () => {
+  let externalCalls = 0
+
+  const handler = createTurnstileHandler({
+    env: {
+      SUPABASE_URL: environment.SUPABASE_URL,
+      SUPABASE_SECRET_KEY: 'sb_secret_chave-de-teste',
+    },
+    fetchImplementation: async () => {
+      externalCalls += 1
+      return Response.json({ success: true })
+    },
+    createRequestId: () => requestId,
+  })
+
+  const response = await handler.fetch(createRequest('token-de-teste'))
+
+  assert.equal(response.status, 500)
+  assert.equal(externalCalls, 0)
+})
+
 test('bloqueia token recusado e registra a rejeição', async () => {
   let auditBody = ''
 

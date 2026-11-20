@@ -1,0 +1,96 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_Process_Acs_Identidade202611" targetNamespace="https://examentech.example/bpmn/identidade-acesso">
+  <bpmn:collaboration id="Collaboration_Acs">
+    <bpmn:participant id="Participant_Acs" name="ExamenTech · Login e controle de acesso" processRef="Process_Acs"/>
+  </bpmn:collaboration>
+  <bpmn:process id="Process_Acs" name="Login e controle de acesso" isExecutable="false">
+    <bpmn:documentation>Fluxo de acesso com senha, Turnstile e TOTP. Após o MFA, registrar_acesso consulta o perfil e registra o resultado da validação. Para aluno ativo, consultar_ingresso_aluno exige organização ativa, sessão válida e ao menos uma matrícula já aprovada na organização para liberar o painel. A aprovação anterior continua contando quando o vínculo é inativado. Enquanto aguarda, o aluno pode solicitar ou acompanhar matrícula e usar Verificar liberação para uma nova consulta.</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_Acs">
+      <bpmn:lane id="Lane_Usuario" name="Usuário">
+        <bpmn:flowNodeRef>Start_Login</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_InformarLogin</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_InformarTotp</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_IngressoAluno</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Painel</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_Acesso</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Auth" name="Aplicação / Supabase Auth">
+        <bpmn:flowNodeRef>Task_ValidarLogin</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Login</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_LoginRecusado</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_IdentificarMfa</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_VerificarTotp</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Mfa</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_ConsultarIngresso</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Ingresso</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Banco" name="Banco / auditoria">
+        <bpmn:flowNodeRef>Task_RegistrarAcesso</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Perfil</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>End_AcessoNegado</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Start_Login" name="Início">
+      <bpmn:outgoing>Flow_Process_Acs_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_InformarLogin" name="Informar e-mail e senha e concluir o Turnstile">
+      <bpmn:incoming>Flow_Process_Acs_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_ValidarLogin" name="Validar credenciais e Turnstile no Auth">
+      <bpmn:incoming>Flow_Process_Acs_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Login" name="Login aceito?" gatewayDirection="Diverging">
+      <bpmn:incoming>Flow_Process_Acs_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Process_Acs_5</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_LoginRecusado" name="Login recusado">
+      <bpmn:incoming>Flow_Process_Acs_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_IdentificarMfa" name="Consultar fator TOTP ou iniciar configuração">
+      <bpmn:incoming>Flow_Process_Acs_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Task_InformarTotp" name="Configurar TOTP ou informar o código do autenticador">
+      <bpmn:incoming>Flow_Process_Acs_6</bpmn:incoming>
+      <bpmn:incoming>Flow_Process_Acs_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_7</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_VerificarTotp" name="Verificar o código TOTP no Supabase Auth">
+      <bpmn:incoming>Flow_Process_Acs_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Mfa" name="MFA válido?" gatewayDirection="Diverging">
+      <bpmn:incoming>Flow_Process_Acs_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_9</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Process_Acs_10</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_RegistrarAcesso" name="Consultar perfil e registrar resultado do acesso após MFA">
+      <bpmn:incoming>Flow_Process_Acs_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Perfil" name="Perfil ativo e válido?" gatewayDirection="Diverging">
+      <bpmn:incoming>Flow_Process_Acs_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_12</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Process_Acs_13</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_AcessoNegado" name="Acesso negado">
+      <bpmn:incoming>Flow_Process_Acs_12</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_ConsultarIngresso" name="Para aluno, consultar primeira aprovação na organização">
+      <bpmn:incoming>Flow_Process_Acs_13</bpmn:incoming>
+      <bpmn:incoming>Flow_Process_Acs_16</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Ingresso" name="Aluno sem primeira aprovação?" gatewayDirection="Diverging">
+      <bpmn:incoming>Flow_Process_Acs_14</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_15</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Process_Acs_17</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Task_IngressoAluno" name="Solicitar ou acompanhar a primeira matrícula">
+      <bpmn:incoming>Flow_Process_Acs_15</bpmn:incoming>
+      <bpmn:outgoing>Flow_Process_Acs_16</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_Painel" name="Abrir o painel conforme o perfil">
